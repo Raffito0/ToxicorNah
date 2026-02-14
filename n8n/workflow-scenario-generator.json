@@ -1,0 +1,823 @@
+{
+  "name": "ToxicOrNah - Scenario Generator",
+  "nodes": [
+    {
+      "id": "node_001",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        -300
+      ],
+      "parameters": {
+        "content": "## ToxicOrNah - Scenario Generator\n\n### Setup required:\n1. **Airtable**: Assign your Airtable Personal Access Token credential to all Airtable nodes\n2. **Google Gemini**: Create a Google Gemini API credential (API key) and assign to both Gemini Chat Model sub-nodes\n3. **Telegram**: Create a Telegram Bot API credential and assign to the Send node. Set `TELEGRAM_CHAT_ID` in Settings → Variables\n\n### How to use:\n- Click \"Test workflow\" to generate 1 scenario\n- Check Telegram for approval message with Approve/Redo/Skip buttons\n- Use the companion \"Telegram Callback Handler\" workflow to process button clicks",
+        "width": 520,
+        "height": 340
+      }
+    },
+    {
+      "id": "node_002",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "node_003",
+      "name": "Get Active Concepts",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "operation": "search",
+        "application": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblhhTVI4EYofdY32",
+          "mode": "id"
+        },
+        "filterByFormula": "{is_active} = TRUE()",
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_AIRTABLE",
+          "name": "Airtable Personal Access Token"
+        }
+      }
+    },
+    {
+      "id": "node_004",
+      "name": "Select Concept",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// NODE: Select Concept\n// Weighted random concept pick + vibe + appStyle + gender selection\n// Mode: Run Once for All Items\n\nconst concepts = $input.all().map(item => item.json);\n\nif (concepts.length === 0) {\n  throw new Error('No active concepts found in Airtable');\n}\n\n// --- Weighted random selection ---\nfunction weightedRandom(items, weightField) {\n  const totalWeight = items.reduce((sum, item) => sum + (Number(item[weightField]) || 1), 0);\n  let random = Math.random() * totalWeight;\n  for (const item of items) {\n    random -= (Number(item[weightField]) || 1);\n    if (random <= 0) return item;\n  }\n  return items[items.length - 1];\n}\n\nconst concept = weightedRandom(concepts, 'weight');\n\n// --- Vibe selection (40% toxic, 25% mixed, 20% decoded, 15% wholesome) ---\nfunction pickVibe() {\n  const r = Math.random();\n  if (r < 0.40) return 'toxic';\n  if (r < 0.65) return 'mixed';\n  if (r < 0.85) return 'decoded';\n  return 'wholesome';\n}\n\n// --- App style (40% imessage, 30% instagram, 30% whatsapp) ---\nfunction pickAppStyle() {\n  const r = Math.random();\n  if (r < 0.40) return 'imessage';\n  if (r < 0.70) return 'instagram';\n  return 'whatsapp';\n}\n\n// --- Gender (80% male person analyzed, 20% female) ---\nconst personGender = Math.random() < 0.80 ? 'male' : 'female';\n\nconst vibe = pickVibe();\nconst appStyle = pickAppStyle();\nconst scenarioName = vibe + '-' + concept.concept_id + '-' + Date.now();\n\nreturn [{\n  json: {\n    concept,\n    vibe,\n    appStyle,\n    personGender,\n    scenarioName,\n    conceptId: concept.concept_id\n  }\n}];\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "node_005",
+      "name": "Get Body Clip Templates",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "operation": "search",
+        "application": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblTcEPaDKKOyKGoL",
+          "mode": "id"
+        },
+        "filterByFormula": "={{ '{concept_id} = \"' + $(\"Select Concept\").first().json.conceptId + '\"' }}",
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_AIRTABLE",
+          "name": "Airtable Personal Access Token"
+        }
+      }
+    },
+    {
+      "id": "node_006",
+      "name": "Get Caption Templates",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "operation": "search",
+        "application": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblxhuowMWTPSQVdb",
+          "mode": "id"
+        },
+        "filterByFormula": "={{ '{concept_id} = \"' + $(\"Select Concept\").first().json.conceptId + '\"' }}",
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_AIRTABLE",
+          "name": "Airtable Personal Access Token"
+        }
+      }
+    },
+    {
+      "id": "node_007",
+      "name": "Get VO Templates",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "operation": "search",
+        "application": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblpyfkR7OdRiwSdo",
+          "mode": "id"
+        },
+        "filterByFormula": "={{ '{concept_id} = \"' + $(\"Select Concept\").first().json.conceptId + '\"' }}",
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_AIRTABLE",
+          "name": "Airtable Personal Access Token"
+        }
+      }
+    },
+    {
+      "id": "node_008",
+      "name": "Get Hook Texts",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "operation": "search",
+        "application": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblmCU1lVXEPqP8zK",
+          "mode": "id"
+        },
+        "filterByFormula": "={{ '{concept_id} = \"' + $(\"Select Concept\").first().json.conceptId + '\"' }}",
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_AIRTABLE",
+          "name": "Airtable Personal Access Token"
+        }
+      }
+    },
+    {
+      "id": "node_009",
+      "name": "Get Social Examples",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1540,
+        300
+      ],
+      "parameters": {
+        "operation": "search",
+        "application": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblU1iYIOURfRYdfF",
+          "mode": "id"
+        },
+        "filterByFormula": "={{ '{concept_id} = \"' + $(\"Select Concept\").first().json.conceptId + '\"' }}",
+        "options": {}
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_AIRTABLE",
+          "name": "Airtable Personal Access Token"
+        }
+      }
+    },
+    {
+      "id": "node_010",
+      "name": "Build Scenario Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// NODE: Build Scenario Prompt\n// Assembles the Gemini prompt from concept data + all templates\n// Mode: Run Once for All Items\n\nconst { concept, vibe, appStyle, personGender, scenarioName } = $('Select Concept').first().json;\n\nconst bodyClipTemplates = $('Get Body Clip Templates').all().map(i => i.json);\nconst captionTemplates = $('Get Caption Templates').all().map(i => i.json);\nconst voTemplates = $('Get VO Templates').all().map(i => i.json);\nconst hookTexts = $('Get Hook Texts').all().map(i => i.json);\nconst socialExamples = $('Get Social Examples').all().map(i => i.json);\n\n// Format body clip templates for prompt context\nconst bodyClipsFormatted = bodyClipTemplates\n  .sort((a, b) => Number(a.clip_index) - Number(b.clip_index))\n  .map(t => {\n    const group = t.character_group ? ' [' + t.character_group + ']' : '';\n    return '  Clip ' + t.clip_index + ': \"' + t.clip_label + '\" (' + t.app_section + ') - ' + t.min_duration_sec + '-' + t.max_duration_sec + 's' + group;\n  })\n  .join('\\n');\n\n// ============================================================\n// SYSTEM PROMPT\n// ============================================================\n\nconst systemPrompt = `You are a scenario generator for \"Toxic or Nah,\" a relationship chat analysis app. You create realistic fake text conversations between two people, plus complete analysis results that the app would display.\n\nYour output must be a single valid JSON object matching the ContentScenario interface exactly. No markdown, no code fences, no explanation — ONLY the JSON.\n\n## CONTENT SCENARIO INTERFACE\n\n{\n  \"id\": string,\n  \"chat\": {\n    \"contactName\": string,\n    \"appStyle\": \"imessage\" | \"instagram\" | \"whatsapp\",\n    \"messages\": [\n      {\n        \"sender\": \"them\" | \"me\",\n        \"text\": string,\n        \"time\"?: string\n      }\n    ]\n  },\n  \"results\": {\n    \"personName\": \"Him\" | \"Her\",\n    \"personGender\": \"male\" | \"female\",\n    \"overallScore\": number,\n    \"warmthScore\": number,\n    \"communicationScore\": number,\n    \"dramaScore\": number,\n    \"distanceScore\": number,\n    \"passionScore\": number,\n    \"profileType\": string,\n    \"profileSubtitle\": string,\n    \"profileDescription\": string,\n    \"personSoulType\": string,\n    \"userSoulType\": string,\n    \"personDescription\": string,\n    \"personTraits\": [string, string, string, string, string],\n    \"userDescription\": string,\n    \"userTraits\": [string, string, string, string, string],\n    \"categories\": {\n      \"intentions\":        { \"description\": string },\n      \"chemistry\":         { \"description\": string },\n      \"effort\":            { \"description\": string },\n      \"redFlagsGreenFlags\": { \"description\": string },\n      \"trajectory\":        { \"description\": string }\n    },\n    \"messageInsights\": [\n      {\n        \"message\": string,\n        \"title\": string,\n        \"tag\": \"RED FLAG\" | \"GREEN FLAG\" | \"DECODED\",\n        \"description\": string,\n        \"solution\": string\n      }\n    ],\n    \"dynamic\": {\n      \"name\": string,\n      \"subtitle\": string,\n      \"whyThisHappens\": string,\n      \"patternBreak\": string,\n      \"powerBalance\": number\n    }\n  }\n}\n\n## VALID SOUL TYPE IDS\n\n### Male (use when personGender = \"male\"):\n- \"male-untamable\" — The Untamable (Wild Energy): free-spirited, commitment-phobic, thrilling but unreliable\n- \"male-gentle-flame\" — The Gentle Flame (Warm Energy): genuinely kind, emotionally present, warmth radiates\n- \"male-silent-abyss\" — The Silent Abyss (Abyss Energy): deep but unreachable, pulls you in then disappears\n- \"male-faded-crown\" — The Faded Crown (Hollow Energy): once great, now empty promises, living off past glory\n- \"male-sweet-poison\" — The Sweet Poison (Toxic Energy): charming on surface, slowly toxic underneath\n- \"male-wounded-prince\" — The Wounded Prince (Martyr Energy): uses his pain as a weapon, guilt-trips\n- \"male-burning-promise\" — The Burning Promise (Explosive Energy): intense, passionate, but volatile and unpredictable\n- \"male-final-silence\" — The Final Silence (Phantom Energy): ghoster, slow fader, disappears without explanation\n- \"male-dark-mirror\" — The Dark Mirror (Toxic Energy): reflects your insecurities back, gaslighter\n- \"male-ice-charmer\" — The Ice Charmer (Frozen Energy): cold but magnetic, minimal effort maximum control\n- \"male-silent-choke\" — The Silent Choke (Constrictor Energy): controlling through silence and withdrawal\n- \"male-shifting-flame\" — The Shifting Flame (Unstable Energy): hot and cold, inconsistent, keeps you guessing\n- \"male-chameleon\" — The Chameleon (Shapeshifter Energy): becomes whoever you want, no real identity\n- \"male-star-collector\" — The Star Collector (Collector Energy): charms everyone, you're not special to him\n\n### Female (use when personGender = \"female\"):\n- \"female-love-rush\" — The Love Rush (Rush Energy): falls fast, loves hard, overwhelming intensity\n- \"female-natural-state\" — The Natural State (Earth Energy): grounded, stable, emotionally mature\n- \"female-fire-dance\" — The Fire Dance (Fire Energy): passionate, confrontational, emotionally expressive\n- \"female-frozen-bloom\" — The Frozen Bloom (Frost Energy): guarded, takes time to open, walls up\n- \"female-torn-silk\" — The Torn Silk (Silk Energy): elegant but damaged, beautiful sadness\n- \"female-inner-voice\" — The Inner Voice (Intuitive Energy): trusts gut feelings, perceptive, reads between lines\n- \"female-silent-venom\" — The Silent Venom (Venom Energy): passive-aggressive, subtle toxicity\n- \"female-sunset-soul\" — The Sunset Soul (Sunset Energy): nostalgic, holds onto past relationships\n- \"female-deep-shadow\" — The Deep Shadow (Shadow Energy): dark moods, emotional depth, hard to reach\n- \"female-wild-luxury\" — The Wild Luxury (Luxe Energy): high standards, expects effort, not easily impressed\n- \"female-living-maze\" — The Living Maze (Labyrinth Energy): confusing, mixed signals, hard to navigate\n- \"female-golden-rule\" — The Golden Rule (Gold Energy): sets boundaries, knows her worth, fair but firm\n- \"female-savage-grace\" — The Savage Grace (Predator Energy): takes what she wants, dominant, fierce\n- \"female-quiet-storm\" — The Quiet Storm (Storm Energy): calm surface, intense underneath\n- \"female-rising-phoenix\" — The Rising Phoenix (Phoenix Energy): rebuilding from heartbreak, growth mode\n- \"female-liquid-mirror\" — The Liquid Mirror (Mirror Energy): reflects others' energy, adaptive\n\n### User Soul Types:\n- When personGender = \"male\", userSoulType MUST be a \"female-*\" ID\n- When personGender = \"female\", userSoulType MUST be a \"male-*\" ID\n\n## ABSOLUTE RULES\n\n1. personName: ALWAYS \"Him\" if male, \"Her\" if female. NEVER use the contactName.\n2. messageInsights[].message: MUST be an EXACT copy-paste from chat.messages[].text. Character-for-character identical.\n3. messageInsights tags: Include a MIX of tags. Minimum 1 DECODED insight per scenario.\n4. messageInsights selection: ONLY select genuinely noteworthy messages. NEVER select \"hi\", \"hey\", \"hello\", \"what's up\" or basic greetings.\n5. Insight titles: The title must describe what the MESSAGE SENDER is doing. Ask: \"Who sent this message? What is THEIR action? Does my title describe THEIR action?\"\n6. Soul type match: personSoulType must match the person's actual behavior in the chat.\n7. Score coherence: overallScore must match the chat content. Toxic chat = score <=40. Wholesome = >=65.\n8. BANNED traits: NEVER use \"Early Stage\", \"New Connection\", \"Fresh Start\", \"Getting to Know\", \"Just Met\", \"Beginning Phase\".\n9. personDescription / userDescription: Describe WHO they ARE as a person (personality, patterns). NOT what happened in this chat.\n10. Category descriptions: Analyze what actually happens in THIS chat. Be specific, reference actual messages.\n11. DECODED insights: Decode the EXACT psychological moment — what they said, what they're feeling, why THIS response, what it reveals.\n12. No timestamps in message text: Timestamps go in the separate \"time\" field.\n13. Natural texting: lowercase, abbreviations (wyd, lol, ngl, tbh, omg), emojis where natural. Real 18-28 year olds.\n14. Conversation flow: Messages must flow naturally. No random topic jumps.\n\n## VIBE RULES\n\n### toxic (overallScore: 15-35)\n- warmthScore: 10-25, communicationScore: 15-30, dramaScore: 65-85, distanceScore: 70-90, passionScore: 10-25\n- profileType examples: \"Red Flag Alert\", \"Toxic Pattern\", \"Danger Zone\", \"Walking Red Flag\"\n- messageInsights: 2-3 RED FLAG, 0-1 GREEN FLAG, 1-2 DECODED\n- Person soul types (male): ice-charmer, dark-mirror, silent-choke, sweet-poison, final-silence, star-collector, faded-crown\n- powerBalance: 15-35 (person has more power)\n\n### wholesome (overallScore: 75-95)\n- warmthScore: 70-90, communicationScore: 70-90, dramaScore: 5-20, distanceScore: 5-20, passionScore: 65-90\n- profileType examples: \"Green Light\", \"Healthy Connection\", \"The Real Deal\", \"Keeper Alert\"\n- messageInsights: 0-1 RED FLAG, 2-3 GREEN FLAG, 1-2 DECODED\n- Person soul types (male): gentle-flame, burning-promise, untamable\n- powerBalance: 40-60 (balanced)\n\n### mixed (overallScore: 40-60)\n- warmthScore: 35-55, communicationScore: 35-55, dramaScore: 35-55, distanceScore: 35-55, passionScore: 35-60\n- profileType examples: \"Mixed Signals\", \"Proceed with Caution\", \"Gray Area\", \"Situationship Energy\"\n- messageInsights: 1-2 RED FLAG, 1-2 GREEN FLAG, 1-2 DECODED\n- Person soul types: shifting-flame, chameleon, wounded-prince, frozen-bloom, torn-silk\n- powerBalance: 30-50\n\n### decoded (overallScore: any range)\n- Focus on HIDDEN MEANING, subtext\n- profileType examples: \"Hidden Layers\", \"Read Between The Lines\", \"Not What It Seems\"\n- messageInsights: 0-1 RED FLAG, 0-1 GREEN FLAG, 3-4 DECODED\n- Person soul types: any`;\n\n// ============================================================\n// USER PROMPT\n// ============================================================\n\nconst userPrompt = `Generate a ContentScenario JSON with these parameters:\n\nCONCEPT: ${concept.concept_name}\nCONCEPT DESCRIPTION: ${concept.description || 'General relationship chat analysis video'}\nVIBE: ${vibe}\nAPP STYLE: ${appStyle}\nPERSON GENDER: ${personGender}\nSCENARIO ID: \"${scenarioName}\"\nSCENARIOS NEEDED: ${concept.scenarios_per_video || 1}\n\nBODY CLIP STRUCTURE (what the video will show):\n${bodyClipsFormatted}\n\nGenerate the scenario now. Remember:\n- The chat must feel REAL (natural texting between 18-28 year olds)\n- 14-22 messages in the conversation\n- The analysis must MATCH the chat content\n- personName = \"${personGender === 'male' ? 'Him' : 'Her'}\"\n- messageInsights[].message must be EXACT quotes from the chat\n- Include exactly 4-5 messageInsights with proper tag mix for \"${vibe}\" vibe\n- All soul type IDs must be from the valid list\n- 5 traits per person, no banned traits\n- DECODED insights must reveal the EXACT psychological moment`;\n\n// Output system + user prompts for the Basic LLM Chain node\nreturn [{\n  json: {\n    systemPrompt,\n    userPrompt,\n    // Pass templates through for content copy generation later\n    bodyClipsFormatted,\n    captionTemplates,\n    voTemplates,\n    hookTexts,\n    socialExamples\n  }\n}];\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "node_011",
+      "name": "Generate Scenario",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1980,
+        300
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.userPrompt }}",
+        "hasOutputParser": false,
+        "options": {
+          "systemMessage": "={{ $json.systemPrompt }}"
+        }
+      }
+    },
+    {
+      "id": "node_012",
+      "name": "Gemini Scenario Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        520
+      ],
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {
+          "temperature": 0.9,
+          "maxOutputTokens": 8192
+        }
+      },
+      "credentials": {
+        "googleGeminiApi": {
+          "id": "REPLACE_GOOGLE_GEMINI",
+          "name": "Google Gemini API"
+        }
+      }
+    },
+    {
+      "id": "node_013",
+      "name": "Validate Scenario",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// NODE: Validate Scenario\n// Parses Gemini response and validates the ContentScenario JSON\n// Mode: Run Once for All Items\n\n// Basic LLM Chain outputs { text: \"...\" } with the raw LLM response\nconst llmOutput = $input.first().json;\nconst { vibe } = $('Select Concept').first().json;\n\n// Extract JSON from LLM Chain output\nlet scenario;\ntry {\n  const content = llmOutput.text || llmOutput.output || JSON.stringify(llmOutput);\n  // Strip markdown code fences if present\n  const cleaned = content.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  scenario = JSON.parse(cleaned);\n} catch (e) {\n  return [{ json: { valid: false, errors: ['JSON parse failed: ' + e.message], scenario: null } }];\n}\n\nconst errors = [];\n\n// --- Required top-level fields ---\nif (!scenario.id) errors.push('Missing id');\nif (!scenario.chat) errors.push('Missing chat');\nif (!scenario.results) errors.push('Missing results');\n\nif (scenario.chat) {\n  if (!scenario.chat.contactName) errors.push('Missing chat.contactName');\n  if (!['imessage', 'instagram', 'whatsapp'].includes(scenario.chat.appStyle)) {\n    errors.push('Invalid appStyle: ' + scenario.chat.appStyle);\n  }\n  if (!Array.isArray(scenario.chat.messages) || scenario.chat.messages.length < 12) {\n    errors.push('Too few messages: ' + (scenario.chat.messages ? scenario.chat.messages.length : 0) + ' (min 12)');\n  }\n  if (scenario.chat.messages && scenario.chat.messages.length > 25) {\n    errors.push('Too many messages: ' + scenario.chat.messages.length + ' (max 25)');\n  }\n  // Validate each message\n  if (scenario.chat.messages) {\n    scenario.chat.messages.forEach((msg, i) => {\n      if (!['them', 'me'].includes(msg.sender)) errors.push('Message ' + i + ': invalid sender \"' + msg.sender + '\"');\n      if (!msg.text || typeof msg.text !== 'string') errors.push('Message ' + i + ': missing or invalid text');\n    });\n  }\n}\n\nconst r = scenario.results;\nif (r) {\n  // --- personName auto-fix ---\n  const expectedName = r.personGender === 'male' ? 'Him' : 'Her';\n  if (r.personName !== expectedName) {\n    errors.push('personName should be \"' + expectedName + '\", got \"' + r.personName + '\" (auto-fixed)');\n    r.personName = expectedName;\n  }\n\n  // --- Scores 0-100 ---\n  const scoreFields = ['overallScore', 'warmthScore', 'communicationScore', 'dramaScore', 'distanceScore', 'passionScore'];\n  scoreFields.forEach(field => {\n    const val = r[field];\n    if (typeof val !== 'number' || val < 0 || val > 100) {\n      errors.push(field + ' out of range: ' + val);\n    }\n  });\n\n  // --- Vibe coherence ---\n  if (vibe === 'toxic' && r.overallScore > 40) {\n    errors.push('Toxic vibe but overallScore=' + r.overallScore + ' (should be <=40)');\n  }\n  if (vibe === 'wholesome' && r.overallScore < 65) {\n    errors.push('Wholesome vibe but overallScore=' + r.overallScore + ' (should be >=65)');\n  }\n\n  // --- Valid soul type IDs ---\n  const MALE_SOUL_TYPES = [\n    'male-untamable', 'male-gentle-flame', 'male-silent-abyss', 'male-faded-crown',\n    'male-sweet-poison', 'male-wounded-prince', 'male-burning-promise', 'male-final-silence',\n    'male-dark-mirror', 'male-ice-charmer', 'male-silent-choke', 'male-shifting-flame',\n    'male-chameleon', 'male-star-collector'\n  ];\n  const FEMALE_SOUL_TYPES = [\n    'female-love-rush', 'female-natural-state', 'female-fire-dance', 'female-frozen-bloom',\n    'female-torn-silk', 'female-inner-voice', 'female-silent-venom', 'female-sunset-soul',\n    'female-deep-shadow', 'female-wild-luxury', 'female-living-maze', 'female-golden-rule',\n    'female-savage-grace', 'female-quiet-storm', 'female-rising-phoenix', 'female-liquid-mirror'\n  ];\n  const ALL_SOUL_TYPES = MALE_SOUL_TYPES.concat(FEMALE_SOUL_TYPES);\n\n  if (!ALL_SOUL_TYPES.includes(r.personSoulType)) {\n    errors.push('Invalid personSoulType: \"' + r.personSoulType + '\"');\n  }\n  if (!ALL_SOUL_TYPES.includes(r.userSoulType)) {\n    errors.push('Invalid userSoulType: \"' + r.userSoulType + '\"');\n  }\n\n  // Gender-soul type cross check\n  if (r.personGender === 'male' && r.personSoulType && !r.personSoulType.startsWith('male-')) {\n    errors.push('personGender=male but personSoulType is not male: ' + r.personSoulType);\n  }\n  if (r.personGender === 'male' && r.userSoulType && !r.userSoulType.startsWith('female-')) {\n    errors.push('personGender=male but userSoulType should be female: ' + r.userSoulType);\n  }\n  if (r.personGender === 'female' && r.personSoulType && !r.personSoulType.startsWith('female-')) {\n    errors.push('personGender=female but personSoulType is not female: ' + r.personSoulType);\n  }\n  if (r.personGender === 'female' && r.userSoulType && !r.userSoulType.startsWith('male-')) {\n    errors.push('personGender=female but userSoulType should be male: ' + r.userSoulType);\n  }\n\n  // --- Traits ---\n  if (!Array.isArray(r.personTraits) || r.personTraits.length !== 5) {\n    errors.push('personTraits must have exactly 5, got ' + (r.personTraits ? r.personTraits.length : 0));\n  }\n  if (!Array.isArray(r.userTraits) || r.userTraits.length !== 5) {\n    errors.push('userTraits must have exactly 5, got ' + (r.userTraits ? r.userTraits.length : 0));\n  }\n\n  // Banned traits filter\n  const BANNED = ['Early Stage', 'New Connection', 'Fresh Start', 'Getting to Know', 'Just Met', 'Beginning Phase'];\n  const allTraits = (r.personTraits || []).concat(r.userTraits || []);\n  allTraits.forEach(trait => {\n    if (BANNED.some(b => trait.toLowerCase().includes(b.toLowerCase()))) {\n      errors.push('Banned trait found: \"' + trait + '\"');\n    }\n  });\n\n  // --- Categories ---\n  const requiredCategories = ['intentions', 'chemistry', 'effort', 'redFlagsGreenFlags', 'trajectory'];\n  requiredCategories.forEach(cat => {\n    if (!r.categories || !r.categories[cat] || !r.categories[cat].description) {\n      errors.push('Missing or empty category: ' + cat);\n    }\n  });\n\n  // --- Message Insights ---\n  if (!Array.isArray(r.messageInsights)) {\n    errors.push('messageInsights is not an array');\n  } else {\n    if (r.messageInsights.length < 3 || r.messageInsights.length > 6) {\n      errors.push('messageInsights count=' + r.messageInsights.length + ' (need 3-6)');\n    }\n\n    // Check each insight message is an exact quote from chat\n    const chatTexts = (scenario.chat && scenario.chat.messages ? scenario.chat.messages : []).map(m => m.text);\n    r.messageInsights.forEach((insight, i) => {\n      if (!chatTexts.includes(insight.message)) {\n        // Try fuzzy match (trimmed, case-insensitive)\n        const fuzzy = chatTexts.find(t => t.trim().toLowerCase() === insight.message.trim().toLowerCase());\n        if (fuzzy) {\n          insight.message = fuzzy; // Auto-fix to exact match\n        } else {\n          errors.push('Insight ' + i + ': message \"' + insight.message + '\" not found in chat');\n        }\n      }\n      if (!['RED FLAG', 'GREEN FLAG', 'DECODED'].includes(insight.tag)) {\n        errors.push('Insight ' + i + ': invalid tag \"' + insight.tag + '\"');\n      }\n    });\n\n    // Check DECODED requirement\n    const hasDecoded = r.messageInsights.some(ins => ins.tag === 'DECODED');\n    if (!hasDecoded) {\n      errors.push('No DECODED insight found (at least 1 required)');\n    }\n\n    // Check no greetings selected\n    const GREETING_WORDS = ['hi', 'hey', 'hello', 'sup', 'yo', 'hii', 'hiii'];\n    r.messageInsights.forEach((insight, i) => {\n      const lower = insight.message.toLowerCase().trim();\n      if (GREETING_WORDS.includes(lower)) {\n        errors.push('Insight ' + i + ': \"' + insight.message + '\" is a basic greeting');\n      }\n    });\n  }\n\n  // --- Dynamic ---\n  if (!r.dynamic || !r.dynamic.name) errors.push('Missing dynamic.name');\n  if (!r.dynamic || !r.dynamic.whyThisHappens) errors.push('Missing dynamic.whyThisHappens');\n  if (r.dynamic && (typeof r.dynamic.powerBalance !== 'number' || r.dynamic.powerBalance < 0 || r.dynamic.powerBalance > 100)) {\n    errors.push('dynamic.powerBalance out of range: ' + (r.dynamic ? r.dynamic.powerBalance : 'undefined'));\n  }\n}\n\n// Determine if we should pass the scenario through (allow minor errors)\nconst criticalErrors = errors.filter(e =>\n  !e.includes('auto-fixed') &&\n  !e.includes('out of range') // score issues are fixable\n);\nconst valid = criticalErrors.length === 0;\n\nreturn [{\n  json: {\n    valid,\n    errors,\n    scenario: scenario,\n    errorCount: errors.length,\n    criticalErrorCount: criticalErrors.length\n  }\n}];\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "node_014",
+      "name": "Scenario Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "node_015",
+              "leftValue": "={{ $input.first().json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "node_016",
+      "name": "Build Copy Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// NODE: Build Copy Prompt\n// Assembles the Gemini prompt for content copy generation (hook, VO, captions, social)\n// Mode: Run Once for All Items\n\nconst { concept, vibe, scenarioName } = $('Select Concept').first().json;\nconst { scenario } = $('Validate Scenario').first().json;\nconst { bodyClipsFormatted, captionTemplates, voTemplates, hookTexts, socialExamples } = $('Build Scenario Prompt').first().json;\n\n// Format VO template\nconst voTemplate = voTemplates[0]; // One per concept\nconst voFormatted = voTemplate\n  ? 'Tone: ' + voTemplate.tone + '\\nInstructions: ' + voTemplate.instructions + '\\nExample scripts:\\n' + voTemplate.example_scripts\n  : 'Tone: dramatic, Gen-Z, slightly unhinged. React in real-time to what you see on screen.';\n\n// Format hook text pool\nconst hookFormatted = hookTexts\n  .filter(h => h.type === 'hook')\n  .map(h => '- \"' + h.text + '\" (' + h.mood + ')')\n  .join('\\n');\n\nconst outroFormatted = hookTexts\n  .filter(h => h.type === 'outro_cta')\n  .map(h => '- \"' + h.text + '\"')\n  .join('\\n');\n\n// Format social copy examples\nconst socialFormatted = socialExamples\n  .map(s => '[' + s.style + ']: ' + s.caption_text)\n  .join('\\n\\n');\n\n// Format caption templates\nconst captionFormatted = captionTemplates\n  .sort((a, b) => Number(a.caption_index) - Number(b.caption_index))\n  .map(c => {\n    const clipRef = c.linked_body_clip_index ? ' (clip ' + c.linked_body_clip_index + ')' : '';\n    return '  #' + c.caption_index + ' [' + c.part + '] style=' + c.style + ' position=' + c.position + ' @' + c.start_offset_sec + 's for ' + c.duration_sec + 's' + clipRef + '\\n    Template: \"' + c.text_template + '\"';\n  })\n  .join('\\n');\n\n// ============================================================\n// SYSTEM PROMPT\n// ============================================================\n\nconst systemPrompt = `You are a short-form video content writer for TikTok and Instagram Reels. You write hook texts, voiceover scripts, caption overlays, and social media captions for the \"Toxic or Nah\" relationship chat analysis app.\n\nYour audience is 18-28 year old women who are obsessed with decoding their situationships. Your tone is dramatic, Gen-Z, slightly unhinged, and addictive — like their group chat but as a video.\n\nYour output must be a single valid JSON object. No markdown, no code fences, no explanation — ONLY the JSON.\n\n## OUTPUT FORMAT\n\n{\n  \"hookText\": string,\n  \"outroText\": string,\n  \"voScript\": {\n    \"sections\": [\n      {\n        \"part\": string,\n        \"text\": string,\n        \"duration_hint\": string\n      }\n    ]\n  },\n  \"captionPlan\": [\n    {\n      \"captionIndex\": number,\n      \"part\": \"hook\" | \"body\" | \"outro\",\n      \"text\": string,\n      \"style\": \"dramatic\" | \"reaction\" | \"commentary\" | \"emphasis\" | \"cta\",\n      \"position\": \"top-center\" | \"bottom-center\" | \"center\",\n      \"linkedBodyClipIndex\": number | null,\n      \"startOffsetSec\": number,\n      \"durationSec\": number\n    }\n  ],\n  \"socialCaption\": string\n}\n\n## RULES\n\n1. Hook text: Scroll-stopping, 8-15 words max. Use \"...\" for suspense. Must make you NEED to watch.\n2. VO script: Spoken by AI girl persona reacting in real-time. Each section MAX 15 words (must fit 2-3s of speech). Use filler words occasionally (\"like\", \"omg\", \"wait\"). One section per body clip plus hook and outro.\n3. Caption plan: 4-7 total captions. Hook = 1 caption. Each body clip = 0-1 caption. Outro = 1 caption (CTA).\n4. Social caption: Dramatic/relatable opening, 1-2 emojis, 3-5 hashtags always including #toxicornah #redflag #relationships. Under 250 chars total.\n5. Adapt tone and energy to the scenario vibe and concept.`;\n\n// ============================================================\n// USER PROMPT\n// ============================================================\n\nconst userPrompt = `Generate all content copy for this scenario:\n\n## SCENARIO\n${JSON.stringify(scenario, null, 2)}\n\n## CONCEPT\nName: ${concept.concept_name}\nDescription: ${concept.description || ''}\n\n## BODY CLIP STRUCTURE\n${bodyClipsFormatted}\n(VO script must have one section per clip above, plus hook and outro)\n\n## VO TEMPLATE\n${voFormatted}\n\n## HOOK TEXT EXAMPLES (for inspiration, don't copy exactly)\n${hookFormatted}\n\n## OUTRO CTA EXAMPLES\n${outroFormatted}\n\n## SOCIAL COPY EXAMPLES (for style reference)\n${socialFormatted}\n\n## CAPTION TEMPLATE PATTERN\n${captionFormatted}\n\nKey data to use in captions:\n- Toxicity Score: ${scenario.results.overallScore}\n- Person Soul Type: ${scenario.results.personSoulType}\n- Contact Name: ${scenario.chat.contactName}\n- Person Name: ${scenario.results.personName}\n\nGenerate the content copy JSON now.`;\n\n// Output system + user prompts for the Basic LLM Chain node\nreturn [{\n  json: { systemPrompt, userPrompt, scenario }\n}];\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "node_017",
+      "name": "Error: Invalid Scenario",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        500
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "node_018",
+      "name": "Generate Content Copy",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        2860,
+        200
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.userPrompt }}",
+        "hasOutputParser": false,
+        "options": {
+          "systemMessage": "={{ $json.systemPrompt }}"
+        }
+      }
+    },
+    {
+      "id": "node_019",
+      "name": "Gemini Copy Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        420
+      ],
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {
+          "temperature": 0.85,
+          "maxOutputTokens": 4096
+        }
+      },
+      "credentials": {
+        "googleGeminiApi": {
+          "id": "REPLACE_GOOGLE_GEMINI",
+          "name": "Google Gemini API"
+        }
+      }
+    },
+    {
+      "id": "node_020",
+      "name": "Validate Copy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// NODE: Validate Copy\n// Validates the Gemini content copy response\n// Mode: Run Once for All Items\n\n// Basic LLM Chain outputs { text: \"...\" } with the raw LLM response\nconst llmOutput = $input.first().json;\nconst { scenario } = $('Build Copy Prompt').first().json;\n\nlet copy;\ntry {\n  const content = llmOutput.text || llmOutput.output || JSON.stringify(llmOutput);\n  // Strip markdown code fences if present\n  const cleaned = content.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  copy = JSON.parse(cleaned);\n} catch (e) {\n  return [{ json: { valid: false, errors: ['JSON parse failed: ' + e.message], copy: null, scenario } }];\n}\n\nconst errors = [];\n\n// Hook text\nif (!copy.hookText || typeof copy.hookText !== 'string') {\n  errors.push('Missing hookText');\n} else if (copy.hookText.split(' ').length > 20) {\n  errors.push('hookText too long: ' + copy.hookText.split(' ').length + ' words');\n}\n\n// Outro text\nif (!copy.outroText || typeof copy.outroText !== 'string') {\n  errors.push('Missing outroText');\n}\n\n// VO Script\nif (!copy.voScript || !copy.voScript.sections || !Array.isArray(copy.voScript.sections)) {\n  errors.push('Missing or invalid voScript.sections');\n} else {\n  const parts = copy.voScript.sections.map(s => s.part);\n  if (!parts.includes('hook')) errors.push('VO missing hook section');\n  if (!parts.some(p => p.startsWith('body_clip_'))) errors.push('VO missing body clip sections');\n  copy.voScript.sections.forEach((s, i) => {\n    if (!s.text || typeof s.text !== 'string') {\n      errors.push('VO section ' + i + ' (' + s.part + '): missing text');\n    }\n  });\n}\n\n// Caption plan\nif (!Array.isArray(copy.captionPlan)) {\n  errors.push('Missing or invalid captionPlan');\n} else {\n  if (copy.captionPlan.length < 3) errors.push('Too few captions: ' + copy.captionPlan.length);\n  if (copy.captionPlan.length > 10) errors.push('Too many captions: ' + copy.captionPlan.length);\n  copy.captionPlan.forEach((c, i) => {\n    if (!c.text) errors.push('Caption ' + i + ': missing text');\n    if (!['hook', 'body', 'outro'].includes(c.part)) errors.push('Caption ' + i + ': invalid part \"' + c.part + '\"');\n  });\n}\n\n// Social caption\nif (!copy.socialCaption || typeof copy.socialCaption !== 'string') {\n  errors.push('Missing socialCaption');\n} else if (!copy.socialCaption.toLowerCase().includes('#toxicornah')) {\n  // Auto-fix: append hashtag\n  copy.socialCaption = copy.socialCaption.trim() + ' #toxicornah';\n  errors.push('socialCaption was missing #toxicornah (auto-fixed)');\n}\n\nconst valid = errors.filter(e => !e.includes('auto-fixed')).length === 0;\n\nreturn [{\n  json: { valid, errors, copy, scenario }\n}];\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "node_021",
+      "name": "Copy Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "node_022",
+              "leftValue": "={{ $input.first().json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "node_023",
+      "name": "Error: Invalid Copy",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3300,
+        500
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "node_024",
+      "name": "Prepare Airtable Save",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// NODE: Prepare Airtable Save\n// Formats the data for saving to the Scenarios table\n// Mode: Run Once for All Items\n\nconst { concept, vibe, appStyle, scenarioName } = $('Select Concept').first().json;\nconst { scenario, copy } = $('Validate Copy').first().json;\n\nreturn [{\n  json: {\n    scenario_name: scenarioName,\n    concept_id: concept.concept_id,\n    vibe: vibe,\n    app_style: appStyle,\n    scenario_json: JSON.stringify(scenario),\n    generated_hook_text: copy.hookText,\n    generated_outro_text: copy.outroText,\n    generated_vo_script: JSON.stringify(copy.voScript),\n    generated_caption_plan: JSON.stringify(copy.captionPlan),\n    generated_social_caption: copy.socialCaption,\n    status: 'approved'\n  }\n}];\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "node_025",
+      "name": "Save Scenario",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        3740,
+        100
+      ],
+      "parameters": {
+        "operation": "create",
+        "application": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblcQaMBBPcOAy0NF",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        }
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_AIRTABLE",
+          "name": "Airtable Personal Access Token"
+        }
+      }
+    },
+    {
+      "id": "node_026",
+      "name": "Format Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3960,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// NODE: Format Telegram Message\n// Builds the Telegram approval message + inline keyboard\n// Mode: Run Once for All Items\n\nconst { concept, vibe, appStyle, scenarioName } = $('Select Concept').first().json;\nconst { scenario, copy } = $('Validate Copy').first().json;\n\nconst chat = scenario.chat;\nconst results = scenario.results;\n\n// Preview: first 3 and last 3 messages\nconst msgs = chat.messages;\nconst first3 = msgs.slice(0, 3).map(m => (m.sender === 'them' ? '\\u{1F464}' : '\\u{1F469}') + ' ' + m.text);\nconst last3 = msgs.slice(-3).map(m => (m.sender === 'them' ? '\\u{1F464}' : '\\u{1F469}') + ' ' + m.text);\nconst middleNote = msgs.length > 6 ? '... (' + (msgs.length - 6) + ' more messages) ...' : '';\nconst preview = first3.concat(middleNote ? [middleNote] : []).concat(last3).join('\\n');\n\n// Insight tags as emojis\nconst insightList = results.messageInsights.map(i => {\n  const emoji = i.tag === 'RED FLAG' ? '\\u{1F6A9}' : i.tag === 'GREEN FLAG' ? '\\u2705' : '\\u{1F52E}';\n  return emoji + ' \"' + i.title + '\"';\n}).join('\\n');\n\n// VO preview (first 2 sections)\nconst voPreview = copy.voScript && copy.voScript.sections\n  ? copy.voScript.sections.slice(0, 2).map(s => '[' + s.part + '] ' + s.text).join('\\n')\n  : 'N/A';\n\nconst message = '\\u{1F3AC} *NEW SCENARIO*\\n\\n'\n  + '\\u{1F4CB} *' + concept.concept_name + '*  |  ' + vibe.toUpperCase() + '  |  ' + appStyle + '\\n'\n  + '\\u{1F194} ' + scenarioName + '\\n\\n'\n  + '\\u{1F4AC} *Chat Preview (' + chat.contactName + '):*\\n'\n  + preview + '\\n\\n'\n  + '\\u{1F4CA} *Scores:*\\n'\n  + 'Health: ' + results.overallScore + '/100\\n'\n  + 'Warmth: ' + results.warmthScore + ' | Drama: ' + results.dramaScore + ' | Distance: ' + results.distanceScore + '\\n\\n'\n  + '\\u{1F3AD} *Soul Types:*\\n'\n  + results.personName + ': ' + results.personSoulType + '\\n'\n  + 'User: ' + results.userSoulType + '\\n\\n'\n  + '\\u{1F3F7} *Profile:* ' + results.profileType + ' \\u2014 \"' + results.profileSubtitle + '\"\\n\\n'\n  + '\\u{1F50D} *Insights (' + results.messageInsights.length + '):*\\n'\n  + insightList + '\\n\\n'\n  + '\\u26A1 *Dynamic:* ' + results.dynamic.name + '\\n\\n'\n  + '\\u{1F3A4} *Hook:* \"' + copy.hookText + '\"\\n'\n  + '\\u{1F5E3} *VO Preview:*\\n' + voPreview + '\\n\\n'\n  + '\\u{1F4F1} *Social:* ' + (copy.socialCaption ? copy.socialCaption.substring(0, 120) : 'N/A') + '...';\n\n// Inline keyboard for approval\nconst replyMarkup = {\n  inline_keyboard: [\n    [\n      { text: '\\u2705 Approve', callback_data: 'approve_' + scenarioName },\n      { text: '\\u{1F504} Redo', callback_data: 'redo_' + scenarioName },\n      { text: '\\u274C Skip', callback_data: 'skip_' + scenarioName }\n    ]\n  ]\n};\n\nreturn [{\n  json: {\n    message,\n    replyMarkup,\n    scenarioName,\n    scenario,\n    copy\n  }\n}];\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "node_027",
+      "name": "Send Telegram Approval",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4180,
+        100
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        },
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "values": [
+                {
+                  "text": "✅ Approve",
+                  "additionalFields": {
+                    "callback_data": "={{ 'approve_' + $json.scenarioName }}"
+                  }
+                },
+                {
+                  "text": "🔄 Redo",
+                  "additionalFields": {
+                    "callback_data": "={{ 'redo_' + $json.scenarioName }}"
+                  }
+                },
+                {
+                  "text": "❌ Skip",
+                  "additionalFields": {
+                    "callback_data": "={{ 'skip_' + $json.scenarioName }}"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_TELEGRAM",
+          "name": "Telegram Bot API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Active Concepts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Concepts": {
+      "main": [
+        [
+          {
+            "node": "Select Concept",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Concept": {
+      "main": [
+        [
+          {
+            "node": "Get Body Clip Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Body Clip Templates": {
+      "main": [
+        [
+          {
+            "node": "Get Caption Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Caption Templates": {
+      "main": [
+        [
+          {
+            "node": "Get VO Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get VO Templates": {
+      "main": [
+        [
+          {
+            "node": "Get Hook Texts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Hook Texts": {
+      "main": [
+        [
+          {
+            "node": "Get Social Examples",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Social Examples": {
+      "main": [
+        [
+          {
+            "node": "Build Scenario Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Scenario Prompt": {
+      "main": [
+        [
+          {
+            "node": "Generate Scenario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Scenario Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Scenario",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scenario": {
+      "main": [
+        [
+          {
+            "node": "Validate Scenario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Scenario": {
+      "main": [
+        [
+          {
+            "node": "Scenario Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scenario Valid?": {
+      "main": [
+        [
+          {
+            "node": "Build Copy Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: Invalid Scenario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Copy Prompt": {
+      "main": [
+        [
+          {
+            "node": "Generate Content Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Copy Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Content Copy",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Content Copy": {
+      "main": [
+        [
+          {
+            "node": "Validate Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Copy": {
+      "main": [
+        [
+          {
+            "node": "Copy Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy Valid?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Airtable Save",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: Invalid Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Airtable Save": {
+      "main": [
+        [
+          {
+            "node": "Save Scenario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Scenario": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "toxicornah-scenario-gen-v2",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    {
+      "name": "ToxicOrNah"
+    }
+  ]
+}

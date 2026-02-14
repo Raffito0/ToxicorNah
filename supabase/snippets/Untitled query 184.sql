@@ -1,0 +1,1 @@
+SELECT id, is_unlocked, unlock_type FROM analysis_results;

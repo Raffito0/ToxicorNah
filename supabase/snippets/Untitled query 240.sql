@@ -1,0 +1,1 @@
+SELECT DISTINCT category FROM archetypes ORDER BY category;

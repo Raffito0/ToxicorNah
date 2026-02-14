@@ -1,0 +1,210 @@
+{
+  "name": "ToxicOrNah - Telegram Callback Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["callback_query"],
+        "additionalFields": {}
+      },
+      "id": "cb-node-001",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "webhookId": "toxicornah-callback",
+      "credentials": {
+        "telegramApi": {
+          "id": "pyWK5SqqdZeXs1WU",
+          "name": "Telegram Bot API account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// NODE: Handle Telegram Callback\n// Parses the callback_data from inline keyboard button press\n\nconst update = $input.first().json;\n\nconst callbackData = update.callback_query\n  ? update.callback_query.data\n  : (update.data || '');\n\nconst callbackQueryId = update.callback_query\n  ? update.callback_query.id\n  : '';\n\nconst chatId = update.callback_query\n  ? update.callback_query.message.chat.id\n  : '';\n\nconst parts = callbackData.split('_');\nconst action = parts[0];\nconst scenarioName = parts.slice(1).join('_');\n\nlet newStatus = '';\nlet responseText = '';\nswitch (action) {\n  case 'approve':\n    newStatus = 'approved';\n    responseText = '\\u2705 Scenario \"' + scenarioName + '\" approved!';\n    break;\n  case 'redo':\n    newStatus = 'draft';\n    responseText = '\\uD83D\\uDD04 Scenario \"' + scenarioName + '\" marked for regeneration.';\n    break;\n  case 'skip':\n    newStatus = 'skipped';\n    responseText = '\\u274C Scenario \"' + scenarioName + '\" skipped.';\n    break;\n  default:\n    newStatus = '';\n    responseText = '\\u2753 Unknown action: ' + action;\n}\n\nreturn [{\n  json: {\n    action,\n    scenarioName,\n    newStatus,\n    responseText,\n    callbackQueryId,\n    chatId\n  }\n}];"
+      },
+      "id": "cb-node-002",
+      "name": "Parse Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "operation": "answerQuery",
+        "queryId": "={{ $json.callbackQueryId }}",
+        "additionalFields": {
+          "text": "={{ $json.responseText }}",
+          "show_alert": false
+        }
+      },
+      "id": "cb-node-003",
+      "name": "Answer Callback",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [500, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "pyWK5SqqdZeXs1WU",
+          "name": "Telegram Bot API account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "mode": "id",
+          "value": "appsgjIdkpak2kaXq"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "id",
+          "value": "tblcQaMBBPcOAy0NF"
+        },
+        "filterByFormula": "={{ '{scenario_name} = \"' + $('Parse Callback').first().json.scenarioName + '\"' }}",
+        "options": {}
+      },
+      "id": "cb-node-004",
+      "name": "Find Scenario",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [750, 300],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GQSE5xy7UEjGQdD3",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "mode": "id",
+          "value": "appsgjIdkpak2kaXq"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "id",
+          "value": "tblcQaMBBPcOAy0NF"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "status": "={{ $('Parse Callback').first().json.newStatus }}"
+          },
+          "matchingColumns": ["id"]
+        },
+        "options": {}
+      },
+      "id": "cb-node-005",
+      "name": "Update Status",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1000, 300],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GQSE5xy7UEjGQdD3",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Parse Callback').first().json.chatId }}",
+        "text": "={{ $('Parse Callback').first().json.responseText }}",
+        "additionalFields": {}
+      },
+      "id": "cb-node-006",
+      "name": "Send Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "pyWK5SqqdZeXs1WU",
+          "name": "Telegram Bot API account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Callback": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer Callback": {
+      "main": [
+        [
+          {
+            "node": "Find Scenario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Scenario": {
+      "main": [
+        [
+          {
+            "node": "Update Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Status": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "toxicornah-telegram-callback-v3",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "name": "ToxicOrNah"
+    }
+  ]
+}

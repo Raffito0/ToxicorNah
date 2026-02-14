@@ -1,0 +1,109 @@
+{
+  "id": "example-toxic",
+  "chat": {
+    "contactName": "Jake",
+    "appStyle": "imessage",
+    "messages": [
+      { "sender": "them", "text": "hey", "time": "10:32 PM" },
+      { "sender": "me", "text": "hiii! how was your day?", "time": "10:32 PM" },
+      { "sender": "them", "text": "boring" },
+      { "sender": "them", "text": "wyd" },
+      { "sender": "me", "text": "just got home from work lol, I'm so tired", "time": "10:35 PM" },
+      { "sender": "them", "text": "come over then" },
+      { "sender": "me", "text": "it's like 10pm jake lol", "time": "10:36 PM" },
+      { "sender": "them", "text": "so?" },
+      { "sender": "them", "text": "I'm bored" },
+      { "sender": "me", "text": "you only text me when you're bored", "time": "10:38 PM" },
+      { "sender": "them", "text": "that's not true", "time": "10:40 PM" },
+      { "sender": "them", "text": "I texted you yesterday" },
+      { "sender": "me", "text": "yeah to ask if I could bring you food 😭", "time": "10:41 PM" },
+      { "sender": "them", "text": "lol ok well I'm texting you rn aren't I", "time": "10:43 PM" },
+      { "sender": "them", "text": "why do you always gotta make everything a thing" },
+      { "sender": "me", "text": "I'm not making it a thing I'm just saying", "time": "10:44 PM" },
+      { "sender": "them", "text": "k", "time": "10:48 PM" },
+      { "sender": "me", "text": "don't \"k\" me", "time": "10:48 PM" },
+      { "sender": "them", "text": "lol you're so dramatic", "time": "10:50 PM" },
+      { "sender": "them", "text": "goodnight I guess" }
+    ]
+  },
+  "results": {
+    "personName": "Him",
+    "personGender": "male",
+    "overallScore": 28,
+    "warmthScore": 15,
+    "communicationScore": 20,
+    "dramaScore": 72,
+    "distanceScore": 81,
+    "passionScore": 12,
+    "profileType": "Red Flag Alert",
+    "profileSubtitle": "This chat has more red flags than a bullfight",
+    "profileDescription": "He reaches out on his terms, shuts down when you express needs, and uses deflection to avoid accountability. This isn't a conversation — it's a power play.",
+    "personSoulType": "male-ice-charmer",
+    "userSoulType": "female-fire-dance",
+    "personDescription": "The Ice Charmer knows exactly how to pull you in — with minimal effort and maximum ambiguity. He keeps his messages short and his emotions shorter, creating a dynamic where you're always reaching for warmth he refuses to give. His charm isn't in what he says — it's in what he withholds.",
+    "personTraits": ["Emotionally Unavailable", "Deflective", "Low-Effort", "Dismissive", "Avoidant"],
+    "userDescription": "The Fire Dance burns bright with emotional honesty — you don't hide how you feel, and you're not afraid to call things out. But in this dynamic, your fire is being used against you. Every time you express a need, it's labeled as 'dramatic,' training you to silence yourself.",
+    "userTraits": ["Emotionally Expressive", "Direct", "Self-Aware", "Confrontational", "Passionate"],
+    "categories": {
+      "intentions": {
+        "description": "His intentions are surface-level at best. He's not reaching out to connect — he's reaching out because he's bored and wants company on his terms. The 'come over' at 10pm tells you everything: convenience, not commitment."
+      },
+      "chemistry": {
+        "description": "The chemistry here is one-sided. You're bringing emotional depth and vulnerability while he's offering one-word replies and late-night invitations. Real chemistry requires two people showing up — he's barely in the room."
+      },
+      "effort": {
+        "description": "He put in the absolute minimum. Short replies, no questions about your day beyond 'wyd,' and a 'goodnight I guess' that screams passive-aggression. Meanwhile, you're trying to have an actual conversation."
+      },
+      "redFlagsGreenFlags": {
+        "description": "Red flags everywhere: the dismissive 'k,' calling you dramatic for having feelings, only reaching out when bored, and shutting down instead of engaging. The only green flag? You recognizing the pattern."
+      },
+      "trajectory": {
+        "description": "This is heading toward emotional exhaustion. If nothing changes, you'll keep shrinking yourself to avoid being called 'dramatic' while he keeps the bare minimum going. The slow fade or the explosion — pick your ending."
+      }
+    },
+    "messageInsights": [
+      {
+        "message": "come over then",
+        "title": "The Convenience Call",
+        "tag": "RED FLAG",
+        "description": "He didn't ask how you were feeling. He didn't suggest meeting up tomorrow. He jumped straight to 'come over' — at 10pm, after you said you're tired. This isn't interest in you. It's interest in what you can provide on his schedule.",
+        "solution": "Notice when invitations only come late at night or last-minute. Someone who values you plans ahead and respects your time and energy."
+      },
+      {
+        "message": "why do you always gotta make everything a thing",
+        "title": "The Shutdown Switch",
+        "tag": "RED FLAG",
+        "description": "This is textbook DARVO — Deny, Attack, Reverse Victim and Offender. You pointed out a valid pattern (he only texts when bored), and instead of addressing it, he made YOU the problem. 'Making it a thing' = having feelings he doesn't want to deal with.",
+        "solution": "When someone responds to your feelings by attacking you for having them, that's not a communication style — it's a control tactic. Your feelings are not 'a thing.' They're valid."
+      },
+      {
+        "message": "k",
+        "title": "The One-Letter Power Move",
+        "tag": "DECODED",
+        "description": "That 'k' isn't laziness — it's punishment. He waited 4 minutes to send a single letter because you challenged his narrative. In his mind, you weren't supposed to push back. The 'k' says: 'I'm withdrawing my attention until you comply.' It's emotional withholding disguised as casualness.",
+        "solution": "When someone weaponizes silence or minimal responses after you express yourself, they're training you to stop speaking up. Don't let a single letter rewrite your boundaries."
+      },
+      {
+        "message": "lol you're so dramatic",
+        "title": "The Gaslight Giggle",
+        "tag": "RED FLAG",
+        "description": "Calling you 'dramatic' for responding to his 'k' is gaslighting 101. He escalated by withdrawing, you reacted naturally, and now he's labeling your reaction as the problem. The 'lol' makes it worse — it trivializes your emotions while making him seem unbothered.",
+        "solution": "If expressing a basic need gets you labeled as 'dramatic,' the problem isn't your emotions — it's his inability to handle them. Healthy partners don't minimize your feelings with a laugh."
+      },
+      {
+        "message": "you only text me when you're bored",
+        "title": "The Pattern Recognition",
+        "tag": "GREEN FLAG",
+        "description": "This is YOU seeing the pattern clearly and saying it out loud. You didn't sugarcoat it or make excuses for him. That takes emotional intelligence and self-respect. The fact that he immediately deflected proves you hit a nerve — because you were right.",
+        "solution": "Trust your pattern recognition. When you see it, name it. His reaction to your observation tells you more than his words ever will."
+      }
+    ],
+    "dynamic": {
+      "name": "The Convenience Trap",
+      "subtitle": "He wants your energy without earning it",
+      "whyThisHappens": "This dynamic forms when one person offers just enough attention to keep the other invested, while never matching their emotional effort. He's learned that minimal input (a late-night 'wyd') gets maximum output (your attention, your energy, your presence). Every time you respond despite the low effort, the cycle reinforces itself.",
+      "patternBreak": "Stop rewarding low effort with high engagement. When he texts 'wyd' at 10pm, you don't owe him a conversation. Match his energy — or better yet, redirect yours toward someone who doesn't need to be bored to remember you exist.",
+      "powerBalance": 25
+    }
+  }
+}

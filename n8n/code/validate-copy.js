@@ -1,0 +1,149 @@
+// NODE: Validate Copy
+// Validates the Gemini content copy response (new structure with bodyClips)
+// Mode: Run Once for All Items
+
+// Basic LLM Chain outputs { text: "..." } with the raw LLM response
+const llmOutput = $input.first().json;
+const { scenario } = $('Build Copy Prompt').first().json;
+const { bodyClipCount } = $('Select Concept').first().json;
+
+// --- JSON Repair utility ---
+function repairJson(raw) {
+  let s = raw;
+  s = s.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  const firstBrace = s.indexOf('{');
+  const lastBrace = s.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    s = s.substring(firstBrace, lastBrace + 1);
+  }
+  s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) { result += ch; escaped = false; continue; }
+    if (ch === '\\') { result += ch; escaped = true; continue; }
+    if (ch === '"') { inString = !inString; result += ch; continue; }
+    if (inString && ch === '\n') { result += '\\n'; continue; }
+    if (inString && ch === '\r') { continue; }
+    result += ch;
+  }
+  s = result;
+  s = s.replace(/,\s*([\]}])/g, '$1');
+  s = s.replace(/([^\\])""/g, '$1\\"');
+  return s;
+}
+
+let copy;
+try {
+  const raw = llmOutput.output || llmOutput.text || llmOutput;
+
+  if (typeof raw === 'object' && raw !== null) {
+    copy = raw;
+  } else {
+    copy = JSON.parse(repairJson(String(raw)));
+  }
+} catch (e1) {
+  try {
+    const raw = llmOutput.output || llmOutput.text || llmOutput;
+    let repaired = repairJson(String(raw));
+    repaired = repaired.replace(/[\u201C\u201D\u2018\u2019]/g, '"');
+    const posMatch = e1.message.match(/position (\d+)/);
+    if (posMatch) {
+      const pos = parseInt(posMatch[1]);
+      repaired = repaired.substring(0, pos) + '\\' + repaired.substring(pos);
+    }
+    copy = JSON.parse(repaired);
+  } catch (e2) {
+    return [{ json: { valid: false, errors: ['JSON parse failed after repair: ' + e1.message], copy: null, scenario } }];
+  }
+}
+
+const errors = [];
+
+// Character limit for all VOs (50 chars = ~3 seconds of natural speech)
+const VO_CHAR_LIMIT = 50;
+// Hard limit with some grace (validation fails above this)
+const VO_CHAR_HARD_LIMIT = 55;
+
+// Valid body clip section IDs
+const ALL_SECTION_IDS = ['toxic_score', 'soul_type', 'wtf_happening', 'between_the_lines', 'souls_together'];
+const expectedCount = Math.min(5, Math.max(2, bodyClipCount || 3));
+
+// Hook text (max 8 words for short punchy overlay)
+if (!copy.hookText || typeof copy.hookText !== 'string') {
+  errors.push('Missing hookText');
+} else if (copy.hookText.split(' ').length > 10) {
+  errors.push('hookText too long: ' + copy.hookText.split(' ').length + ' words (max 8-10)');
+}
+
+// Hook VO (50 chars max for 3s speech)
+if (!copy.hookVO || typeof copy.hookVO !== 'string') {
+  errors.push('Missing hookVO');
+} else if (copy.hookVO.length > VO_CHAR_HARD_LIMIT) {
+  errors.push('hookVO too long: ' + copy.hookVO.length + ' chars (max ' + VO_CHAR_LIMIT + '). Text: "' + copy.hookVO + '"');
+}
+
+// Body clips
+if (!Array.isArray(copy.bodyClips)) {
+  errors.push('Missing or invalid bodyClips array');
+} else {
+  if (copy.bodyClips.length !== expectedCount) {
+    errors.push('Expected ' + expectedCount + ' bodyClips, got ' + copy.bodyClips.length);
+  }
+  copy.bodyClips.forEach((clip, i) => {
+    if (!clip.section) {
+      errors.push('Body clip ' + i + ': missing section ID');
+    } else if (!ALL_SECTION_IDS.includes(clip.section)) {
+      errors.push('Body clip ' + i + ': invalid section "' + clip.section + '"');
+    }
+    if (!clip.text || typeof clip.text !== 'string') {
+      errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): missing text');
+    } else if (clip.text.split(' ').length > 8) {
+      errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): text too long (' + clip.text.split(' ').length + ' words, max 6)');
+    }
+    if (!clip.vo || typeof clip.vo !== 'string') {
+      errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): missing vo');
+    } else if (clip.vo.length > VO_CHAR_HARD_LIMIT) {
+      errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): vo too long (' + clip.vo.length + ' chars, max ' + VO_CHAR_LIMIT + '). Text: "' + clip.vo + '"');
+    }
+  });
+
+  // Ensure required sections are present
+  const presentSections = copy.bodyClips.map(c => c.section);
+  if (!presentSections.includes('toxic_score')) {
+    errors.push('Missing required body clip section: toxic_score');
+  }
+  if (!presentSections.includes('soul_type')) {
+    errors.push('Missing required body clip section: soul_type');
+  }
+}
+
+// Outro text (max 5 words)
+if (!copy.outroText || typeof copy.outroText !== 'string') {
+  errors.push('Missing outroText');
+} else if (copy.outroText.split(' ').length > 7) {
+  errors.push('outroText too long: ' + copy.outroText.split(' ').length + ' words (max 5)');
+}
+
+// Outro VO (50 chars max for 3s speech)
+if (!copy.outroVO || typeof copy.outroVO !== 'string') {
+  errors.push('Missing outroVO');
+} else if (copy.outroVO.length > VO_CHAR_HARD_LIMIT) {
+  errors.push('outroVO too long: ' + copy.outroVO.length + ' chars (max ' + VO_CHAR_LIMIT + '). Text: "' + copy.outroVO + '"');
+}
+
+// Social caption
+if (!copy.socialCaption || typeof copy.socialCaption !== 'string') {
+  errors.push('Missing socialCaption');
+} else if (!copy.socialCaption.toLowerCase().includes('#toxicornah')) {
+  copy.socialCaption = copy.socialCaption.trim() + ' #toxicornah';
+  errors.push('socialCaption was missing #toxicornah (auto-fixed)');
+}
+
+const valid = errors.filter(e => !e.includes('auto-fixed')).length === 0;
+
+return [{
+  json: { valid, errors, copy, scenario }
+}];
