@@ -477,7 +477,7 @@ export function MessageInsightCard({
                   </div>
                 </div>
                 <h4 className="text-white mb-2" style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'Outfit, sans-serif', letterSpacing: '1.5px' }}>
-                  {tag.toUpperCase() === 'DECODED' ? 'What It Really Means' : 'What to Do'}
+                  What It Really Means
                 </h4>
                 <p style={{ fontSize: '12px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', color: 'rgba(255, 255, 255, 0.7)' }}>
                   {solution}
