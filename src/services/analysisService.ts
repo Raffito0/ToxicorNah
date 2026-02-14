@@ -875,9 +875,10 @@ async function runAIAnalysis(analysisId: string, imageFiles: File[], personId: s
 }
 
 export async function getAnalysisResult(analysisId: string): Promise<StoredAnalysisResult | null> {
-  // DEV MODE: Check localStorage first for real Gemini results
+  // DEV MODE or CONTENT MODE: Check localStorage first
   const isDev = import.meta.env.DEV || window.location.hostname === 'localhost';
-  if (isDev && analysisId.startsWith('dev-analysis-')) {
+  const isContentMode = analysisId.startsWith('dev-analysis-content-');
+  if ((isDev || isContentMode) && analysisId.startsWith('dev-analysis-')) {
     // Try to get real Gemini result from localStorage
     const storedResult = localStorage.getItem('dev_analysis_result_' + analysisId);
     if (storedResult) {
@@ -1202,8 +1203,9 @@ export type AnalysisStatus = 'pending' | 'quick_ready' | 'completed' | 'error';
  */
 export function getAnalysisStatus(analysisId: string): AnalysisStatus {
   const isDev = import.meta.env.DEV || window.location.hostname === 'localhost';
+  const isContentMode = analysisId.startsWith('dev-analysis-content-');
 
-  if (isDev && analysisId.startsWith('dev-analysis-')) {
+  if ((isDev || isContentMode) && analysisId.startsWith('dev-analysis-')) {
     const status = localStorage.getItem('analysis_status_' + analysisId);
     return (status as AnalysisStatus) || 'pending';
   }
