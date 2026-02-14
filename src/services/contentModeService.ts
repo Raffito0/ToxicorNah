@@ -139,7 +139,7 @@ export function buildStoredResult(scenario: ContentScenario): StoredAnalysisResu
 
   return {
     id: '', // Will be set by injectContentScenario
-    overallScore: r.overallScore,
+    overallScore: 100 - r.overallScore, // n8n uses health score (low=toxic), app uses toxicity score (high=toxic)
     warmthScore: r.warmthScore,
     communicationScore: r.communicationScore,
     dramaScore: r.dramaScore,
