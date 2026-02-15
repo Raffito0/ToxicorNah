@@ -391,16 +391,20 @@ RULES:
 
 STRICT messageInsights DESCRIPTION LENGTH - THIS IS CRITICAL FOR UI:
 - The "description" field MUST be EXACTLY 40-60 characters (6-10 words MAX)
-- Count your characters BEFORE writing. If over 60 chars, REWRITE IT SHORTER
-- NO EXCEPTIONS - the UI will cut off anything longer
+- It should be a SHORT PREVIEW of what the "solution" (back of card) reveals
+- Think of it as a teaser: "What It Really Means" summarized in one punchy phrase
 - Format: ONE punchy phrase, no periods, no commas
-- Examples (with char count):
-  - "Classic breadcrumbing to keep you hooked" (40 chars)
-  - "Textbook manipulation tactic right here" (40 chars)
-  - "He's deflecting to avoid real talk" (35 chars)
-  - "Words and actions don't align here" (35 chars)
-- TOO LONG: "This pattern suggests inconsistent emotional availability" (57 chars - REWRITE!)
-- REWRITTEN: "Emotionally hot and cold vibes" (30 chars)
+- Examples:
+  - "He's shrinking the convo to feel safe" (38 chars)
+  - "Classic avoidant move disguised as chill" (41 chars)
+  - "His silence is punishment not laziness" (38 chars)
+  - "He's keeping score while playing cool" (37 chars)
+
+STRICT messageInsights SOLUTION LENGTH:
+- The "solution" field = "What It Really Means" for ALL tags (RED FLAG, GREEN FLAG, DECODED)
+- ALL tags get psychological decoding, NEVER actionable advice
+- MAX 2 sentences, under 30 words total
+- Must reveal what's happening INSIDE HIS HEAD
 
 CATEGORY-SPECIFIC ANALYSIS INSTRUCTIONS:
 
@@ -589,8 +593,8 @@ Provide your analysis in the following JSON format:
       "title": "<MUST START WITH 'He' (e.g. 'He's Testing You', 'He Noticed', 'He's Deflecting'). MAX 18 CHARS. Describes what HE is doing in this message. See ATTRIBUTION RULES below>",
       "tag": "<ONLY 'RED FLAG', 'GREEN FLAG', or 'DECODED' - see TAG SELECTION GUIDE below>",
       "tagColor": "#<hex color based on tag - RED FLAG=#E53935, GREEN FLAG=#43A047, DECODED=#7C4DFF>",
-      "description": "<40-60 CHARS STRICT LIMIT - describe HIS action in this message accurately>",
-      "solution": "<For RED FLAG/GREEN FLAG: unique advice (15-20 words MAX). For DECODED: the 'oh shit' insight in MAX 2 SHORT sentences (under 30 words total). What is happening INSIDE HIS HEAD? What fear, defense mechanism, or attachment pattern drives THIS word choice? Must reveal the INVISIBLE mechanism. NEVER paraphrase his words back.>",
+      "description": "<40-60 CHARS STRICT LIMIT - a short preview/summary of what the 'solution' insight reveals. Think of it as the teaser for the back of the card.>",
+      "solution": "<'What It Really Means' — ALL tags get psychological decoding, NEVER advice. MAX 2 sentences (under 30 words). What is happening INSIDE HIS HEAD? What fear, defense mechanism, or attachment pattern drives THIS word choice? Must reveal the INVISIBLE mechanism. NEVER paraphrase his words back.>",
       "gradientStart": "<DARK color based on tag>",
       "gradientEnd": "<DARKER version>",
       "accentColor": "<LIGHTER accent>"
@@ -831,7 +835,8 @@ If the chat is casual/normal with no real toxicity, 0-2 messageInsights is perfe
 
 STRICT DESCRIPTION LENGTHS:
 - personalizedDescription: 35-50 words MAX
-- messageInsights description: 40-60 characters STRICT (6-10 words)
+- messageInsights description: 40-60 characters STRICT (6-10 words) — must be a short preview of the "solution" insight
+- messageInsights solution: MAX 2 sentences, under 30 words — "What It Really Means" psychological decoding for ALL tags, NEVER advice
 
 CRITICAL: PROPORTIONAL personalizedTraits
 personalizedTraits MUST match the actual vibe of the conversation. Describe what you SEE, don't assume the relationship stage.
@@ -914,8 +919,8 @@ Respond with ONLY this JSON:
       "title": "<MUST START WITH 'He' (e.g. 'He's Testing You', 'He Noticed', 'He's Deflecting'). MAX 18 CHARS. Describes what HE is doing. See ATTRIBUTION RULES below>",
       "tag": "<ONLY 'RED FLAG', 'GREEN FLAG', or 'DECODED' - see TAG SELECTION GUIDE. RED FLAG=ONLY genuinely toxic. DECODED=vulnerability, hesitation, subtext, hidden meaning>",
       "tagColor": "<RED FLAG=#E53935, GREEN FLAG=#43A047, DECODED=#7C4DFF>",
-      "description": "<40-60 CHARS STRICT - describe HIS action in this message accurately>",
-      "solution": "<For RED/GREEN FLAG: 15-20 words MAX advice. For DECODED: the 'oh shit' insight in MAX 2 SHORT sentences (under 30 words total). What fear, defense mechanism, or attachment pattern drives THIS word choice? Reveal the INVISIBLE mechanism. Go DEEPER than surface. NEVER paraphrase his words back.>",
+      "description": "<40-60 CHARS STRICT - a short preview/summary of what the 'solution' insight reveals. Teaser for the back of the card.>",
+      "solution": "<'What It Really Means' — ALL tags get psychological decoding, NEVER advice. MAX 2 sentences (under 30 words). What fear, defense mechanism, or attachment pattern drives THIS word choice? Reveal the INVISIBLE mechanism. Go DEEPER than surface. NEVER paraphrase his words back.>",
       "gradientStart": "<dark hex>",
       "gradientEnd": "<darker hex>",
       "accentColor": "<lighter accent>"

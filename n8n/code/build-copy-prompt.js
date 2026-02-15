@@ -294,8 +294,8 @@ ${voFormatted}
 Here are 5 hooks from our collection. Write one that fits RIGHT IN with these — same style, same length, same energy. It should feel like entry #6 in this list. Do NOT copy any example word-for-word, but it MUST be close in style and tone. If someone read all 6, they should think the same person wrote them all.
 ${hookFormatted}
 
-## OUTRO CTA EXAMPLES — PICK ONE AND ADAPT
-Pick ONE of these 5 outro examples. Use it as your outroText — you can adapt it slightly to fit the scenario but keep the same structure and energy. Do NOT always pick the same one. Your outroVO should be a spoken version of the outroText.
+## OUTRO CTA EXAMPLES — USE ONE OF THESE (DO NOT DEFAULT TO "Block him?")
+Pick ONE of these 5 outro examples and use it EXACTLY or with minimal adaptation. BANNED outro: "Block him?" — this is overused, NEVER generate it. Pick a DIFFERENT one each time. Your outroVO should be a natural spoken version of the outroText.
 ${outroFormatted}
 
 ## SOCIAL COPY EXAMPLES (for style reference)

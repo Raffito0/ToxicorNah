@@ -72,8 +72,8 @@ Your output must be a single valid JSON object matching the ContentScenario inte
         "message": string,
         "title": string,
         "tag": "RED FLAG" | "GREEN FLAG" | "DECODED",
-        "description": string,
-        "solution": string
+        "description": string (40-60 chars, short preview of the solution insight),
+        "solution": string (MAX 2 sentences, under 30 words — "What It Really Means" psychological decoding)
       }
     ],
     "dynamic": {
@@ -134,14 +134,26 @@ Your output must be a single valid JSON object matching the ContentScenario inte
 4. messageInsights selection: ONLY select genuinely noteworthy messages. NEVER select "hi", "hey", "hello", "what's up" or basic greetings.
 5. Insight titles: The title must describe what the MESSAGE SENDER is doing. Ask: "Who sent this message? What is THEIR action? Does my title describe THEIR action?"
 6. Soul type match: personSoulType must match the person's actual behavior in the chat.
-7. Score coherence: overallScore must ALWAYS be between 15-30 (toxic score = 100 - overallScore, so toxic score is always 70+). This applies to ALL vibes.
+7. Score coherence: overallScore must be between 5-28 (toxic score = 100 - overallScore, so toxic score ranges 72-95). VARY the score each time — pick a DIFFERENT number, do NOT default to 22. Use the FULL range: 5, 8, 12, 15, 18, 22, 25, 28 are all valid.
 8. BANNED traits: NEVER use "Early Stage", "New Connection", "Fresh Start", "Getting to Know", "Just Met", "Beginning Phase".
 9. personDescription / userDescription: Describe WHO they ARE as a person (personality, patterns). NOT what happened in this chat.
 10. Category descriptions: Analyze what actually happens in THIS chat. Be specific, reference actual messages.
-11. DECODED insights: Decode the EXACT psychological moment — what they said, what they're feeling, why THIS response, what it reveals.
-12. No timestamps in message text: Timestamps go in the separate "time" field.
-13. Natural texting: lowercase, abbreviations (wyd, lol, ngl, tbh, omg), emojis where natural. Real 18-28 year olds.
-14. Conversation flow: Messages must flow naturally. No random topic jumps.
+11. "description" field = short preview/teaser of the "solution" insight (40-60 chars, 6-10 words). NOT a separate analysis — it summarizes what the back of the card reveals.
+    "solution" field for ALL messageInsights = "What It Really Means" — psychological decoding, MAX 2 sentences, under 30 words. NEVER actionable advice.
+12. "solution" field RULES (CRITICAL — applies to EVERY card, ALL tags):
+    - Decode the EXACT psychological moment: what they're feeling, why THIS response, what it reveals
+    - Explain what's happening in their HEAD, not give advice like "you should..." or "it's normal to..."
+    - NEVER write advice, tips, or suggestions. ONLY psychological insight. This applies to RED FLAG, GREEN FLAG, AND DECODED equally.
+    - Reference the specific context that triggered this response
+    - BAD solution (ANY tag): "Reiterate your need for communication isn't clingy" ← this is ADVICE
+    - BAD solution (ANY tag): "Trust your instincts when something feels off" ← this is a TIP
+    - BAD solution (ANY tag): "Notice when invitations only come late at night" ← this is ADVICE
+    - GOOD solution (ANY tag): "When someone drops to one-word replies after you open up, it's not that they don't care. He read every word. But vulnerability makes him uncomfortable, so he's shrinking the conversation to feel safe again. His 'haha' is a shield."
+    - GOOD solution (ANY tag): "This is a classic avoidant move. He WANTS you to choose him but he won't ask directly because asking = vulnerability = risk of rejection. So he frames it as 'your choice' but he's 100% keeping score of what you pick."
+    - GOOD solution (RED FLAG): "He waited 4 minutes to send a single letter because you challenged his narrative. In his mind, you weren't supposed to push back. The 'k' says: 'I'm withdrawing my attention until you comply.' It's emotional withholding disguised as casualness."
+14. No timestamps in message text: Timestamps go in the separate "time" field.
+15. Natural texting: lowercase, abbreviations (wyd, lol, ngl, tbh, omg), emojis where natural. Real 18-28 year olds.
+16. Conversation flow: Messages must flow naturally. No random topic jumps.
 
 ## VIRAL CHAT RULES — THIS IS THE #1 PRIORITY
 
@@ -178,8 +190,8 @@ GOOD CHAT (viral, toxic, dramatic):
 
 ## VIBE RULES
 
-### toxic (overallScore: 15-30)
-- warmthScore: 10-25, communicationScore: 15-30, dramaScore: 65-85, distanceScore: 70-90, passionScore: 10-25
+### toxic (overallScore: 5-28, VARY each time)
+- warmthScore: 5-25, communicationScore: 10-30, dramaScore: 65-90, distanceScore: 70-95, passionScore: 5-25
 - profileType examples: "Red Flag Alert", "Toxic Pattern", "Danger Zone", "Walking Red Flag"
 - messageInsights: 2-3 RED FLAG, 0-1 GREEN FLAG, 1-2 DECODED
 - Person soul types (male): ice-charmer, dark-mirror, silent-choke, sweet-poison, final-silence, star-collector, faded-crown
@@ -222,18 +234,34 @@ SCENARIOS NEEDED: ${concept.scenarios_per_video || 1}
 BODY CLIP STRUCTURE (what the video will show):
 ${bodyClipsFormatted}
 
+⚠️ THE #1 RULE — READ THIS FIRST ⚠️
+The CHAT ITSELF must contain ACTUAL TOXIC BEHAVIOR. NOT a normal conversation with a toxic analysis slapped on top.
+A boring chat like "hey how was your day" "good" "cool wyd tonight" "hanging w the guys" is WORTHLESS — it gets zero views on TikTok.
+
+THE CHAT MUST CONTAIN AT LEAST 2 OF THESE IN THE ACTUAL MESSAGES:
+- Him dismissing her feelings ("you're being dramatic", "chill", "whatever")
+- Him gaslighting ("I never said that", "that's not what happened")
+- Him deflecting ("why does it matter?", "why are you making this a big deal")
+- Him caught lying or being sketchy ("who was that girl", "she's just a friend")
+- Him being passive-aggressive ("k", "...", "fine", "whatever you want")
+- Him guilt-tripping ("after everything I've done for you")
+- Him going cold after being warm
+
+If the chat reads like a normal healthy conversation, YOU HAVE FAILED. Start over mentally.
+
 Generate the scenario now. Remember:
 - The chat must be VIRAL — dramatic, toxic, the kind that gets millions of views on TikTok
-- At least ONE moment where viewers would screenshot and send to their group chat
+- The toxicity must be IN THE MESSAGES, not just in the analysis
+- At least ONE message that makes you go "oh HELL no" or "wait WHAT"
 - Real texting style (lowercase, abbreviations, emojis) but TOXIC content
 - 14-22 messages in the conversation
-- The analysis must MATCH the chat content
+- The analysis must MATCH the chat content — if the chat is toxic, the analysis reflects WHY it's toxic
 - personName = "${personGender === 'male' ? 'Him' : 'Her'}"
 - messageInsights[].message must be EXACT quotes from the chat
 - Include exactly 4-5 messageInsights with proper tag mix for "${vibe}" vibe
 - All soul type IDs must be from the valid list
 - 5 traits per person, no banned traits
-- DECODED insights must reveal the EXACT psychological moment`;
+- ALL messageInsights "solution" field = psychological decoding ("What It Really Means"), NEVER advice. This applies to RED FLAG, GREEN FLAG, AND DECODED equally.`;
 
 // Output system + user prompts for the Basic LLM Chain node (Gemini 2.0 Flash)
 return [{

@@ -123,6 +123,22 @@ if (scenario.chat) {
       if (!['them', 'me'].includes(msg.sender)) errors.push('Message ' + i + ': invalid sender "' + msg.sender + '"');
       if (!msg.text || typeof msg.text !== 'string') errors.push('Message ' + i + ': missing or invalid text');
     });
+
+    // --- Chat toxicity check: "them" messages must contain actual conflict/tension ---
+    const theirMessages = scenario.chat.messages.filter(m => m.sender === 'them').map(m => m.text.toLowerCase());
+    const allTheirText = theirMessages.join(' ');
+    const TOXIC_INDICATORS = [
+      'dramatic', 'chill', 'relax', 'calm down', 'whatever', 'idc', 'i don\'t care',
+      'why does it matter', 'big deal', 'overreact', 'insecure', 'crazy', 'psycho',
+      'it\'s not like that', 'just a friend', 'you always', 'k', 'fine', 'i never said',
+      'that\'s not what', 'leave me alone', 'i don\'t have time', 'i was busy',
+      'stop', 'enough', 'you\'re tripping', 'not my problem', 'lol ok', 'bye',
+      'who cares', 'get over it', '...', 'nah', 'smh', 'bro', 'dude'
+    ];
+    const toxicHits = TOXIC_INDICATORS.filter(t => allTheirText.includes(t));
+    if (toxicHits.length < 2) {
+      errors.push('Chat lacks toxicity: "them" messages contain only ' + toxicHits.length + ' toxic indicators (need 2+). Chat may be too boring/normal.');
+    }
   }
 }
 
@@ -251,14 +267,20 @@ if (r) {
       errors.push('No DECODED insight found (at least 1 required)');
     }
 
-    // Check no greetings selected
-    const GREETING_WORDS = ['hi', 'hey', 'hello', 'sup', 'yo', 'hii', 'hiii'];
-    r.messageInsights.forEach((insight, i) => {
+    // Auto-remove greeting insights instead of failing
+    const GREETING_WORDS = ['hi', 'hey', 'hello', 'sup', 'yo', 'hii', 'hiii', 'heyy', 'heyyy'];
+    const beforeCount = r.messageInsights.length;
+    r.messageInsights = r.messageInsights.filter(insight => {
       const lower = insight.message.toLowerCase().trim();
       if (GREETING_WORDS.includes(lower)) {
-        errors.push('Insight ' + i + ': "' + insight.message + '" is a basic greeting');
+        errors.push('Auto-removed greeting insight: "' + insight.message + '" (non-critical)');
+        return false;
       }
+      return true;
     });
+    if (beforeCount !== r.messageInsights.length) {
+      errors.push('Removed ' + (beforeCount - r.messageInsights.length) + ' greeting insight(s) — ' + r.messageInsights.length + ' remaining');
+    }
   }
 
   // --- Dynamic ---
@@ -273,7 +295,9 @@ if (r) {
 const criticalErrors = errors.filter(e =>
   !e.includes('auto-fixed') &&
   !e.includes('out of range') &&
-  !e.includes('not found in chat') // partial quote mismatches are non-critical
+  !e.includes('not found in chat') && // partial quote mismatches are non-critical
+  !e.includes('non-critical') &&
+  !e.includes('Auto-removed')
 );
 const valid = criticalErrors.length === 0;
 

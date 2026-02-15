@@ -31,8 +31,8 @@ function pickAppStyle() {
   return 'imessage';
 }
 
-// --- Gender (80% male person analyzed, 20% female) ---
-const personGender = Math.random() < 0.80 ? 'male' : 'female';
+// --- Gender: ALWAYS male (girl analyzes a guy) ---
+const personGender = 'male';
 
 // Use forced_vibe from Airtable if set, otherwise random
 const vibe = concept.forced_vibe || pickVibe();
