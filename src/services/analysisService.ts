@@ -276,10 +276,10 @@ export interface StoredAnalysisResult {
 export async function processAnalysis(personId: string, imageFiles: File[]): Promise<string> {
   console.log('processAnalysis: Starting with personId:', personId, 'files:', imageFiles.length);
 
-  // DEV MODE: Call real Gemini API but skip Supabase database operations
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost';
-  if (isDev && personId.startsWith('dev-')) {
-    console.log('processAnalysis: DEV MODE - calling real Gemini API, skipping Supabase');
+  // DEV/FALLBACK MODE: Call real Gemini API but skip Supabase database operations
+  // Triggered in dev mode OR when Supabase is unavailable (person creation failed)
+  if (personId.startsWith('dev-')) {
+    console.log('processAnalysis: LOCAL MODE - calling real Gemini API, skipping Supabase');
     return await processAnalysisDevMode(personId, imageFiles);
   }
 
@@ -875,18 +875,16 @@ async function runAIAnalysis(analysisId: string, imageFiles: File[], personId: s
 }
 
 export async function getAnalysisResult(analysisId: string): Promise<StoredAnalysisResult | null> {
-  // DEV MODE or CONTENT MODE: Check localStorage first
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost';
-  const isContentMode = analysisId.startsWith('dev-analysis-content-');
-  if ((isDev || isContentMode) && analysisId.startsWith('dev-analysis-')) {
+  // LOCAL MODE: Check localStorage for dev-analysis-* IDs (dev, fallback, or content mode)
+  if (analysisId.startsWith('dev-analysis-')) {
     // Try to get real Gemini result from localStorage
     const storedResult = localStorage.getItem('dev_analysis_result_' + analysisId);
     if (storedResult) {
-      console.log('getAnalysisResult: DEV MODE - returning real Gemini result from localStorage for', analysisId);
+      console.log('getAnalysisResult: LOCAL MODE - returning Gemini result from localStorage for', analysisId);
       return JSON.parse(storedResult) as StoredAnalysisResult;
     }
     // Fall back to mock if no real result found
-    console.log('getAnalysisResult: DEV MODE - no localStorage result, returning mock for', analysisId);
+    console.log('getAnalysisResult: LOCAL MODE - no localStorage result, returning mock for', analysisId);
     return getMockAnalysisResult(analysisId);
   }
 
@@ -1202,15 +1200,13 @@ export type AnalysisStatus = 'pending' | 'quick_ready' | 'completed' | 'error';
  * - 'error': Something failed
  */
 export function getAnalysisStatus(analysisId: string): AnalysisStatus {
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost';
-  const isContentMode = analysisId.startsWith('dev-analysis-content-');
-
-  if ((isDev || isContentMode) && analysisId.startsWith('dev-analysis-')) {
+  // LOCAL MODE: Check localStorage for dev-analysis-* IDs
+  if (analysisId.startsWith('dev-analysis-')) {
     const status = localStorage.getItem('analysis_status_' + analysisId);
     return (status as AnalysisStatus) || 'pending';
   }
 
-  // For production, we'd check Supabase processing_status
+  // For production (Supabase mode), we'd check processing_status
   return 'completed';
 }
 
@@ -1222,15 +1218,15 @@ export function getAnalysisStatus(analysisId: string): AnalysisStatus {
 export async function startAnalysis(personId: string, imageFiles: File[]): Promise<string> {
   console.log('startAnalysis: Starting TWO-PHASE analysis with personId:', personId, 'files:', imageFiles.length);
 
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost';
-
-  if (isDev && personId.startsWith('dev-')) {
+  // DEV/FALLBACK MODE: Use localStorage + real Gemini API
+  // Triggered in dev mode OR when Supabase is unavailable (person creation failed)
+  if (personId.startsWith('dev-')) {
     const devAnalysisId = 'dev-analysis-' + Date.now();
 
     // Set initial status to pending
     localStorage.setItem('analysis_status_' + devAnalysisId, 'pending');
 
-    console.log('[DEV MODE] startAnalysis: Created ID:', devAnalysisId, '- starting two-phase processing');
+    console.log('[LOCAL MODE] startAnalysis: Created ID:', devAnalysisId, '- starting two-phase processing');
 
     // Start two-phase processing (don't await - runs in background)
     processTwoPhaseAnalysis(devAnalysisId, imageFiles);
@@ -1238,7 +1234,7 @@ export async function startAnalysis(personId: string, imageFiles: File[]): Promi
     return devAnalysisId;
   }
 
-  // PRODUCTION MODE: Use existing processAnalysis
+  // PRODUCTION MODE: Use existing processAnalysis (Supabase)
   return await processAnalysis(personId, imageFiles);
 }
 

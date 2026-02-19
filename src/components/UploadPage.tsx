@@ -240,13 +240,9 @@ export function UploadPage({ onAnalyze, contentScenario }: UploadPageProps) {
 
         if (createError) {
           console.error('Error creating default person:', createError);
-          // In dev mode, use a mock person ID
-          if (isDev) {
-            console.log('Dev mode: using mock person ID');
-            personIdToUse = 'dev-person-' + Date.now();
-          } else {
-            throw new Error('Failed to create person');
-          }
+          // Fallback to localStorage mode (works in both dev and production)
+          console.log('Supabase unavailable, using localStorage mode');
+          personIdToUse = 'dev-person-' + Date.now();
         } else {
           personIdToUse = newPerson.id;
         }
