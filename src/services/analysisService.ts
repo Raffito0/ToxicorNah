@@ -1400,7 +1400,7 @@ async function processTwoPhaseAnalysis(analysisId: string, imageFiles: File[]): 
         name: 'Him',
         title: 'The Burning Promise',
         tagline: 'Soulmate energy week one. Stranger by month two.',
-        description: 'All grand gestures, future plans, and "I\'ve never felt this way before." He made you the center of his universe so fast you didn\'t notice the expiration date. You didn\'t do anything wrong. He just burned through you.',
+        description: 'He made you his whole world overnight. Then disappeared like none of it was real.',
         traits: ['Love Bomber', 'Future Faker', 'Intensity Addict', 'Fast Burner', 'Emotionally Volatile'],
         traitColors: ['#FF6D00', '#FF3D00', '#DD2C00', '#FF9100', '#E65100'],
         energyType: 'Explosive Energy',
