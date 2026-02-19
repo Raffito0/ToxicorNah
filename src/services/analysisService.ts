@@ -1253,7 +1253,7 @@ async function processTwoPhaseAnalysis(analysisId: string, imageFiles: File[]): 
 
     const demoResult: StoredAnalysisResult = {
       id: analysisId,
-      overallScore: 12, // toxic score = 88
+      overallScore: 88,
       warmthScore: 14,
       communicationScore: 18,
       dramaScore: 82,
