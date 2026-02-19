@@ -1244,6 +1244,208 @@ export async function startAnalysis(personId: string, imageFiles: File[]): Promi
  * Phase 2: Detailed analysis (background) - shows cards
  */
 async function processTwoPhaseAnalysis(analysisId: string, imageFiles: File[]): Promise<void> {
+  // ═══════════════════════════════════════════════════════════
+  // DEMO MODE: Skip AI, return hardcoded super-toxic result
+  // ═══════════════════════════════════════════════════════════
+  const DEMO_MODE = true; // ← SET TO false TO USE REAL GEMINI AI
+  if (DEMO_MODE) {
+    console.log('[DEMO MODE] Returning hardcoded toxic result');
+
+    const demoResult: StoredAnalysisResult = {
+      id: analysisId,
+      overallScore: 12, // toxic score = 88
+      warmthScore: 14,
+      communicationScore: 18,
+      dramaScore: 82,
+      distanceScore: 88,
+      passionScore: 10,
+      profileType: 'Walking Red Flag',
+      profileSubtitle: 'Run and never look back',
+      profileDescription: 'Girl this man is a whole crime scene in a hoodie.',
+      isUnlocked: true,
+      unlockType: 'free_first',
+      personName: 'Him',
+      personGender: 'male',
+      processingStatus: 'completed',
+      emotionalProfiles: [
+        {
+          archetypeId: 'demo-1',
+          name: 'Intentions',
+          description: 'He keeps you around for validation, not connection. Every "wyd" at 2am is a power move — he reaches out only when he needs his ego fed. There\'s no plan for you in his future, just a revolving door he controls.',
+          category: 'Intentions',
+          categoryNumber: 1,
+          traits: ['Breadcrumbing', 'Ego-driven', 'No commitment'],
+          traitColors: ['#E53935', '#FF7043', '#EF5350'],
+          gradientStart: '#E53935',
+          gradientEnd: '#B71C1C',
+          specificExamples: ['His "I miss you" at 1am after ignoring you all day is textbook breadcrumbing — just enough to keep you hooked.', 'He dodged "what are we" three times. That IS your answer.'],
+        },
+        {
+          archetypeId: 'demo-2',
+          name: 'Chemistry',
+          description: 'The chemistry here is one-sided — you bring the fire, he brings a lighter and watches you burn. His charm is calculated, not genuine. He mirrors just enough of your energy to keep you engaged.',
+          category: 'Chemistry',
+          categoryNumber: 2,
+          traits: ['One-sided effort', 'Calculated charm', 'Mirroring'],
+          traitColors: ['#FF7043', '#E53935', '#D32F2F'],
+          gradientStart: '#FF7043',
+          gradientEnd: '#D84315',
+          specificExamples: ['You wrote a whole paragraph. He sent "lol ok." That\'s not matching energy — that\'s contempt.', 'He only flirts when you pull away. Classic push-pull manipulation.'],
+        },
+        {
+          archetypeId: 'demo-3',
+          name: 'Effort',
+          description: 'His effort is nonexistent. You plan every date, initiate every conversation, and carry the emotional weight of two people. He coasts on your investment while giving nothing back.',
+          category: 'Effort',
+          categoryNumber: 3,
+          traits: ['Zero initiative', 'You do everything', 'Emotional freeloader'],
+          traitColors: ['#EF5350', '#E53935', '#C62828'],
+          gradientStart: '#EF5350',
+          gradientEnd: '#C62828',
+          specificExamples: ['You\'ve initiated the last 11 conversations. He started zero.', 'He "forgot" your birthday but posted on his story the same day.'],
+        },
+        {
+          archetypeId: 'demo-4',
+          name: 'Red Flags & Green Flags',
+          description: 'All red, no green. Gaslighting when confronted, dismissing your feelings as "drama," and disappearing acts are not quirks — they\'re patterns of emotional manipulation.',
+          category: 'Red Flags & Green Flags',
+          categoryNumber: 4,
+          traits: ['Gaslighting', 'Dismissive', 'Disappearing acts'],
+          traitColors: ['#E53935', '#D32F2F', '#B71C1C'],
+          gradientStart: '#D32F2F',
+          gradientEnd: '#8E0000',
+          specificExamples: ['"You\'re being dramatic" after HE ghosted for 5 days is textbook DARVO.', '"She\'s just a friend" but the friend is commenting hearts on every pic.'],
+        },
+        {
+          archetypeId: 'demo-5',
+          name: 'Trajectory',
+          description: 'This is going nowhere and he knows it. He\'ll keep you in a situationship limbo as long as you let him — because commitment means accountability, and accountability means he can\'t do whatever he wants.',
+          category: 'Trajectory',
+          categoryNumber: 5,
+          traits: ['Situationship forever', 'Avoids labels', 'Dead end'],
+          traitColors: ['#B71C1C', '#E53935', '#EF5350'],
+          gradientStart: '#B71C1C',
+          gradientEnd: '#4E0000',
+          specificExamples: ['6 months in and you still can\'t call him your boyfriend. The ambiguity is intentional.', 'He said "let\'s see where this goes" — it went nowhere.'],
+        },
+      ],
+      messageInsights: [
+        {
+          id: 'demo-i1',
+          message: 'lol ok whatever you say',
+          messageCount: '',
+          title: 'The Shutdown',
+          tag: 'RED FLAG',
+          tagColor: '#E53935',
+          description: 'He\'s punishing you with indifference for having feelings.',
+          solution: 'That "lol ok" isn\'t casual — it\'s calculated. He read your whole message, felt challenged, and chose the response that would make you feel the smallest. The laugh is the cruelest part: it says your emotions are entertainment to him.',
+          gradientStart: '#5C1A1A',
+          gradientEnd: '#3D1212',
+          accentColor: '#ff9d9d',
+        },
+        {
+          id: 'demo-i2',
+          message: 'she\'s just a friend calm down',
+          messageCount: '',
+          title: 'The Gaslight Special',
+          tag: 'RED FLAG',
+          tagColor: '#E53935',
+          description: '"Calm down" is his way of making YOUR reaction the problem.',
+          solution: 'He flipped it — now YOU\'RE the crazy one for noticing the girl commenting fire emojis on every photo. "She\'s just a friend" plus "calm down" is a two-hit combo: deny the evidence, then shame you for seeing it. He\'s not defending himself, he\'s attacking your perception.',
+          gradientStart: '#5C1A1A',
+          gradientEnd: '#3D1212',
+          accentColor: '#ff9d9d',
+        },
+        {
+          id: 'demo-i3',
+          message: 'i said i was sorry what more do you want',
+          messageCount: '',
+          title: 'The Non-Apology',
+          tag: 'RED FLAG',
+          tagColor: '#E53935',
+          description: 'His "sorry" is a transaction — he thinks saying it once buys him a clean slate.',
+          solution: 'This isn\'t remorse, it\'s impatience. He\'s not sorry he hurt you — he\'s annoyed that his five-letter word didn\'t make the problem disappear. "What more do you want" reveals it: he sees your pain as an inconvenience, not something he caused.',
+          gradientStart: '#5C1A1A',
+          gradientEnd: '#3D1212',
+          accentColor: '#ff9d9d',
+        },
+        {
+          id: 'demo-i4',
+          message: 'you always do this',
+          messageCount: '',
+          title: 'The Deflection',
+          tag: 'DECODED',
+          tagColor: '#7C4DFF',
+          description: 'He\'s rewriting history to make you the villain of his story.',
+          solution: '"You always do this" is a panic button. He hit it because you got too close to the truth. Instead of addressing what he did, he\'s drowning the conversation in vague accusations. He doesn\'t mean "you always do this" — he means "stop holding me accountable."',
+          gradientStart: '#2A1A4E',
+          gradientEnd: '#1A0F33',
+          accentColor: '#B39DDB',
+        },
+        {
+          id: 'demo-i5',
+          message: 'good morning beautiful ❤️',
+          messageCount: '',
+          title: 'The Love Bomb',
+          tag: 'DECODED',
+          tagColor: '#7C4DFF',
+          description: 'Sweet words after silence — this is the reset button, not affection.',
+          solution: 'This "good morning beautiful" came 48 hours after he ghosted your last 3 messages. It\'s not love — it\'s a reset button. He knows one sweet text erases days of neglect in your mind. The heart emoji is strategic: maximum emotional impact, zero actual effort.',
+          gradientStart: '#2A1A4E',
+          gradientEnd: '#1A0F33',
+          accentColor: '#B39DDB',
+        },
+      ],
+      personArchetype: {
+        name: 'Him',
+        title: 'The Dark Mirror',
+        tagline: 'He doesn\'t just break you. He makes you break yourself.',
+        description: 'He studied you like a playbook. Every insecurity you whispered became a weapon he filed away for later. He doesn\'t fight fair because fair would mean you could win — and control is the only game he plays.',
+        traits: ['Gaslighter', 'Calculated', 'Emotionally Weaponized', 'Mirror Manipulator', 'Blame Deflector'],
+        traitColors: ['#E53935', '#FF7043', '#EF5350', '#D32F2F', '#B71C1C'],
+        energyType: 'Toxic Energy',
+        imageUrl: getMaleSoulTypeByName('The Dark Mirror')?.normalImage || '',
+        sideProfileImageUrl: getMaleSoulTypeByName('The Dark Mirror')?.sideProfileImage || '',
+        gradientFrom: '#2d1b4e',
+        gradientTo: '#150d26',
+        shareableTagline: 'Reflects your wounds back at you',
+      },
+      userArchetype: {
+        name: 'You',
+        title: 'The Love Rush',
+        tagline: 'Ready to love before hello.',
+        description: 'You love with your whole chest and zero hesitation. You see the best in people even when they show you the worst — not because you\'re naive, but because your heart genuinely believes everyone deserves a chance. That\'s beautiful. But it\'s also why you stayed this long.',
+        traits: ['All-in lover', 'Sees the best', 'Emotionally brave', 'Loyal to a fault', 'Hope-driven'],
+        traitColors: ['#2A9D8F', '#1B5B54', '#3ABAA8', '#4DB6AC', '#26A69A'],
+        energyType: 'Rush Energy',
+        imageUrl: getFemaleSoulTypeByName('The Love Rush')?.normalImage || '',
+        sideProfileImageUrl: getFemaleSoulTypeByName('The Love Rush')?.sideProfileImage || '',
+        gradientFrom: '#4d1a3d',
+        gradientTo: '#26101e',
+      },
+      relationshipDynamic: {
+        name: 'The Guilt Trap',
+        subtitle: 'You apologize for his mistakes',
+        whyThisHappens: 'He trained you to feel guilty for having needs. Every time you brought something up, he flipped it until YOU were the one saying sorry. Now you second-guess every emotion before you even feel it.',
+        patternBreak: 'Stop apologizing for having standards. Your needs aren\'t drama — his inability to meet them is.',
+        powerBalance: 22,
+      },
+    };
+
+    // Store as Phase 1 (quick) result first
+    localStorage.setItem('dev_analysis_result_' + analysisId, JSON.stringify(demoResult));
+    localStorage.setItem('analysis_status_' + analysisId, 'quick_ready');
+
+    // Simulate Phase 2 delay (1 second)
+    await new Promise(r => setTimeout(r, 1000));
+
+    // Mark as fully complete
+    localStorage.setItem('dev_analysis_result_' + analysisId, JSON.stringify(demoResult));
+    localStorage.setItem('analysis_status_' + analysisId, 'completed');
+    console.log('[DEMO MODE] Result stored, status: completed');
+    return;
+  }
+
   let extraction: ExtractionResult | null = null;
 
   try {
