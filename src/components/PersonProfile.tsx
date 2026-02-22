@@ -80,7 +80,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
 
   // Dev: forced images for design
   const avatarUrl = '/67320b97b9sdfacf6001d2d3e5b.jpg';
-  const archetypeImageUrl = '/image_mQngGkvd_1770217143493_1024.jpg';
+  const archetypeImageUrl = '/image_r6qZ9PP4_1770361994322_1024.jpg';
 
   return (
     <div className="relative w-full overflow-hidden" style={{ minHeight: '45vh' }}>
