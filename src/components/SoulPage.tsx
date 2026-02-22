@@ -261,16 +261,16 @@ function YourArchetypeSection({ data }: { data: SoulProfileData }) {
   const [showInfoTooltip, setShowInfoTooltip] = useState(false);
 
   return (
-    <Section className="px-5" style={{ marginTop: '45px' }}>
+    <Section className="px-[30px]" style={{ marginTop: '45px' }}>
       {/* Custom header with archetype name */}
-      <div className="mb-6">
+      <div className="mb-6 text-center">
         <p
           className="text-white/50 uppercase mb-2"
           style={{ fontSize: '16px', letterSpacing: '1.5px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
         >
           Who You Are
         </p>
-        <div className="relative flex items-center gap-2">
+        <div className="relative flex items-center justify-center gap-2">
           <h2
             className="text-white text-3xl"
             style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px' }}
@@ -357,7 +357,7 @@ function YourArchetypeSection({ data }: { data: SoulProfileData }) {
       >
         {/* Full vertical archetype image */}
         <img
-          src={DEV_USER_ARCHETYPE_IMAGE}
+          src={dominantArchetype.imageUrl || DEV_USER_ARCHETYPE_IMAGE}
           alt={dominantArchetype.title}
           className="absolute inset-0 w-full h-full object-cover"
         />
