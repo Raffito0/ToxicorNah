@@ -324,7 +324,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
             >
           {/* CONTENT MODE: Show captured chat screenshot */}
           {isContentMode && contentScreenshots.length > 0 ? (
-            <div className="w-full h-full flex items-center justify-center p-3 overflow-hidden">
+            <div className="w-full h-full flex items-center justify-center px-5 py-8 overflow-hidden">
               {contentScreenshots.map((dataUrl, index) => (
                 <img
                   key={index}
