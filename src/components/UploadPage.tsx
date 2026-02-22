@@ -66,7 +66,11 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
       }
 
       try {
-        const dataUrl = await toPng(chatRenderRef.current, {
+        // Capture the inner ChatRenderer element (has explicit 390x844 dimensions)
+        // NOT the wrapper div which has opacity:0 that would be cloned by html-to-image
+        const captureTarget = (chatRenderRef.current.firstElementChild as HTMLElement) || chatRenderRef.current;
+        console.log('[ContentMode] Capture target dimensions:', captureTarget.offsetWidth, 'x', captureTarget.offsetHeight);
+        const dataUrl = await toPng(captureTarget, {
           quality: 0.95,
           pixelRatio: 2,
           backgroundColor: '#000000',
