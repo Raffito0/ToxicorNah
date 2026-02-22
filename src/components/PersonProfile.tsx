@@ -82,7 +82,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
   const archetypeImageUrl = '/image_r6qZ9PP4_1770361994322_1024.jpg';
 
   return (
-    <div className="relative w-full overflow-hidden" style={{ minHeight: '45vh' }}>
+    <div className="relative w-full overflow-hidden" style={{ minHeight: '40vh' }}>
       {/* Blurred archetype background */}
       <img
         src={archetypeImageUrl}
@@ -109,7 +109,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
       />
 
       {/* Content */}
-      <div className="relative flex flex-col items-center justify-center text-center px-8" style={{ zIndex: 3, minHeight: '45vh' }}>
+      <div className="relative flex flex-col items-center justify-center text-center px-8" style={{ zIndex: 3, minHeight: '40vh' }}>
         {/* Avatar with Pulsing Halo Ring */}
         <div className="relative">
           {/* Outer pulsing halo ring */}
@@ -2810,8 +2810,8 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
       <HeroSection data={data} />
 
       {/* Content wrapper — full width black, overlaps hero to hide any edge */}
-      <div className="w-full relative bg-black" style={{ marginTop: '-120px', zIndex: 10 }}>
-      <div className="w-full max-w-md mx-auto px-8 pb-8">
+      <div className="w-full relative bg-black" style={{ marginTop: '-40px', zIndex: 10 }}>
+      <div className="w-full max-w-md mx-auto px-8 pb-8 pt-2">
         {/* SECTION: Archetype Card */}
         <ArchetypeCardSection data={data} />
 
