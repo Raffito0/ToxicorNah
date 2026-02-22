@@ -556,7 +556,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
                           animate={{ opacity: 1, filter: 'blur(0px)' }}
                           exit={{ opacity: 0 }}
                           transition={{ duration: 0.5, delay: 0.35 }}
-                          style={{ fontSize: '15px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 300, letterSpacing: '1.5px', color: 'rgba(255, 255, 255, 0.85)', fontStyle: 'italic' }}
+                          style={{ fontSize: '17px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 300, letterSpacing: '1.5px', color: 'rgba(255, 255, 255, 0.85)', fontStyle: 'italic' }}
                         >
                           {analysis.personArchetype.tagline}
                         </motion.p>
@@ -886,7 +886,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
                   <p
                     className="mt-2 max-w-[280px]"
                     style={{
-                      fontSize: '15px',
+                      fontSize: '17px',
                       fontFamily: 'Plus Jakarta Sans, sans-serif',
                       fontWeight: 300,
                       letterSpacing: '1.5px',
