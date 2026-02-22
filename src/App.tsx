@@ -137,7 +137,8 @@ function App() {
 
   // Content mode: skip auth entirely
   // Guest mode: first-time users skip auth and go straight to upload
-  if (!contentScenario && !isAuthenticated && !guestMode) {
+  const hasSidParam = new URLSearchParams(window.location.search).has('sid');
+  if (!contentScenario && !hasSidParam && !isAuthenticated && !guestMode) {
     // First visit ever? Skip auth, go to upload
     if (!localStorage.getItem('has_visited')) {
       setGuestMode(true);
