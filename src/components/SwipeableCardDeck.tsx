@@ -380,8 +380,8 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                       <div
                         className="absolute bottom-0 left-0 right-0 rounded-b-[28px]"
                         style={{
-                          height: '50%',
-                          background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%)',
+                          height: '35%',
+                          background: 'linear-gradient(to top, rgba(0,0,0,0.4) 0%, transparent 100%)',
                           pointerEvents: 'none',
                         }}
                       />
