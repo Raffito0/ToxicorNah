@@ -110,7 +110,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
       />
 
       {/* Content */}
-      <div className="relative flex flex-col items-center justify-center text-center px-8" style={{ zIndex: 3, minHeight: '45vh' }}>
+      <div className="relative flex flex-col items-center justify-center text-center px-8 pt-12" style={{ zIndex: 3, minHeight: '45vh' }}>
         {/* Avatar with Pulsing Halo Ring */}
         <div className="relative">
           {/* Outer pulsing halo ring */}
