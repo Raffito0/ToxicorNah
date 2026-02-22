@@ -99,12 +99,11 @@ function HeroSection({ data }: { data: PersonProfileData }) {
         style={{ zIndex: 1 }}
       />
 
-      {/* Bottom fade to black — seamless transition */}
+      {/* Bottom fade to black — matches SoulHero gradient */}
       <div
-        className="absolute bottom-0 left-0 right-0"
+        className="absolute inset-0"
         style={{
-          height: '40%',
-          background: 'linear-gradient(to bottom, transparent 0%, black 100%)',
+          background: 'linear-gradient(to bottom, transparent 20%, rgba(0,0,0,0.7) 60%, rgba(0,0,0,0.95) 100%)',
           zIndex: 2,
         }}
       />
