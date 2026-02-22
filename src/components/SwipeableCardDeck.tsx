@@ -223,7 +223,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
       </div>
 
       {/* Reduced width to contain rotated cards within screen bounds */}
-      <div ref={setDeckNode} className="relative z-10 mx-auto" style={{ width: 'calc(100% - 16px)', aspectRatio: '3/4.5' }}>
+      <div ref={setDeckNode} className="relative z-10 mx-auto" style={{ width: 'calc(100%)', aspectRatio: '3/5' }}>
           {orderedCards.map((cardItem, visualIndex) => {
             const isTop = visualIndex === orderedCards.length - 1;
             const rotation = isTop ? 0 : (visualIndex - 1) * 6;
