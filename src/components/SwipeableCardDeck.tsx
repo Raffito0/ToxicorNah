@@ -212,7 +212,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
   const orderedCards = stackOrder.map(index => allCards[index]);
 
   return (
-    <div className="w-full max-w-md mx-auto px-[30px] pt-24">
+    <div className="w-full max-w-md mx-auto px-[16px] pt-24">
       <div className="text-center mb-10">
         <p className="text-white/50 uppercase mb-2" style={{ fontSize: '16px', letterSpacing: '1.5px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}>
           Emotional Breakdown
