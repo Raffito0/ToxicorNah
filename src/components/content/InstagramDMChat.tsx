@@ -124,7 +124,7 @@ export function InstagramDMChat({ contactName, messages }: InstagramDMChatProps)
       <div
         style={{
           flex: 1,
-          overflowY: 'auto',
+          overflowY: 'hidden',
           padding: '16px 16px',
           display: 'flex',
           flexDirection: 'column',

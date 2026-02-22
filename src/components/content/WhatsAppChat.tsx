@@ -113,7 +113,7 @@ export function WhatsAppChat({ contactName, messages }: WhatsAppChatProps) {
       <div
         style={{
           flex: 1,
-          overflowY: 'auto',
+          overflowY: 'hidden',
           padding: '12px 12px',
           display: 'flex',
           flexDirection: 'column',

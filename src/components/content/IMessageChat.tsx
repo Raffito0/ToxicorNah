@@ -113,7 +113,7 @@ export function IMessageChat({ contactName, messages }: IMessageChatProps) {
       <div
         style={{
           flex: 1,
-          overflowY: 'auto',
+          overflowY: 'hidden',
           padding: '12px 16px',
           display: 'flex',
           flexDirection: 'column',
