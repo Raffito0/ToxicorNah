@@ -1,12 +1,11 @@
 {
-  "routes": [
+  "headers": [
     {
-      "src": "/.well-known/(.*)",
-      "dest": "/.well-known/$1",
-      "headers": {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-      }
+      "source": "/.well-known/(.*)",
+      "headers": [
+        { "key": "Content-Type", "value": "application/json" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
+      ]
     }
   ]
 }
