@@ -2810,7 +2810,7 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
       <HeroSection data={data} />
 
       {/* Content wrapper — full width black, overlaps hero to hide any edge */}
-      <div className="w-full relative bg-black" style={{ marginTop: '-40px', zIndex: 10 }}>
+      <div className="w-full relative bg-black" style={{ marginTop: '-80px', zIndex: 10 }}>
       <div className="w-full max-w-md mx-auto px-8 pb-8">
         {/* SECTION: Archetype Card */}
         <ArchetypeCardSection data={data} />
