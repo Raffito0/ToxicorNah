@@ -218,11 +218,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
           Emotional Breakdown
         </p>
         <h2 className="text-white text-3xl" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px' }}>
-          What The F
-          <span style={{ filter: 'blur(2px)' }}>u</span>
-          <span style={{ filter: 'blur(3.5px)' }}>c</span>
-          <span style={{ filter: 'blur(6px)' }}>k</span>
-          {' '}Is Happening<br />In The Chat
+          What's Happening<br />In The Chat
         </h2>
       </div>
 
