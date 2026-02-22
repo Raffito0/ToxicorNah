@@ -70,6 +70,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
           quality: 0.95,
           pixelRatio: 2,
           backgroundColor: '#000000',
+          skipFonts: true,
         });
         setContentScreenshots([dataUrl]);
         console.log('[ContentMode] Chat screenshot captured on attempt', attempts);
