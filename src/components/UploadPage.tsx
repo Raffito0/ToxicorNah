@@ -314,7 +314,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
             <div
               className={`rounded-3xl cursor-pointer transition-all flex items-center justify-center ${
                 (isContentMode && contentScreenshots.length > 0)
-                  ? 'flex-1 min-h-0 mb-4'
+                  ? 'flex-1 min-h-0 mb-4 max-h-[70vh]'
                   : 'aspect-square mb-10'
               }`}
               style={{ backgroundColor: '#121212' }}
