@@ -1,15 +1,12 @@
 {
-  "rewrites": [
-    { "source": "/.well-known/(.*)", "destination": "/.well-known/$1" },
-    { "source": "/((?!.well-known).*)", "destination": "/index.html" }
-  ],
-  "headers": [
+  "routes": [
     {
-      "source": "/.well-known/assetlinks.json",
-      "headers": [
-        { "key": "Content-Type", "value": "application/json" },
-        { "key": "Access-Control-Allow-Origin", "value": "*" }
-      ]
+      "src": "/.well-known/(.*)",
+      "dest": "/.well-known/$1",
+      "headers": {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
     }
   ]
 }

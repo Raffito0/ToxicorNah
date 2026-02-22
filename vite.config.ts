@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [
     react(),
     VitePWA({
@@ -35,6 +36,7 @@ export default defineConfig({
         // Only cache JS/CSS/HTML — skip large images in public/
         globPatterns: ['**/*.{js,css,html,ico,svg,woff2}'],
         navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/.well-known\//],
         runtimeCaching: [],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
