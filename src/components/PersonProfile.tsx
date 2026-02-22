@@ -78,7 +78,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
   const to = hexToRgb(archetype.gradientTo);
   const accentColor = `rgb(${Math.round((from.r + to.r) / 2)}, ${Math.round((from.g + to.g) / 2)}, ${Math.round((from.b + to.b) / 2)})`;
 
-  const avatarUrl = person.avatar || '';
+  const avatarUrl = person.avatar || '/67320b97b9sdfacf6001d2d3e5b.jpg';
   const archetypeImageUrl = '/image_r6qZ9PP4_1770361994322_1024.jpg';
 
   return (
@@ -103,8 +103,8 @@ function HeroSection({ data }: { data: PersonProfileData }) {
       <div
         className="absolute bottom-0 left-0 right-0"
         style={{
-          height: '50%',
-          background: 'linear-gradient(to bottom, transparent 0%, black 100%)',
+          height: '70%',
+          background: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 30%, rgba(0,0,0,0.7) 60%, #111111 100%)',
           zIndex: 2,
         }}
       />
