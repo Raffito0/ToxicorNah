@@ -48,7 +48,7 @@ function Section({ children, className = '' }: { children: React.ReactNode; clas
 // ===== Section Header (uppercase label + big title) =====
 function SectionHeader({ label, title }: { label: string; title: string }) {
   return (
-    <div className="mb-6">
+    <div className="mb-6 text-center">
       <p
         className="text-white/50 uppercase mb-2"
         style={{ fontSize: '16px', letterSpacing: '1.5px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
@@ -2810,7 +2810,7 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
       <HeroSection data={data} />
 
       {/* Content wrapper — full width black, overlaps hero to hide any edge */}
-      <div className="w-full relative bg-black" style={{ marginTop: '-80px', zIndex: 10 }}>
+      <div className="w-full relative bg-black" style={{ marginTop: '-120px', zIndex: 10 }}>
       <div className="w-full max-w-md mx-auto px-8 pb-8">
         {/* SECTION: Archetype Card */}
         <ArchetypeCardSection data={data} />
