@@ -31,7 +31,7 @@ function Section({ children, className = '', style }: { children: React.ReactNod
 // ===== Section Header (uppercase label + big title) =====
 function SectionHeader({ label, title }: { label: string; title: string }) {
   return (
-    <div className="mb-6">
+    <div className="mb-6 text-center">
       <p
         className="text-white/50 uppercase mb-2"
         style={{ fontSize: '16px', letterSpacing: '1.5px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
@@ -1083,7 +1083,7 @@ function TypeYouAttractSection({ isLocked = false, onUnlockClick }: { isLocked?:
   };
 
   return (
-    <Section className="pt-24 px-5">
+    <Section className="pt-24 px-[30px]">
       <SectionHeader label="Pattern Alert" title="The Soul You Attract" />
 
       {/* Card wrapper with blur if locked - overflow hidden to contain blur */}
