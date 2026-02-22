@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { getFemaleSoulTypeByName } from '../data/soulTypes';
 
 // ===== Interfaces =====
 
@@ -196,13 +197,13 @@ export async function fetchSoulProfile(): Promise<SoulProfileData | null> {
   if (isDev) {
     return {
       dominantArchetype: {
-        title: 'The Moth',
-        tagline: "You can't stay away from the fire",
-        description: "You're drawn to intensity and chaos, even when you know it'll burn you. The thrill of unpredictability feels more real than stability.",
-        traits: ['Intensity Seeker', 'Chaos Familiar', 'Heart Over Logic'],
-        imageUrl: '/Screenshot 2026-01-26 230420.png',
-        gradientFrom: '#a78bfa',
-        gradientTo: '#4c1d95',
+        title: 'The Rising Phoenix',
+        tagline: "Built from what broke her",
+        description: "She burned down to ashes—and rose even brighter. Every heartbreak became fuel, every betrayal became strength. She didn't just survive, she transformed.",
+        traits: ['Resilient', 'Transformed', 'Powerful'],
+        imageUrl: getFemaleSoulTypeByName('The Rising Phoenix')?.normalImage || '',
+        gradientFrom: '#f97316',
+        gradientTo: '#7c2d12',
       },
       patternShock: {
         stat: '4 of 5',
@@ -223,8 +224,8 @@ export async function fetchSoulProfile(): Promise<SoulProfileData | null> {
         {
           hisArchetype: 'The Sweet Poison',
           hisArchetypeImage: '/openart-image_SeQ6AwE2_1769430650812_raw.png',
-          yourArchetype: 'The Moth',
-          yourArchetypeImage: '/Screenshot 2026-01-26 230420.png',
+          yourArchetype: 'The Rising Phoenix',
+          yourArchetypeImage: getFemaleSoulTypeByName('The Rising Phoenix')?.normalImage || '',
           insight: 'You keep going back despite knowing better',
           relationshipCount: 2,
           personNames: ['Alex', 'Marco'],
@@ -241,12 +242,12 @@ export async function fetchSoulProfile(): Promise<SoulProfileData | null> {
       ],
       unlockedArchetypes: [
         {
-          title: 'The Moth',
-          imageUrl: '/Screenshot 2026-01-26 230420.png',
+          title: 'The Rising Phoenix',
+          imageUrl: getFemaleSoulTypeByName('The Rising Phoenix')?.normalImage || '',
           unlockedAt: '2025-12-01T10:00:00Z',
           personName: 'Alex',
-          gradientFrom: '#a78bfa',
-          gradientTo: '#4c1d95',
+          gradientFrom: '#f97316',
+          gradientTo: '#7c2d12',
         },
         {
           title: 'The Volcano',
@@ -267,7 +268,7 @@ export async function fetchSoulProfile(): Promise<SoulProfileData | null> {
       archetypeEvolution: [
         { date: '2025-10-01T10:00:00Z', archetype: 'The Echo', personName: 'Marco', imageUrl: '' },
         { date: '2025-11-15T10:00:00Z', archetype: 'The Volcano', personName: 'Luca', imageUrl: '' },
-        { date: '2025-12-01T10:00:00Z', archetype: 'The Moth', personName: 'Alex', imageUrl: '' },
+        { date: '2025-12-01T10:00:00Z', archetype: 'The Rising Phoenix', personName: 'Alex', imageUrl: '' },
       ],
       analysisCount: 12,
       hasEnoughData: true,
