@@ -103,8 +103,8 @@ function HeroSection({ data }: { data: PersonProfileData }) {
       <div
         className="absolute bottom-0 left-0 right-0"
         style={{
-          height: '70%',
-          background: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 30%, rgba(0,0,0,0.7) 60%, #111111 100%)',
+          height: '40%',
+          background: 'linear-gradient(to bottom, transparent 0%, #111111 100%)',
           zIndex: 2,
         }}
       />
