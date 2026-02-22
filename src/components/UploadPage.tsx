@@ -295,7 +295,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
             <div className="text-center mb-8">
               <div className="flex items-center justify-center gap-3 mb-2 relative">
                 <img
-                  src="/Group 59.png"
+                  src="/logo-group59.png"
                   alt="Toxic or Nah Logo"
                   style={{ height: '38px' }}
                 />
