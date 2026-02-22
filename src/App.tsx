@@ -21,6 +21,30 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
   const [contentScenario, setContentScenario] = useState<ContentScenario | null>(null);
+  const [guestMode, setGuestMode] = useState(false);
+
+  useEffect(() => {
+    // Handle App Link sid injected by Android MainActivity
+    const handleApplinkSid = (e: Event) => {
+      const sid = (e as CustomEvent).detail as string;
+      if (sid) {
+        loadScenarioFromSupabase(sid)
+          .then(setContentScenario)
+          .catch((err) => console.error('[AppLink] Failed to load scenario:', err));
+      }
+    };
+    window.addEventListener('applink-sid', handleApplinkSid);
+
+    // Also check if sid was injected before this component mounted
+    const pendingSid = (window as any).__pendingSid;
+    if (pendingSid) {
+      loadScenarioFromSupabase(pendingSid)
+        .then(setContentScenario)
+        .catch((err) => console.error('[AppLink] Failed to load pending scenario:', err));
+    }
+
+    return () => window.removeEventListener('applink-sid', handleApplinkSid);
+  }, []);
 
   useEffect(() => {
     // Check if this is a payment success redirect
@@ -79,11 +103,20 @@ function App() {
     window.history.replaceState({}, '', '/');
     setShowPaymentSuccess(false);
 
+    // If guest created an account, exit guest mode
+    if (guestMode) {
+      setGuestMode(false);
+      localStorage.setItem('has_visited', 'true');
+    }
+
     // If we have an analysis ID, show the results
     if (analysisId) {
       setCurrentAnalysisId(analysisId);
       setAnalyzeSubPage('results');
       setActiveTab('analyze');
+    } else {
+      // Default to connections for returning authenticated users
+      setActiveTab('connections');
     }
   }
 
@@ -103,17 +136,23 @@ function App() {
   }
 
   // Content mode: skip auth entirely
-  if (!contentScenario && !isAuthenticated) {
-    return <AuthPage onAuthSuccess={handleAuthSuccess} />;
+  // Guest mode: first-time users skip auth and go straight to upload
+  if (!contentScenario && !isAuthenticated && !guestMode) {
+    // First visit ever? Skip auth, go to upload
+    if (!localStorage.getItem('has_visited')) {
+      setGuestMode(true);
+    } else {
+      return <AuthPage onAuthSuccess={handleAuthSuccess} />;
+    }
   }
 
-  // Authenticated (or content mode): show tab-based layout
+  // Authenticated (or content mode or guest mode): show tab-based layout
   function renderTabContent() {
     switch (activeTab) {
       case 'analyze':
         return analyzeSubPage === 'results'
-          ? <ResultsPage analysisId={currentAnalysisId} />
-          : <UploadPage onAnalyze={handleAnalysisComplete} contentScenario={contentScenario} />;
+          ? <ResultsPage analysisId={currentAnalysisId} isGuest={guestMode} />
+          : <UploadPage onAnalyze={handleAnalysisComplete} contentScenario={contentScenario} isGuest={guestMode} />;
       case 'connections':
         return connectionsSubPage === 'profile'
           ? <PersonProfile personId={selectedPersonId} onBack={() => setConnectionsSubPage('list')} onAnalyzeNew={() => setActiveTab('analyze')} />
@@ -130,10 +169,10 @@ function App() {
 
   return (
     <div className="min-h-screen bg-black overflow-x-hidden">
-      <div className="pb-[72px]">
+      <div className={guestMode ? '' : 'pb-[72px]'}>
         {renderTabContent()}
       </div>
-      <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />
+      {!guestMode && <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />}
     </div>
   );
 }

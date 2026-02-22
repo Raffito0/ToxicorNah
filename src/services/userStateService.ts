@@ -247,3 +247,50 @@ export function getUserFlowState(state: UserState): UserFlowState {
 export function isFirstTimeUser(state: UserState): boolean {
   return !state.isPremium && !state.firstAnalysisCompleted;
 }
+
+/**
+ * Returns true if user has never visited the app before (no localStorage flag).
+ * Used to determine guest mode (skip auth for first-time users).
+ */
+export function isFirstVisit(): boolean {
+  return !localStorage.getItem('has_visited');
+}
+
+/**
+ * Marks that the user has visited the app (so next time they see auth page).
+ */
+export function markVisited(): void {
+  localStorage.setItem('has_visited', 'true');
+}
+
+/**
+ * Migrates guest analysis data from localStorage to Supabase after account creation.
+ * Links the anonymous session to the new user ID.
+ */
+export async function migrateGuestToUser(userId: string): Promise<void> {
+  const sessionId = getOrCreateSessionId();
+
+  // Link existing tracking record to the new user
+  await supabase
+    .from('user_analysis_tracking')
+    .update({ user_id: userId, updated_at: new Date().toISOString() })
+    .eq('session_id', sessionId);
+
+  // Link any analysis results from this session to the user
+  await supabase
+    .from('analysis_results')
+    .update({ user_id: userId })
+    .eq('session_id', sessionId);
+
+  // Mark as visited so returning user sees auth page
+  markVisited();
+}
+
+/**
+ * Links a Stripe checkout session to a user account after guest→user migration.
+ */
+export async function linkStripeCustomer(userId: string, stripeSessionId: string): Promise<void> {
+  await supabase.functions.invoke('link-stripe-customer', {
+    body: { userId, stripeSessionId }
+  });
+}

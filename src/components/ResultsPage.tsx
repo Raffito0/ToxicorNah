@@ -100,9 +100,10 @@ function MiniScoreRing({ score, maxScore = 100 }: { score: number; maxScore?: nu
 
 interface ResultsPageProps {
   analysisId?: string;
+  isGuest?: boolean;
 }
 
-export function ResultsPage({ analysisId }: ResultsPageProps) {
+export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   const [analysis, setAnalysis] = useState<StoredAnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(true); // True until Phase 1 (quick) completes
   const [isDetailedLoading, setIsDetailedLoading] = useState(true); // True until Phase 2 (detailed) completes
@@ -256,7 +257,7 @@ export function ResultsPage({ analysisId }: ResultsPageProps) {
   }, [isGeneratingShare, analysis]);
 
   async function handleSubscribe(plan: 'annual' | 'monthly') {
-    const { url, error } = await createSubscriptionCheckout(analysisId, plan);
+    const { url, error } = await createSubscriptionCheckout(analysisId, plan, isGuest);
 
     if (error) {
       console.error('Subscription checkout error:', error);
@@ -273,7 +274,7 @@ export function ResultsPage({ analysisId }: ResultsPageProps) {
       throw new Error('No analysis ID');
     }
 
-    const { url, error } = await createSingleUnlockCheckout(analysisId);
+    const { url, error } = await createSingleUnlockCheckout(analysisId, isGuest);
 
     if (error) {
       console.error('Single unlock checkout error:', error);
@@ -370,33 +371,40 @@ export function ResultsPage({ analysisId }: ResultsPageProps) {
             <div className="text-center mb-3">
               <motion.p
                 className="text-white/50 uppercase tracking-widest mb-2"
-                style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.2 }}
+                style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, willChange: 'filter, transform, opacity' }}
+                initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+                animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                transition={{ delay: 0.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
               >
                 Toxicity Score
               </motion.p>
               <motion.h1
                 className="text-white text-3xl mb-2"
-                style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px' }}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3, duration: 0.5 }}
+                style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px', willChange: 'filter, transform, opacity' }}
+                initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+                animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                transition={{ delay: 0.3, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
               >
                 How Toxic {analysis.personGender === 'female' ? 'She Is' : 'He Is'}
               </motion.h1>
             </div>
 
-            <div className="my-8">
+            <motion.div
+              className="my-8"
+              style={{ willChange: 'filter, transform, opacity' }}
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              transition={{ delay: 0.5, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+            >
               <ToxicOrb score={analysis.overallScore} size={140} />
-            </div>
+            </motion.div>
 
             <motion.div
               className="text-center mb-4"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 1.0, duration: 0.5 }}
+              style={{ willChange: 'filter, transform, opacity' }}
+              initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              transition={{ delay: 1.0, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
             >
               <h2 className="text-2xl mb-2" style={{ color: haloColor, fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px' }}>
                 {analysis.overallScore > 66 ? 'Toxic AF' : analysis.profileType}
@@ -406,10 +414,10 @@ export function ResultsPage({ analysisId }: ResultsPageProps) {
 
             <motion.p
               className="text-center mb-8 px-2"
-              style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', color: 'rgba(255, 255, 255, 0.55)' }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 1.2, duration: 0.5 }}
+              style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', color: 'rgba(255, 255, 255, 0.55)', willChange: 'filter, transform, opacity' }}
+              initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              transition={{ delay: 1.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
             >
               {analysis.profileDescription}
             </motion.p>

@@ -20,7 +20,8 @@ interface CheckoutSessionResponse {
  */
 export async function createSubscriptionCheckout(
   analysisId?: string,
-  plan: 'annual' | 'monthly' = 'annual'
+  plan: 'annual' | 'monthly' = 'annual',
+  isGuest: boolean = false
 ): Promise<CheckoutSessionResponse> {
   try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -33,6 +34,7 @@ export async function createSubscriptionCheckout(
     // Annual plan has a 7-day free trial
     const trialPeriodDays = plan === 'annual' ? 7 : undefined;
 
+    const guestParam = isGuest ? '&guest=true' : '';
     const { data, error } = await supabase.functions.invoke('create-checkout-session', {
       body: {
         priceId,
@@ -41,7 +43,7 @@ export async function createSubscriptionCheckout(
         sessionId: sessionId,
         analysisId: analysisId,
         trialPeriodDays,
-        successUrl: `${window.location.origin}/payment-success?session_id={CHECKOUT_SESSION_ID}&type=subscription&plan=${plan}`,
+        successUrl: `${window.location.origin}/payment-success?session_id={CHECKOUT_SESSION_ID}&type=subscription&plan=${plan}${guestParam}`,
         cancelUrl: `${window.location.origin}/results/${analysisId || ''}`
       }
     });
@@ -61,11 +63,12 @@ export async function createSubscriptionCheckout(
 /**
  * Creates a Stripe Checkout session for single analysis unlock
  */
-export async function createSingleUnlockCheckout(analysisId: string): Promise<CheckoutSessionResponse> {
+export async function createSingleUnlockCheckout(analysisId: string, isGuest: boolean = false): Promise<CheckoutSessionResponse> {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     const sessionId = getOrCreateSessionId();
 
+    const guestParam = isGuest ? '&guest=true' : '';
     const { data, error } = await supabase.functions.invoke('create-checkout-session', {
       body: {
         priceId: STRIPE_PRICES.SINGLE_UNLOCK,
@@ -73,7 +76,7 @@ export async function createSingleUnlockCheckout(analysisId: string): Promise<Ch
         userId: user?.id || null,
         sessionId: sessionId,
         analysisId: analysisId,
-        successUrl: `${window.location.origin}/payment-success?session_id={CHECKOUT_SESSION_ID}&type=single&analysis=${analysisId}`,
+        successUrl: `${window.location.origin}/payment-success?session_id={CHECKOUT_SESSION_ID}&type=single&analysis=${analysisId}${guestParam}`,
         cancelUrl: `${window.location.origin}/results/${analysisId}`
       }
     });

@@ -2,14 +2,18 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CheckCircle, Loader2, XCircle } from 'lucide-react';
 import { verifyPaymentSuccess } from '../services/stripeService';
+import { CreateAccountPage } from './CreateAccountPage';
 
 interface PaymentSuccessPageProps {
   onComplete: (analysisId?: string) => void;
 }
 
 export function PaymentSuccessPage({ onComplete }: PaymentSuccessPageProps) {
-  const [status, setStatus] = useState<'verifying' | 'success' | 'error'>('verifying');
+  const [status, setStatus] = useState<'verifying' | 'success' | 'create_account' | 'error'>('verifying');
   const [paymentType, setPaymentType] = useState<'subscription' | 'single_unlock' | null>(null);
+  const [isGuest, setIsGuest] = useState(false);
+  const [stripeSessionId, setStripeSessionId] = useState<string | null>(null);
+  const [analysisId, setAnalysisId] = useState<string | null>(null);
 
   useEffect(() => {
     verifyPayment();
@@ -18,8 +22,12 @@ export function PaymentSuccessPage({ onComplete }: PaymentSuccessPageProps) {
   async function verifyPayment() {
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get('session_id');
-    const type = urlParams.get('type');
-    const analysisId = urlParams.get('analysis');
+    const guest = urlParams.get('guest') === 'true';
+    const analysis = urlParams.get('analysis');
+
+    setIsGuest(guest);
+    setStripeSessionId(sessionId);
+    setAnalysisId(analysis);
 
     if (!sessionId) {
       setStatus('error');
@@ -30,13 +38,18 @@ export function PaymentSuccessPage({ onComplete }: PaymentSuccessPageProps) {
       const result = await verifyPaymentSuccess(sessionId);
 
       if (result.success) {
-        setStatus('success');
         setPaymentType(result.type);
 
-        // Redirect after showing success message
-        setTimeout(() => {
-          onComplete(analysisId || undefined);
-        }, 2500);
+        if (guest) {
+          // Guest user: show account creation after payment
+          setStatus('create_account');
+        } else {
+          setStatus('success');
+          // Redirect after showing success message
+          setTimeout(() => {
+            onComplete(analysis || undefined);
+          }, 2500);
+        }
       } else {
         setStatus('error');
       }
@@ -44,6 +57,23 @@ export function PaymentSuccessPage({ onComplete }: PaymentSuccessPageProps) {
       console.error('Payment verification error:', err);
       setStatus('error');
     }
+  }
+
+  function handleAccountCreated() {
+    // Guest has created their account - transition to app
+    window.history.replaceState({}, '', '/');
+    onComplete(analysisId || undefined);
+  }
+
+  // Show CreateAccountPage for guests after payment
+  if (status === 'create_account') {
+    return (
+      <CreateAccountPage
+        stripeSessionId={stripeSessionId || undefined}
+        analysisId={analysisId || undefined}
+        onAccountCreated={handleAccountCreated}
+      />
+    );
   }
 
   return (
@@ -57,10 +87,10 @@ export function PaymentSuccessPage({ onComplete }: PaymentSuccessPageProps) {
           <>
             <Loader2 className="w-16 h-16 text-purple-500 animate-spin mx-auto mb-6" />
             <h1 className="text-2xl mb-2" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}>
-              Verificando il pagamento...
+              Verifying payment...
             </h1>
             <p className="text-white/60">
-              Attendere prego
+              Please wait
             </p>
           </>
         )}
@@ -75,17 +105,17 @@ export function PaymentSuccessPage({ onComplete }: PaymentSuccessPageProps) {
               <CheckCircle className="w-20 h-20 text-green-500 mx-auto mb-6" />
             </motion.div>
             <h1 className="text-2xl mb-2" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}>
-              Pagamento completato!
+              Payment complete!
             </h1>
             <p className="text-white/60 mb-4">
               {paymentType === 'subscription' ? (
-                <>Benvenuta in Toxic+ Unlimited! Ora hai accesso illimitato a tutte le analisi.</>
+                <>Welcome to Toxic+ Unlimited! You now have unlimited access to all analyses.</>
               ) : (
-                <>L'analisi è stata sbloccata con successo!</>
+                <>Your analysis has been unlocked!</>
               )}
             </p>
             <p className="text-white/40 text-sm">
-              Reindirizzamento in corso...
+              Redirecting...
             </p>
           </>
         )}
@@ -94,17 +124,17 @@ export function PaymentSuccessPage({ onComplete }: PaymentSuccessPageProps) {
           <>
             <XCircle className="w-20 h-20 text-red-500 mx-auto mb-6" />
             <h1 className="text-2xl mb-2" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}>
-              Qualcosa è andato storto
+              Something went wrong
             </h1>
             <p className="text-white/60 mb-6">
-              Non siamo riusciti a verificare il pagamento. Se ti è stato addebitato l'importo, contattaci.
+              We couldn't verify your payment. If you were charged, please contact us.
             </p>
             <button
               onClick={() => onComplete()}
               className="bg-white text-black px-6 py-3 rounded-full font-medium hover:bg-white/90 transition-colors"
               style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
             >
-              Torna all'app
+              Back to app
             </button>
           </>
         )}

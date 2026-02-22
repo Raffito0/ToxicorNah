@@ -19,9 +19,10 @@ interface Person {
 interface UploadPageProps {
   onAnalyze: (analysisId: string) => void;
   contentScenario?: ContentScenario | null;
+  isGuest?: boolean;
 }
 
-export function UploadPage({ onAnalyze, contentScenario }: UploadPageProps) {
+export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPageProps) {
   const [persons, setPersons] = useState<Person[]>([]);
   const [selectedPerson, setSelectedPerson] = useState<string>('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -268,7 +269,7 @@ export function UploadPage({ onAnalyze, contentScenario }: UploadPageProps) {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="h-screen bg-black text-white overflow-hidden">
       <div className="flex flex-col items-center justify-center" style={{ paddingLeft: '30px', paddingRight: '30px', paddingTop: '16px', paddingBottom: '16px' }}>
         <div className="w-full max-w-md">
           <div className="bg-black py-12">
@@ -279,13 +280,15 @@ export function UploadPage({ onAnalyze, contentScenario }: UploadPageProps) {
                   alt="Toxic or Nah Logo"
                   style={{ height: '38px' }}
                 />
-                <button
-                  onClick={handleLogout}
-                  className="absolute right-0 text-zinc-400 hover:text-white transition-colors p-2"
-                  title="Logout"
-                >
-                  <LogOut className="w-5 h-5" />
-                </button>
+                {!isGuest && (
+                  <button
+                    onClick={handleLogout}
+                    className="absolute right-0 text-zinc-400 hover:text-white transition-colors p-2"
+                    title="Logout"
+                  >
+                    <LogOut className="w-5 h-5" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -505,7 +508,7 @@ export function UploadPage({ onAnalyze, contentScenario }: UploadPageProps) {
                 background: '#7200B4'
               }}
             >
-              ANALYZE
+              READ HIM
             </button>
           </div>
         </div>
