@@ -82,7 +82,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
   const archetypeImageUrl = '/image_r6qZ9PP4_1770361994322_1024.jpg';
 
   return (
-    <div className="relative w-full overflow-hidden" style={{ minHeight: '40vh' }}>
+    <div className="relative w-full overflow-hidden" style={{ minHeight: '45vh' }}>
       {/* Blurred archetype background */}
       <img
         src={archetypeImageUrl}
@@ -99,17 +99,18 @@ function HeroSection({ data }: { data: PersonProfileData }) {
         style={{ zIndex: 1 }}
       />
 
-      {/* Bottom fade to black — matches SoulHero gradient */}
+      {/* Bottom fade to black */}
       <div
-        className="absolute inset-0"
+        className="absolute bottom-0 left-0 right-0"
         style={{
-          background: 'linear-gradient(to bottom, transparent 15%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.85) 70%, black 100%)',
+          height: '50%',
+          background: 'linear-gradient(to bottom, transparent 0%, black 100%)',
           zIndex: 2,
         }}
       />
 
       {/* Content */}
-      <div className="relative flex flex-col items-center justify-center text-center px-8" style={{ zIndex: 3, minHeight: '40vh' }}>
+      <div className="relative flex flex-col items-center justify-center text-center px-8" style={{ zIndex: 3, minHeight: '45vh' }}>
         {/* Avatar with Pulsing Halo Ring */}
         <div className="relative">
           {/* Outer pulsing halo ring */}
@@ -427,7 +428,7 @@ function ArchetypeCardSection({ data }: { data: PersonProfileData }) {
   const [isFlipped, setIsFlipped] = useState(false);
 
   return (
-    <Section className="pt-20">
+    <Section className="pt-8">
       <SectionHeader label="Who He Is" title="His Soul Type" />
 
       {/* Flippable Card Container */}
