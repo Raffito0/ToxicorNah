@@ -191,7 +191,7 @@ function getTypeMatrixInsight(hisArchetype: string, herArchetype: string): strin
 
 export async function fetchSoulProfile(): Promise<SoulProfileData | null> {
   // DEV MODE: Return mock data in development
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || new URLSearchParams(window.location.search).has('sid');
 
   if (isDev) {
     return {

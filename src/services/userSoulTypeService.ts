@@ -42,7 +42,7 @@ function setDevSoulType(soulTypeId: string): void {
  * Save the user's assigned soul type
  */
 export async function saveUserSoulType(soulTypeId: string): Promise<{ success: boolean; error?: string }> {
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || new URLSearchParams(window.location.search).has('sid');
 
   if (isDev) {
     // DEV: Save to localStorage
@@ -121,7 +121,7 @@ async function getUserSoulTypeRecord(): Promise<UserSoulTypeRecord | null> {
  * Get the user's assigned soul type (full object)
  */
 export async function getUserSoulType(): Promise<SoulType | null> {
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || new URLSearchParams(window.location.search).has('sid');
 
   if (isDev) {
     // DEV: Get from localStorage
@@ -153,7 +153,7 @@ export async function hasUserSoulType(): Promise<boolean> {
  * Clear the user's soul type (for testing/reset)
  */
 export async function clearUserSoulType(): Promise<{ success: boolean; error?: string }> {
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || new URLSearchParams(window.location.search).has('sid');
 
   if (isDev) {
     localStorage.removeItem(DEV_SOUL_TYPE_KEY);

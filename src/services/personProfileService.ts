@@ -1356,7 +1356,7 @@ function buildHardTruths(
 
 export async function fetchPersonProfile(personId: string): Promise<PersonProfileData | null> {
   // DEV MODE: Return mock data in development
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || new URLSearchParams(window.location.search).has('sid');
 
   if (isDev) {
     return {
@@ -1977,7 +1977,7 @@ export function isPersonArchived(personId: string): boolean {
 
 // ===== Person Management CRUD Functions =====
 
-const isDev = () => import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const isDev = () => import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || new URLSearchParams(window.location.search).has('sid');
 
 export async function updatePersonName(personId: string, newName: string): Promise<boolean> {
   if (isDev()) {
