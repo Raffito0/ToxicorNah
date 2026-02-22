@@ -269,10 +269,10 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
   }
 
   return (
-    <div className="h-screen bg-black text-white overflow-hidden">
-      <div className="flex flex-col items-center justify-center" style={{ paddingLeft: '30px', paddingRight: '30px', paddingTop: '16px', paddingBottom: '16px' }}>
-        <div className="w-full max-w-md">
-          <div className="bg-black py-12">
+    <div className="h-screen bg-black text-white overflow-hidden flex flex-col">
+      <div className="flex flex-col items-center flex-1 min-h-0" style={{ paddingLeft: '30px', paddingRight: '30px', paddingTop: '16px', paddingBottom: '16px' }}>
+        <div className="w-full max-w-md flex flex-col flex-1 min-h-0">
+          <div className="bg-black pt-12 pb-4 flex flex-col flex-1 min-h-0">
             <div className="text-center mb-8">
               <div className="flex items-center justify-center gap-3 mb-2 relative">
                 <img
@@ -293,7 +293,11 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
             </div>
 
             <div
-              className="rounded-3xl mb-10 cursor-pointer transition-colors aspect-square flex items-center justify-center"
+              className={`rounded-3xl cursor-pointer transition-all flex items-center justify-center ${
+                (uploadedFiles.length > 0 || (isContentMode && contentScreenshots.length > 0))
+                  ? 'flex-1 min-h-0 mb-4'
+                  : 'aspect-square mb-10'
+              }`}
               style={{ backgroundColor: '#121212' }}
               onClick={() => !isContentMode && fileInputRef.current?.click()}
               onDrop={!isContentMode ? handleDrop : undefined}
@@ -301,21 +305,15 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
             >
           {/* CONTENT MODE: Show captured chat screenshot */}
           {isContentMode && contentScreenshots.length > 0 ? (
-            <div className="flex flex-col items-center justify-center p-4">
-              <div className="flex flex-wrap gap-2 items-center justify-center">
-                {contentScreenshots.map((dataUrl, index) => (
-                  <div key={index} className="relative">
-                    <img
-                      src={dataUrl}
-                      alt={`Chat ${index + 1}`}
-                      className="h-48 w-auto object-cover rounded-lg"
-                    />
-                  </div>
-                ))}
-              </div>
-              <p className="text-zinc-400 text-sm mt-4" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}>
-                {contentScreenshots.length} chat{contentScreenshots.length > 1 ? 's' : ''} uploaded
-              </p>
+            <div className="w-full h-full flex items-center justify-center p-3 overflow-hidden">
+              {contentScreenshots.map((dataUrl, index) => (
+                <img
+                  key={index}
+                  src={dataUrl}
+                  alt={`Chat ${index + 1}`}
+                  className="max-w-full max-h-full object-contain rounded-lg"
+                />
+              ))}
             </div>
           ) : isContentMode ? (
             <div className="flex flex-col items-center justify-center p-8">
@@ -335,20 +333,19 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
               </p>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center p-4">
-              <div className="flex flex-wrap gap-2 items-center justify-center">
+            <div className="w-full h-full flex items-center justify-center p-3 overflow-hidden">
+              <div className="flex gap-2 items-center justify-center max-h-full">
                 {uploadedFiles.map((file, index) => (
-                  <div key={index} className="relative group">
+                  <div key={index} className="relative group max-h-full">
                     <img
                       src={URL.createObjectURL(file)}
                       alt={`Upload ${index + 1}`}
-                      className="h-24 w-auto object-cover rounded-lg"
+                      className="max-h-full w-auto object-contain rounded-lg"
                     />
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setUploadedFiles(uploadedFiles.filter((_, i) => i !== index));
-                        // Reset file input so the same file can be re-uploaded
                         if (fileInputRef.current) {
                           fileInputRef.current.value = '';
                         }
@@ -360,9 +357,6 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
                   </div>
                 ))}
               </div>
-              <p className="text-zinc-400 text-sm mt-4" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}>
-                {uploadedFiles.length} chat{uploadedFiles.length > 1 ? 's' : ''} uploaded
-              </p>
             </div>
           )}
               <input
