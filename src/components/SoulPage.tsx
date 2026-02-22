@@ -11,6 +11,7 @@ import { PaywallModal } from './PaywallModal';
 import { getUserState, UserState, canPurchaseSingleUnlock } from '../services/userStateService';
 import { createSubscriptionCheckout, createSingleUnlockCheckout, createCustomerPortalSession, getSubscriptionDetails } from '../services/stripeService';
 import { supabase } from '../lib/supabase';
+import { getMaleSoulTypeByName } from '../data/soulTypes';
 
 // ===== Section animation wrapper =====
 function Section({ children, className = '', style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
@@ -1070,11 +1071,11 @@ function TypeYouAttractSection({ isLocked = false, onUnlockClick }: { isLocked?:
 
   // Mock data
   const attractedType = {
-    archetype: "The Emotionally Unavailable",
-    traits: ["Hot & Cold", "Mixed Signals", "Avoidant"],
-    why: "Your nurturing energy draws those who need healing but can't receive it. You see potential where others see red flags.",
-    description: "The ones who keep you guessing, never fully committing but never fully leaving either.",
-    imageUrl: '/Adobe Exsdfprsdsdsdsdsdess - file 1 (3).png',
+    archetype: "The Faded Crown",
+    traits: ["Entitled", "Nostalgic", "Delusional"],
+    why: "Your loyalty draws those who take it for granted. They disappear and return expecting nothing has changed—because with you, it never did.",
+    description: "He resurfaces months later like nothing happened. Still expects the throne, still acts like royalty—but you've already built a kingdom without him.",
+    imageUrl: getMaleSoulTypeByName('The Faded Crown')?.normalImage || '',
   };
 
   const handleFlip = () => {
