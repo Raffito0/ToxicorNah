@@ -80,7 +80,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
     };
 
     // Initial delay to let the chat render fully
-    const timer = setTimeout(tryCapture, 500);
+    const timer = setTimeout(tryCapture, 800);
     return () => clearTimeout(timer);
   }, [contentScenario]);
 
@@ -541,11 +541,12 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
         <div
           ref={chatRenderRef}
           style={{
-            position: 'fixed',
-            left: '-9999px',
+            position: 'absolute',
+            left: 0,
             top: 0,
-            zIndex: -1,
+            opacity: 0,
             pointerEvents: 'none',
+            overflow: 'hidden',
           }}
         >
           <ChatRenderer
