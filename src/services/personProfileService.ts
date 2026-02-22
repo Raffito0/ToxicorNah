@@ -1363,7 +1363,7 @@ export async function fetchPersonProfile(personId: string): Promise<PersonProfil
       person: applyPersonOverrides(personId, {
         id: personId,
         name: 'Alex',
-        avatar: '/67320b97b9sdfacf6001d2d3e5b.jpg',
+        avatar: null,
         totalAnalyses: 45,
         relationshipStatus: null,
         isArchived: false,

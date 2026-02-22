@@ -78,8 +78,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
   const to = hexToRgb(archetype.gradientTo);
   const accentColor = `rgb(${Math.round((from.r + to.r) / 2)}, ${Math.round((from.g + to.g) / 2)}, ${Math.round((from.b + to.b) / 2)})`;
 
-  // Dev: forced images for design
-  const avatarUrl = '/67320b97b9sdfacf6001d2d3e5b.jpg';
+  const avatarUrl = person.avatar || '';
   const archetypeImageUrl = '/image_r6qZ9PP4_1770361994322_1024.jpg';
 
   return (
@@ -140,7 +139,13 @@ function HeroSection({ data }: { data: PersonProfileData }) {
               border: `2px solid ${accentColor}60`,
             }}
           >
-            <img src={avatarUrl} alt={person.name} className="w-full h-full object-cover" />
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={person.name} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${archetype.gradientFrom}, ${archetype.gradientTo})` }}>
+                <span className="text-white text-3xl font-semibold">{person.name.charAt(0).toUpperCase()}</span>
+              </div>
+            )}
           </div>
 
           {/* Notification badge */}
