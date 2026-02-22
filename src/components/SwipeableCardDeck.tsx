@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Lock } from 'lucide-react';
 import { getAnalysisResult } from '../services/analysisService';
 import { SkeletonCardStack } from './SkeletonCard';
@@ -175,11 +175,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
             Emotional Breakdown
           </p>
           <h2 className="text-white text-3xl" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px' }}>
-            What The F
-            <span style={{ filter: 'blur(2px)' }}>u</span>
-            <span style={{ filter: 'blur(3.5px)' }}>c</span>
-            <span style={{ filter: 'blur(6px)' }}>k</span>
-            {' '}Is Happening<br />In The Chat
+            What's Happening<br />In The Chat
           </h2>
         </div>
 
@@ -232,7 +228,6 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
 
       {/* Reduced width to contain rotated cards within screen bounds */}
       <div ref={setDeckNode} className="relative z-10 mx-auto" style={{ width: 'calc(100% - 32px)', aspectRatio: '3/4' }}>
-        <AnimatePresence initial={false}>
           {orderedCards.map((cardItem, visualIndex) => {
             const isTop = visualIndex === orderedCards.length - 1;
             const rotation = isTop ? 0 : (visualIndex - 1) * 6;
@@ -247,7 +242,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                 className="absolute inset-0"
                 style={{
                   zIndex: visualIndex,
-                  perspective: "1000px",
+                  willChange: 'transform',
                 }}
                 initial={false}
                 animate={hasDealt ? {
@@ -272,26 +267,26 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                 {/* Inner div: handles drag only (separate from stack position) */}
                 <motion.div
                   className={`w-full h-full ${isTop ? 'cursor-pointer' : ''}`}
-                  drag={isTop}
+                  style={{ touchAction: 'none', willChange: 'transform' }}
+                  drag={isTop ? true : false}
                   dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
-                  dragElastic={0.9}
+                  dragElastic={0.7}
                   dragSnapToOrigin={true}
+                  dragMomentum={false}
                   onDragStart={() => {
                     isDraggingRef.current = true;
                     dragDistanceRef.current = 0;
                   }}
-                  onDrag={(e, { offset }) => {
-                    dragDistanceRef.current = Math.sqrt(offset.x ** 2 + offset.y ** 2);
+                  onDrag={(_e, { offset }) => {
+                    dragDistanceRef.current = Math.abs(offset.x) + Math.abs(offset.y);
                   }}
-                  onDragEnd={(e, { offset, velocity }) => {
+                  onDragEnd={(_e, { offset, velocity }) => {
                     const swipeThreshold = 80;
                     const swipeVelocityThreshold = 400;
-                    const totalOffset = Math.sqrt(offset.x ** 2 + offset.y ** 2);
-                    const totalVelocity = Math.sqrt(velocity.x ** 2 + velocity.y ** 2);
+                    const totalOffset = Math.abs(offset.x) + Math.abs(offset.y);
+                    const totalVelocity = Math.abs(velocity.x) + Math.abs(velocity.y);
 
                     if (totalOffset > swipeThreshold || totalVelocity > swipeVelocityThreshold) {
-                      // If first-time free, open paywall instead of allowing swipe
-                      // Short delay to let snap-back animation start
                       if (isFirstTimeFree) {
                         setTimeout(() => {
                           onPaywallOpen?.();
@@ -301,47 +296,38 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                       }
                     }
 
-                    // Reset drag state after a short delay to allow tap check
                     setTimeout(() => {
                       isDraggingRef.current = false;
                       dragDistanceRef.current = 0;
                     }, 50);
                   }}
                   onTap={() => {
-                    // Only handle tap if we weren't dragging (drag distance < 10px)
                     if (isDraggingRef.current && dragDistanceRef.current > 10) {
                       return;
                     }
 
                     if (isTop && isCardLocked) {
-                      // Open paywall for locked cards
                       onPaywallOpen?.();
                     }
                   }}
                   transition={{
                     type: "spring",
-                    stiffness: 400,
-                    damping: 30,
+                    stiffness: 500,
+                    damping: 35,
                   }}
                 >
                   {/* ===== CARD - Split Design: Top Image, Bottom Content ===== */}
                     <div
                       className="absolute inset-0 rounded-[28px] overflow-hidden flex flex-col"
                       style={{
-                        boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+                        boxShadow: isTop ? '0 20px 60px rgba(0,0,0,0.4)' : 'none',
                         background: '#111111',
                       }}
                     >
-                      {/* Content wrapper with blur animation */}
-                      <motion.div
+                      <div
                         className="w-full h-full flex flex-col"
-                        initial={false}
-                        animate={{
-                          filter: isTop ? 'blur(0px)' : 'blur(8px)',
+                        style={{
                           opacity: isTop ? 1 : 0.7,
-                        }}
-                        transition={{
-                          duration: 0.05,
                         }}
                       >
                         {/* TOP HALF - Image */}
@@ -392,7 +378,17 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                             {cardItem.punchyText}
                           </p>
                         </div>
-                      </motion.div>
+                      </div>
+
+                      {/* Dark gradient from bottom to top */}
+                      <div
+                        className="absolute bottom-0 left-0 right-0 rounded-b-[28px]"
+                        style={{
+                          height: '50%',
+                          background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%)',
+                          pointerEvents: 'none',
+                        }}
+                      />
 
                       {/* Darkening overlay for non-top cards */}
                       {!isTop && !isCardLocked && (
@@ -409,9 +405,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                         <div
                           className="absolute inset-0 z-20 flex flex-col items-center justify-center rounded-[28px]"
                           style={{
-                            background: 'rgba(0, 0, 0, 0.6)',
-                            backdropFilter: 'blur(8px)',
-                            WebkitBackdropFilter: 'blur(8px)',
+                            background: 'rgba(0, 0, 0, 0.7)',
                           }}
                         >
                           <div
@@ -436,7 +430,6 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
               </motion.div>
             );
           })}
-        </AnimatePresence>
       </div>
 
       {/* Swipe hint - positioned below the card stack */}
