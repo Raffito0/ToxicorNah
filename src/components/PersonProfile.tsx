@@ -104,7 +104,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
         className="absolute bottom-0 left-0 right-0"
         style={{
           height: '40%',
-          background: 'linear-gradient(to bottom, transparent 0%, #111111 100%)',
+          background: 'linear-gradient(to bottom, transparent 0%, black 100%)',
           zIndex: 2,
         }}
       />
@@ -2790,7 +2790,7 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden" style={{ backgroundColor: '#111111' }}>
+    <div className="min-h-screen bg-black overflow-x-hidden">
       {/* Navigation buttons — floating over hero, same row */}
       <div className="absolute top-4 left-4 right-4 z-50 flex items-center justify-between pointer-events-none">
         <button
@@ -2811,7 +2811,7 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
       <HeroSection data={data} />
 
       {/* Content wrapper — full width black, overlaps hero to hide any edge */}
-      <div className="w-full relative" style={{ marginTop: '-40px', zIndex: 10, backgroundColor: '#111111' }}>
+      <div className="w-full relative bg-black" style={{ marginTop: '-40px', zIndex: 10 }}>
       <div className="w-full max-w-md mx-auto px-8 pb-8">
         {/* SECTION: Archetype Card */}
         <ArchetypeCardSection data={data} />
