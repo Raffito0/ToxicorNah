@@ -296,9 +296,11 @@ function YourArchetypeSection({ data }: { data: SoulProfileData }) {
             style={{
               background: 'rgba(255,255,255,0.15)',
               fontSize: '11px',
-              fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+              fontFamily: 'Plus Jakarta Sans, sans-serif',
               fontWeight: 700,
+              lineHeight: 1,
               border: '1px solid rgba(255,255,255,0.25)',
+              paddingTop: '1px',
             }}
           >
             ?
