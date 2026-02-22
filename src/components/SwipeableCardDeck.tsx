@@ -212,7 +212,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
   const orderedCards = stackOrder.map(index => allCards[index]);
 
   return (
-    <div className="w-full max-w-lg mx-auto px-[16px] pt-24">
+    <div className="w-full max-w-xl mx-auto px-[16px] pt-24">
       <div className="text-center mb-10">
         <p className="text-white/50 uppercase mb-2" style={{ fontSize: '16px', letterSpacing: '1.5px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}>
           Emotional Breakdown
@@ -223,7 +223,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
       </div>
 
       {/* Reduced width to contain rotated cards within screen bounds */}
-      <div ref={setDeckNode} className="relative z-10 mx-auto" style={{ width: 'calc(100%)', aspectRatio: '3/4' }}>
+      <div ref={setDeckNode} className="relative z-10 mx-auto" style={{ width: 'calc(100%)', aspectRatio: '3/4.2' }}>
           {orderedCards.map((cardItem, visualIndex) => {
             const isTop = visualIndex === orderedCards.length - 1;
             const rotation = isTop ? 0 : (visualIndex - 1) * 6;
