@@ -349,7 +349,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                           <h3
                             className="text-white"
                             style={{
-                              fontSize: '30px',
+                              fontSize: '24px',
                               fontFamily: 'Outfit, sans-serif',
                               fontWeight: 500,
                               letterSpacing: '1.5px',
