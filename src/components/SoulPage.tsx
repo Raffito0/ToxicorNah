@@ -292,18 +292,10 @@ function YourArchetypeSection({ data }: { data: SoulProfileData }) {
               repeat: Infinity,
               ease: 'easeInOut',
             }}
-            className="w-5 h-5 rounded-full flex items-center justify-center text-white/60 hover:text-white/80 transition-colors"
-            style={{
-              background: 'rgba(255,255,255,0.15)',
-              fontSize: '11px',
-              fontFamily: 'Plus Jakarta Sans, sans-serif',
-              fontWeight: 700,
-              lineHeight: 1,
-              border: '1px solid rgba(255,255,255,0.25)',
-              paddingTop: '1px',
-            }}
+            className="text-white/60 hover:text-white/80 transition-colors"
+            style={{ width: '20px', height: '20px', padding: 0, background: 'none', border: 'none' }}
           >
-            ?
+            <HelpCircle size={20} strokeWidth={1.5} />
           </motion.button>
 
           {/* Tooltip */}
