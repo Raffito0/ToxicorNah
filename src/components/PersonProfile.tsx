@@ -78,7 +78,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
   const to = hexToRgb(archetype.gradientTo);
   const accentColor = `rgb(${Math.round((from.r + to.r) / 2)}, ${Math.round((from.g + to.g) / 2)}, ${Math.round((from.b + to.b) / 2)})`;
 
-  const avatarUrl = person.avatar || '/67320b97b9sdfacf6001d2d3e5b.jpg';
+  const avatarUrl = person.avatar || '/openart-image_l7RhnYOF_1771785086054_raw.png';
   const archetypeImageUrl = '/image_r6qZ9PP4_1770361994322_1024.jpg';
 
   return (
