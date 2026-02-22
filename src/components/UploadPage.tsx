@@ -294,7 +294,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
 
             <div
               className={`rounded-3xl cursor-pointer transition-all flex items-center justify-center ${
-                (uploadedFiles.length > 0 || (isContentMode && contentScreenshots.length > 0))
+                (isContentMode && contentScreenshots.length > 0)
                   ? 'flex-1 min-h-0 mb-4'
                   : 'aspect-square mb-10'
               }`}
@@ -333,14 +333,14 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
               </p>
             </div>
           ) : (
-            <div className="w-full h-full flex items-center justify-center p-3 overflow-hidden">
-              <div className="flex gap-2 items-center justify-center max-h-full">
+            <div className="flex flex-col items-center justify-center p-4">
+              <div className="flex flex-wrap gap-2 items-center justify-center">
                 {uploadedFiles.map((file, index) => (
-                  <div key={index} className="relative group max-h-full">
+                  <div key={index} className="relative group">
                     <img
                       src={URL.createObjectURL(file)}
                       alt={`Upload ${index + 1}`}
-                      className="max-h-full w-auto object-contain rounded-lg"
+                      className="h-24 w-auto object-cover rounded-lg"
                     />
                     <button
                       onClick={(e) => {
@@ -357,6 +357,9 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
                   </div>
                 ))}
               </div>
+              <p className="text-zinc-400 text-sm mt-4" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}>
+                {uploadedFiles.length} chat{uploadedFiles.length > 1 ? 's' : ''} uploaded
+              </p>
             </div>
           )}
               <input
