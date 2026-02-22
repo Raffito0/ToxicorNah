@@ -48,24 +48,38 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
 
   // Content mode: capture chat screenshot on mount
   useEffect(() => {
-    if (!contentScenario || !chatRenderRef.current) return;
+    if (!contentScenario) return;
 
-    // Small delay to let the chat render fully
-    const timer = setTimeout(async () => {
+    // Retry until the ref is available (may not be mounted on first render)
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    const tryCapture = async () => {
+      attempts++;
+      if (!chatRenderRef.current) {
+        if (attempts < maxAttempts) {
+          setTimeout(tryCapture, 300);
+        } else {
+          console.error('[ContentMode] chatRenderRef never mounted after', maxAttempts, 'attempts');
+        }
+        return;
+      }
+
       try {
-        if (!chatRenderRef.current) return;
         const dataUrl = await toPng(chatRenderRef.current, {
           quality: 0.95,
           pixelRatio: 2,
           backgroundColor: '#000000',
         });
         setContentScreenshots([dataUrl]);
-        console.log('[ContentMode] Chat screenshot captured');
+        console.log('[ContentMode] Chat screenshot captured on attempt', attempts);
       } catch (err) {
         console.error('[ContentMode] Failed to capture chat screenshot:', err);
       }
-    }, 500);
+    };
 
+    // Initial delay to let the chat render fully
+    const timer = setTimeout(tryCapture, 500);
     return () => clearTimeout(timer);
   }, [contentScenario]);
 
