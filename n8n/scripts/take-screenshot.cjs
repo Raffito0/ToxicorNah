@@ -114,11 +114,11 @@ function renderIMessage(contactName, messages) {
     let borderRadius;
     if (isMe) {
       const topRight = isFirstInGroup ? '18px' : '6px';
-      const bottomRight = isLastInGroup ? '6px' : '4px';
+      const bottomRight = isLastInGroup ? '14px' : '4px';
       borderRadius = '18px ' + topRight + ' ' + bottomRight + ' 18px';
     } else {
       const topLeft = isFirstInGroup ? '18px' : '6px';
-      const bottomLeft = isLastInGroup ? '6px' : '4px';
+      const bottomLeft = isLastInGroup ? '14px' : '4px';
       borderRadius = topLeft + ' 18px 18px ' + bottomLeft;
     }
 
@@ -127,13 +127,15 @@ function renderIMessage(contactName, messages) {
     let tailHtml = '';
     if (isLastInGroup) {
       if (isMe) {
-        tailHtml = '<svg width="8" height="16" viewBox="0 0 8 16" style="position:absolute;bottom:0;right:-7px;display:block;">'
-          + '<path d="M0,0 C6,0 9,2 9,6 C9,10 6,13 1,16 L0,16 Z" fill="#007AFF"/>'
-          + '</svg>';
+        const tailSvgPath = path.resolve(__dirname, 'Untitled design (6).svg');
+        const tailSvgContent = fs.readFileSync(tailSvgPath, 'utf-8');
+        const tailBase64 = Buffer.from(tailSvgContent).toString('base64');
+        tailHtml = '<img src="data:image/svg+xml;base64,' + tailBase64 + '" style="position:absolute;bottom:-4px;right:-6px;width:22px;height:24px;display:block;" />';
       } else {
-        tailHtml = '<svg width="8" height="16" viewBox="0 0 8 16" style="position:absolute;bottom:0;left:-7px;display:block;">'
-          + '<path d="M 8 0 L 0 0 C 0 6.5, 5 11.5, 8 16 Z" fill="#1C1C1E"/>'
-          + '</svg>';
+        const tailSvgPathThem = path.resolve(__dirname, 'Untitled design (5).svg');
+        const tailSvgContentThem = fs.readFileSync(tailSvgPathThem, 'utf-8');
+        const tailBase64Them = Buffer.from(tailSvgContentThem).toString('base64');
+        tailHtml = '<img src="data:image/svg+xml;base64,' + tailBase64Them + '" style="position:absolute;bottom:-4px;left:-5px;width:22px;height:24px;display:block;transform:scaleX(-1);" />';
       }
     }
 
@@ -548,7 +550,7 @@ async function takeScreenshot(scenario, outputPath) {
     deviceScaleFactor: 2,
   });
 
-  await page.setContent(html, { waitUntil: 'networkidle0' });
+  await page.setContent(html, { waitUntil: 'domcontentloaded' });
 
   // Replace emojis with Twemoji SVGs (iOS-like, not Windows Segoe UI)
   try {

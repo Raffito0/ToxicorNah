@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { getMaleSoulTypeByName, getFemaleSoulTypeByName } from '../data/soulTypes';
+import { usesMockData, isDevMode } from '../utils/platform';
 
 // ===== Interfaces =====
 
@@ -16,15 +17,14 @@ export interface PersonProfileData {
   hardTruths: HardTruthsData;
 }
 
-export type RelationshipStatus = 'talking' | 'situationship' | 'dating' | 'boyfriend' | 'its_complicated' | 'ex' | null;
+export type RelationshipStatus = 'crush' | 'talking' | 'situationship' | 'boyfriend' | 'ex' | null;
 
-export const RELATIONSHIP_STATUS_OPTIONS: { value: NonNullable<RelationshipStatus>; label: string; emoji: string }[] = [
-  { value: 'talking', label: 'Talking', emoji: '💬' },
-  { value: 'situationship', label: 'Situationship', emoji: '🌀' },
-  { value: 'dating', label: 'Dating', emoji: '💕' },
-  { value: 'boyfriend', label: 'Boyfriend', emoji: '❤️' },
-  { value: 'its_complicated', label: "It's Complicated", emoji: '🔥' },
-  { value: 'ex', label: 'Ex', emoji: '💔' },
+export const RELATIONSHIP_STATUS_OPTIONS: { value: NonNullable<RelationshipStatus>; label: string; emoji: string; icon: string }[] = [
+  { value: 'crush', label: 'Crush', emoji: '🦋', icon: '/Crush.png' },
+  { value: 'talking', label: 'Talking', emoji: '💬', icon: '/Talking.png' },
+  { value: 'situationship', label: 'Situationship', emoji: '🌀', icon: '/Situationship.png' },
+  { value: 'boyfriend', label: 'Boyfriend', emoji: '❤️', icon: '/Boyfriend.png' },
+  { value: 'ex', label: 'Ex', emoji: '💔', icon: '/Ex.png' },
 ];
 
 export interface PersonBasicInfo {
@@ -1356,9 +1356,7 @@ function buildHardTruths(
 
 export async function fetchPersonProfile(personId: string): Promise<PersonProfileData | null> {
   // DEV MODE: Return mock data in development
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || new URLSearchParams(window.location.search).has('sid');
-
-  if (isDev) {
+  if (usesMockData()) {
     return {
       person: applyPersonOverrides(personId, {
         id: personId,
@@ -1977,7 +1975,7 @@ export function isPersonArchived(personId: string): boolean {
 
 // ===== Person Management CRUD Functions =====
 
-const isDev = () => import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || new URLSearchParams(window.location.search).has('sid');
+const isDev = () => isDevMode();
 
 export async function updatePersonName(personId: string, newName: string): Promise<boolean> {
   if (isDev()) {

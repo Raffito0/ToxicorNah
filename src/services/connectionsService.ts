@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { getDeletedPersonIds, isPersonArchived } from './personProfileService';
+import { usesMockData } from '../utils/platform';
 
 export interface ConnectionCardData {
   personId: string;
@@ -39,9 +40,7 @@ export function getScoreColor(score: number): string {
 
 export async function fetchConnections(): Promise<ConnectionCardData[]> {
   // DEV MODE: Return mock data in development
-  const isDev = import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || new URLSearchParams(window.location.search).has('sid');
-
-  if (isDev) {
+  if (usesMockData()) {
     const deletedIds = getDeletedPersonIds();
     const mockConnections = [
       {

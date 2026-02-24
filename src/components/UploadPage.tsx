@@ -9,6 +9,7 @@ import { injectContentScenario } from '../services/contentModeService';
 import { ChatRenderer } from './content/ChatRenderer';
 import { toPng } from 'html-to-image';
 import type { ContentScenario } from '../types/contentScenario';
+import { isDevMode } from '../utils/platform';
 
 interface Person {
   id: string;
@@ -250,7 +251,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
         console.log('First-time user: auto-creating default person "Him"');
 
         // Check if we're in dev mode
-        const isDev = import.meta.env.DEV || window.location.hostname === 'localhost';
+        const isDev = isDevMode();
 
         const { data: newPerson, error: createError } = await supabase
           .from('persons')

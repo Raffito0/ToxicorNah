@@ -5,6 +5,11 @@ import { VitePWA } from 'vite-plugin-pwa';
 // https://vitejs.dev/config/
 export default defineConfig({
   base: './',
+  server: {
+    watch: {
+      ignored: ['**/android/**', '**/ios/**', '**/mobile/**'],
+    },
+  },
   plugins: [
     react(),
     VitePWA({
@@ -43,6 +48,7 @@ export default defineConfig({
     }),
   ],
   optimizeDeps: {
+    entries: ['index.html'],
     exclude: ['lucide-react'],
   },
 });

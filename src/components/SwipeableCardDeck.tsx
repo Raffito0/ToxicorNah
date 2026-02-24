@@ -238,7 +238,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                 className="absolute inset-0"
                 style={{
                   zIndex: visualIndex,
-                  willChange: 'transform',
+                  willChange: 'transform, filter',
                 }}
                 initial={false}
                 animate={hasDealt ? {
@@ -246,11 +246,13 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                   y: translateY,
                   scale: isTop ? 1.02 : 1,
                   opacity: 1,
+                  filter: 'blur(0px)',
                 } : {
                   rotate: 0,
                   y: 0,
                   scale: 0.92,
                   opacity: 0,
+                  filter: 'blur(10px)',
                 }}
                 transition={{
                   type: "spring",
@@ -283,13 +285,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                     const totalVelocity = Math.abs(velocity.x) + Math.abs(velocity.y);
 
                     if (totalOffset > swipeThreshold || totalVelocity > swipeVelocityThreshold) {
-                      if (isFirstTimeFree) {
-                        setTimeout(() => {
-                          onPaywallOpen?.();
-                        }, 150);
-                      } else {
-                        moveTopToBottom();
-                      }
+                      moveTopToBottom();
                     }
 
                     setTimeout(() => {
@@ -298,13 +294,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                     }, 50);
                   }}
                   onTap={() => {
-                    if (isDraggingRef.current && dragDistanceRef.current > 10) {
-                      return;
-                    }
-
-                    if (isTop && isCardLocked) {
-                      onPaywallOpen?.();
-                    }
+                    // No-op: paywall is triggered by tapping the pill itself
                   }}
                   transition={{
                     type: "spring",
@@ -344,7 +334,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                         </div>
 
                         {/* BOTTOM HALF - Content */}
-                        <div className="relative w-full h-1/2 flex flex-col items-center justify-start pt-6 px-6 text-center">
+                        <div className="relative z-10 w-full h-1/2 flex flex-col items-center justify-start pt-6 px-6 text-center">
                           {/* Category Title */}
                           <h3
                             className="text-white"
@@ -360,19 +350,43 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                           </h3>
 
                           {/* Punchy Text - 2-3 lines based on chat analysis */}
-                          <p
-                            className="max-w-[280px]"
-                            style={{
-                              fontSize: '14px',
-                              fontFamily: 'Plus Jakarta Sans, sans-serif',
-                              fontWeight: 200,
-                              lineHeight: '1.5',
-                              letterSpacing: '1.5px',
-                              color: 'rgba(255, 255, 255, 0.7)',
-                            }}
-                          >
-                            {cardItem.punchyText}
-                          </p>
+                          <div className="relative max-w-[280px]">
+                            <p
+                              style={{
+                                fontSize: '14px',
+                                fontFamily: 'Plus Jakarta Sans, sans-serif',
+                                fontWeight: 200,
+                                lineHeight: '1.5',
+                                letterSpacing: '1.5px',
+                                color: 'rgba(255, 255, 255, 0.7)',
+                                ...(isCardLocked ? { filter: 'blur(6px)', userSelect: 'none' as const } : {}),
+                              }}
+                            >
+                              {cardItem.punchyText}
+                            </p>
+                          </div>
+
+                          {/* Lock pill - equidistant between title and bottom edge */}
+                          {isCardLocked && (
+                            <div
+                              className="absolute left-0 right-0 flex items-center justify-center"
+                              style={{ top: '33%', bottom: 0, cursor: 'pointer' }}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onPointerUp={(e) => { e.stopPropagation(); onPaywallOpen?.(); }}
+                            >
+                              <div
+                                className="flex items-center gap-2 px-4 py-3 rounded-full"
+                                style={{
+                                  background: '#7200B4',
+                                }}
+                              >
+                                <Lock className="w-4 h-4 text-white" />
+                                <span className="text-white font-medium uppercase whitespace-nowrap" style={{ fontSize: '13px', fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px' }}>
+                                  See the full truth
+                                </span>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -387,7 +401,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                       />
 
                       {/* Darkening overlay for non-top cards */}
-                      {!isTop && !isCardLocked && (
+                      {!isTop && (
                         <div
                           className="absolute inset-0 rounded-[28px]"
                           style={{
@@ -396,31 +410,6 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                         />
                       )}
 
-                      {/* Lock overlay for locked cards */}
-                      {isCardLocked && (
-                        <div
-                          className="absolute inset-0 z-20 flex flex-col items-center justify-center rounded-[28px]"
-                          style={{
-                            background: 'rgba(0, 0, 0, 0.7)',
-                          }}
-                        >
-                          <div
-                            className="flex flex-col items-center gap-3 px-8 py-6 rounded-2xl"
-                            style={{
-                              background: 'rgba(139, 92, 246, 0.2)',
-                              border: '1px solid rgba(139, 92, 246, 0.4)',
-                            }}
-                          >
-                            <Lock className="w-8 h-8 text-purple-300" />
-                            <span className="text-white text-center" style={{ fontSize: '14px', fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '0.05em' }}>
-                              Unlock Full Analysis
-                            </span>
-                            <span className="text-white/60 text-center" style={{ fontSize: '12px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 400 }}>
-                              Tap to see {cardItem.categoryTitle}
-                            </span>
-                          </div>
-                        </div>
-                      )}
                     </div>
                 </motion.div>
               </motion.div>

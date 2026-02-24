@@ -213,6 +213,8 @@ export interface StoredAnalysisResult {
   unlockType: string;
   personGender: 'male' | 'female';
   personName: string;
+  personAvatar?: string | null;
+  personRelationshipStatus?: string | null;
   emotionalProfiles: Array<{
     archetypeId: string;
     name: string;
@@ -475,6 +477,8 @@ async function processAnalysisDevMode(personId: string, imageFiles: File[]): Pro
       unlockType: 'dev_mode',
       personGender: aiResult.personGender || 'male',
       personName: 'Him',  // Never use AI-extracted name; the UI uses the user-assigned name
+      personAvatar: null,
+      personRelationshipStatus: null,
       emotionalProfiles: Object.entries(aiResult.categoryAnalysis).map(([key, analysis], index) => {
         const categoryNames: Record<string, string> = {
           redFlagsGreenFlags: 'Red Flags & Green Flags',
@@ -904,16 +908,24 @@ export async function getAnalysisResult(analysisId: string): Promise<StoredAnaly
     return null;
   }
 
-  // Fetch person name from persons table
+  // Fetch person info from persons table
   let personName = 'Unknown';
+  let personAvatar: string | null = null;
+  let personRelationshipStatus: string | null = null;
   if (analysis.person_id) {
     const { data: person } = await supabase
       .from('persons')
-      .select('name')
+      .select('name, avatar, relationship_status')
       .eq('id', analysis.person_id)
       .single();
     if (person?.name) {
       personName = person.name;
+    }
+    if (person?.avatar) {
+      personAvatar = person.avatar;
+    }
+    if (person?.relationship_status) {
+      personRelationshipStatus = person.relationship_status;
     }
   }
 
@@ -991,6 +1003,8 @@ export async function getAnalysisResult(analysisId: string): Promise<StoredAnaly
     unlockType: analysis.unlock_type,
     personGender: analysis.person_gender || 'male',
     personName,
+    personAvatar,
+    personRelationshipStatus,
     emotionalProfiles: emotionalProfilesWithDetails,
     messageInsights: (messageInsights || []).map(m => ({
       message: m.message_text,
@@ -1079,7 +1093,10 @@ function getMockAnalysisResult(analysisId: string): StoredAnalysisResult {
     profileDescription: 'He draws you in with sweetness, but there are patterns worth watching.',
     isUnlocked: true,
     unlockType: 'free_first',
-    personName: 'Him',
+    personGender: 'male',
+    personName: 'Connor',
+    personAvatar: '/openart-image_l7RhnYOF_1771785086054_raw.png',
+    personRelationshipStatus: 'crush',
     processingStatus: 'completed',
     emotionalProfiles: [
       {
@@ -1264,8 +1281,10 @@ async function processTwoPhaseAnalysis(analysisId: string, imageFiles: File[]): 
       profileDescription: 'Girl this man is a whole crime scene in a hoodie.',
       isUnlocked: true,
       unlockType: 'free_first',
-      personName: 'Him',
+      personName: 'Connor',
       personGender: 'male',
+      personAvatar: '/openart-image_l7RhnYOF_1771785086054_raw.png',
+      personRelationshipStatus: 'crush',
       processingStatus: 'completed',
       emotionalProfiles: [
         {
@@ -1534,6 +1553,8 @@ async function processTwoPhaseAnalysis(analysisId: string, imageFiles: File[]): 
       unlockType: 'dev_mode',
       personGender: quick.personGender || 'male',
       personName: 'Him',  // Never use AI-extracted name; the UI uses the user-assigned name
+      personAvatar: null,
+      personRelationshipStatus: null,
       // Empty arrays for Phase 2 data (will be populated later)
       emotionalProfiles: [],
       messageInsights: [],

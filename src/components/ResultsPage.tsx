@@ -9,11 +9,14 @@ import { VerticalCardDeck } from './VerticalCardDeck';
 import { DynamicCard } from './DynamicCard';
 import { ScrollReveal } from './ScrollReveal';
 import { PaywallModal } from './PaywallModal';
+import { KeepEyeOnHimModal } from './KeepEyeOnHimModal';
 import { SoulTypeMedia } from './SoulTypeMedia';
 import { getAnalysisResult, getAnalysisStatus, StoredAnalysisResult, computeDynamicGradient } from '../services/analysisService';
 import { getUserState, canPurchaseSingleUnlock, canUseFirstFreeAnalysis } from '../services/userStateService';
 import { createSubscriptionCheckout, createSingleUnlockCheckout } from '../services/stripeService';
 import { supabase } from '../lib/supabase';
+import { isDevMode } from '../utils/platform';
+import { RELATIONSHIP_STATUS_OPTIONS } from '../services/personProfileService';
 
 /**
  * Computes the DynamicCard gradient based on color similarity between
@@ -127,7 +130,23 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   const [isArchetypeCardFlipped, setIsArchetypeCardFlipped] = useState(false);
   const [showArchetypeContent, setShowArchetypeContent] = useState(false);
   const [isGeneratingShare, setIsGeneratingShare] = useState(false);
+  const [showKeepEyeModal, setShowKeepEyeModal] = useState(false);
+  const [keepEyeModalDismissed, setKeepEyeModalDismissed] = useState(false);
   const shareableArchetypeRef = useRef<HTMLDivElement>(null);
+
+  // Show "Keep an eye on him" modal 1s after paywall closes for first-time users
+  const paywallWasOpened = useRef(false);
+  useEffect(() => {
+    if (showPaywall) {
+      paywallWasOpened.current = true;
+    } else if (paywallWasOpened.current && !keepEyeModalDismissed && userState.isFirstAnalysis) {
+      // Paywall just closed — show "Keep an eye on him" after 1s
+      const timer = setTimeout(() => {
+        setShowKeepEyeModal(true);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [showPaywall, keepEyeModalDismissed, userState.isFirstAnalysis]);
 
   const dynamicGradient = useMemo(() => {
     if (!analysis) return { gradientStart: '#162a3d', gradientEnd: '#0b1520' };
@@ -347,8 +366,8 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
 
   // DEV MODE: Always unlock content in development
   // Set TEST_LOCKS to true to test the lock system locally
-  const TEST_LOCKS = false; // <-- Set to false to disable lock testing
-  const isDev = !TEST_LOCKS && (import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const TEST_LOCKS = false;
+  const isDev = !TEST_LOCKS && isDevMode();
 
   // Determine lock state:
   // - isPremium or analysis.isUnlocked = everything unlocked
@@ -358,23 +377,127 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   // When TEST_LOCKS is true, force first-time free mode for testing
   const isFirstTimeFree = TEST_LOCKS || (!isFullyUnlocked && userState.isFirstAnalysis);
 
+  // Profile hero data
+  const personAvatarUrl = analysis.personAvatar || null;
+  const personRelStatus = analysis.personRelationshipStatus || null;
+  const relStatusOption = personRelStatus ? RELATIONSHIP_STATUS_OPTIONS.find(o => o.value === personRelStatus) : null;
+
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="flex flex-col items-center justify-center pt-4 pb-4">
-        <motion.div
-          className="w-full max-w-md px-[30px]"
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+      {/* ===== Profile Hero Section (hidden for first-time users who haven't added a person yet) ===== */}
+      {!isFirstTimeFree && (
+      <div className="relative w-full overflow-hidden" style={{ minHeight: '38vh' }}>
+        {/* Blurred archetype background */}
+        <img
+          src="/image_r6qZ9PP4_1770361994322_1024.jpg"
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ filter: 'blur(18px) brightness(0.9)', transform: 'scale(1.15)' }}
+        />
+
+        {/* Sfumato gradient overlay */}
+        <img
+          src="/Sfumato.png"
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ zIndex: 1 }}
+        />
+
+        {/* Bottom fade to black */}
+        <div
+          className="absolute bottom-0 left-0 right-0"
+          style={{
+            height: '70%',
+            background: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.2) 25%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.75) 60%, rgba(0,0,0,0.92) 75%, black 85%)',
+            zIndex: 2,
+          }}
+        />
+
+        {/* Content */}
+        <div
+          className="relative flex flex-col items-center justify-center text-center px-8 pt-12 pb-6"
+          style={{ zIndex: 3, minHeight: '38vh' }}
         >
-          <div className="bg-black py-12">
+          {/* Avatar */}
+          <motion.div
+            className="relative"
+            style={{ willChange: 'filter, transform, opacity' }}
+            initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+            transition={{ delay: 0.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+          >
+            <div
+              className="w-24 h-24 rounded-full overflow-hidden relative"
+            >
+              {personAvatarUrl ? (
+                <img src={personAvatarUrl} alt={analysis.personName} className="w-full h-full object-cover" />
+              ) : (
+                <div
+                  className="w-full h-full flex items-center justify-center"
+                  style={{ background: `linear-gradient(135deg, ${analysis.personArchetype.gradientFrom}, ${analysis.personArchetype.gradientTo})` }}
+                >
+                  <span className="text-white text-3xl font-semibold">
+                    {analysis.personName.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+              )}
+            </div>
+          </motion.div>
+
+          {/* Name */}
+          <motion.h1
+            className="text-white mt-4"
+            style={{ fontSize: '22px', fontWeight: 500, fontFamily: 'Plus Jakarta Sans, sans-serif', willChange: 'filter, transform, opacity' }}
+            initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+            transition={{ delay: 0.4, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+          >
+            {analysis.personName}
+          </motion.h1>
+
+          {/* Relationship Status Pill */}
+          {relStatusOption && (
+            <motion.div
+              className="mt-2 px-3 py-1 rounded-full flex items-center gap-1.5"
+              style={{
+                background: 'rgba(255, 255, 255, 0.1)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                willChange: 'filter, transform, opacity',
+              }}
+              initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              transition={{ delay: 0.55, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+            >
+              <img src={relStatusOption.icon} alt="" className="w-5 h-5" />
+              <span
+                style={{
+                  fontSize: '12px',
+                  fontFamily: 'Plus Jakarta Sans, sans-serif',
+                  fontWeight: 200,
+                  letterSpacing: '1.5px',
+                  color: 'rgba(255, 255, 255, 0.7)',
+                }}
+              >
+                {relStatusOption.label}
+              </span>
+            </motion.div>
+          )}
+        </div>
+      </div>
+      )}
+
+      {/* Content — overlaps hero by 40px to hide any seam (same pattern as PersonProfile) */}
+      <div className="relative flex flex-col items-center justify-center pb-4 bg-black" style={{ marginTop: isFirstTimeFree ? '0px' : '-40px', zIndex: 10 }}>
+        <div className="w-full max-w-md px-[30px]">
+          <div className="bg-black pt-4 pb-12">
             <div className="text-center mb-3">
               <motion.p
                 className="text-white/50 uppercase tracking-widest mb-2"
                 style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, willChange: 'filter, transform, opacity' }}
                 initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
                 animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-                transition={{ delay: 0.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+                transition={{ delay: 0.7, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
               >
                 Toxicity Score
               </motion.p>
@@ -383,7 +506,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
                 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px', willChange: 'filter, transform, opacity' }}
                 initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
                 animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-                transition={{ delay: 0.3, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+                transition={{ delay: 0.85, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
               >
                 How Toxic {analysis.personGender === 'female' ? 'She Is' : 'He Is'}
               </motion.h1>
@@ -394,7 +517,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
               style={{ willChange: 'filter, transform, opacity' }}
               initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              transition={{ delay: 0.5, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+              transition={{ delay: 1.0, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
             >
               <ToxicOrb score={analysis.overallScore} size={140} />
             </motion.div>
@@ -404,7 +527,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
               style={{ willChange: 'filter, transform, opacity' }}
               initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              transition={{ delay: 1.0, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+              transition={{ delay: 1.5, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
             >
               <h2 className="text-2xl mb-2" style={{ color: haloColor, fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px' }}>
                 {analysis.overallScore > 66 ? 'Toxic AF' : analysis.profileType}
@@ -417,33 +540,45 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
               style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', color: 'rgba(255, 255, 255, 0.55)', willChange: 'filter, transform, opacity' }}
               initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              transition={{ delay: 1.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+              transition={{ delay: 1.7, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
             >
               {analysis.profileDescription}
             </motion.p>
 
           </div>
-        </motion.div>
+        </div>
 
         {/* His Soul Type Section */}
-        <ScrollReveal className="w-full max-w-md pt-[19px] px-[30px]">
+        <div className="w-full max-w-md pt-[19px] px-[30px]">
           {/* Section Header */}
           <div className="mb-6 text-center">
-            <p
+            <motion.p
               className="text-white/50 uppercase mb-2"
-              style={{ fontSize: '16px', letterSpacing: '1.5px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
+              style={{ fontSize: '16px', letterSpacing: '1.5px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, willChange: 'filter, transform, opacity' }}
+              initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              transition={{ delay: 1.9, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
             >
               Who {analysis.personGender === 'female' ? 'She' : 'He'} Is
-            </p>
-            <h2
+            </motion.p>
+            <motion.h2
               className="text-white text-3xl"
-              style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px' }}
+              style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px', willChange: 'filter, transform, opacity' }}
+              initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              transition={{ delay: 2.05, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
             >
               {analysis.personGender === 'female' ? 'Her' : 'His'} Soul Type
-            </h2>
+            </motion.h2>
           </div>
 
           {/* Archetype Card - Flippable, starts showing back */}
+          <motion.div
+            style={{ willChange: 'filter, transform, opacity' }}
+            initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+            transition={{ delay: 2.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+          >
           <div
             className="relative w-full cursor-pointer"
             style={{
@@ -717,7 +852,8 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
               </button>
             </motion.div>
           )}
-        </ScrollReveal>
+          </motion.div>
+        </div>
 
         {/* SwipeableCardDeck - Card 1 free, Cards 2-5 locked for first-time free */}
         <ScrollReveal>
@@ -740,15 +876,36 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
         </ScrollReveal>
 
         {/* The Dynamic Section - Visuals free, text locked for first-time free */}
-        <ScrollReveal className="w-full max-w-md pt-24 px-[30px]">
+        <div className="w-full max-w-md pt-24 px-[30px]">
           <div className="text-center mb-8">
-            <p className="text-white/50 uppercase mb-2" style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}>
+            <motion.p
+              className="text-white/50 uppercase mb-2"
+              style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, willChange: 'filter, transform, opacity' }}
+              initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+              whileInView={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              viewport={{ once: true, margin: '-80px' }}
+              transition={{ duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+            >
               The Dynamic
-            </p>
-            <h2 className="text-white text-3xl mb-2" style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px' }}>
+            </motion.p>
+            <motion.h2
+              className="text-white text-3xl mb-2"
+              style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px', willChange: 'filter, transform, opacity' }}
+              initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+              whileInView={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              viewport={{ once: true, margin: '-80px' }}
+              transition={{ delay: 0.15, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+            >
               Your Souls Together
-            </h2>
+            </motion.h2>
           </div>
+          <motion.div
+            style={{ willChange: 'filter, transform, opacity' }}
+            initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+            whileInView={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+            viewport={{ once: true, margin: '-80px' }}
+            transition={{ delay: 0.3, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+          >
           <DynamicCard
             dynamicName={analysis.relationshipDynamic.name}
             subtitle={analysis.relationshipDynamic.subtitle}
@@ -773,13 +930,16 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             onPaywallOpen={() => setShowPaywall(true)}
             isLoading={isDetailedLoading}
           />
+          </motion.div>
 
           {/* Share Dynamic Button */}
           <motion.div
             className="mt-6"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
+            style={{ willChange: 'filter, transform, opacity' }}
+            initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+            whileInView={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+            viewport={{ once: true, margin: '-80px' }}
+            transition={{ delay: 0.15, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
           >
             <button
               className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-full active:scale-95 transition-all"
@@ -796,7 +956,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
               </span>
             </button>
           </motion.div>
-        </ScrollReveal>
+        </div>
 
       </div>
 
@@ -946,6 +1106,21 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
         )}
       </div>
 
+      <KeepEyeOnHimModal
+        isOpen={showKeepEyeModal}
+        analysisId={analysisId || ''}
+        personGender={analysis?.personGender || 'male'}
+        canSkip={!userState.isPremium}
+        onSaved={() => {
+          setShowKeepEyeModal(false);
+          setKeepEyeModalDismissed(true);
+        }}
+        onSkip={() => {
+          setShowKeepEyeModal(false);
+          setKeepEyeModalDismissed(true);
+        }}
+      />
+
       <PaywallModal
         isOpen={showPaywall}
         onClose={() => setShowPaywall(false)}
@@ -954,7 +1129,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
         canUseSingleUnlock={userState.canUseSingleUnlock}
         singleUnlocksRemaining={userState.singleUnlocksRemaining}
         isFirstAnalysis={userState.isFirstAnalysis}
-        archetypeImage={analysis?.personArchetype.imageUrl}
+        showSingleUnlock={true}
       />
     </div>
   );

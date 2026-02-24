@@ -3,45 +3,95 @@
 // Returns the UUID for building the demo URL (?sid=xxx)
 // Mode: Run Once for All Items
 //
-// This node should run AFTER the "Update Scenario Status" node in Flow 2
-// when the action is "approve".
+// WIRING: In Workflow 2, placed on the "approve" branch of the IF node after Update Status.
+// References $('Find Scenario') for scenario_json and $('Parse Callback') for action/scenarioName.
 //
-// Requires: Supabase URL and Service Role Key in n8n credentials/environment
-// Set these as n8n environment variables:
-//   SUPABASE_URL = https://iilqnbumccqxlyloerzd.supabase.co
-//   SUPABASE_SERVICE_KEY = your-service-role-key
-
-const input = $input.first().json;
-
-// Only save if action is approve
-if (input.action !== 'approve') {
-  return [{ json: { skipped: true, reason: 'Action is not approve: ' + input.action } }];
+// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+const _https = require('https');
+const _http = require('http');
+const { URL } = require('url');
+function fetch(url, opts = {}, _redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (_redirectCount > 5) return reject(new Error('Too many redirects'));
+    const u = new URL(url);
+    const lib = u.protocol === 'https:' ? _https : _http;
+    const body = opts.body || null;
+    const ro = {
+      hostname: u.hostname,
+      port: u.port || undefined,
+      path: u.pathname + u.search,
+      method: opts.method || 'GET',
+      headers: { ...(opts.headers || {}) },
+    };
+    if (body) ro.headers['Content-Length'] = Buffer.byteLength(body);
+    const req = lib.request(ro, res => {
+      // Follow redirects (301, 302, 307, 308)
+      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume(); // drain response
+        const redirectUrl = res.headers.location.startsWith('http')
+          ? res.headers.location
+          : u.protocol + '//' + u.host + res.headers.location;
+        return fetch(redirectUrl, opts, _redirectCount + 1).then(resolve).catch(reject);
+      }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          text: () => Promise.resolve(buf.toString()),
+          json: () => Promise.resolve(JSON.parse(buf.toString())),
+          arrayBuffer: () => Promise.resolve(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)),
+        });
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
 }
 
-const scenarioName = input.scenarioName;
+// Config — hardcoded for private self-hosted n8n
+const SUPABASE_URL = 'https://iilqnbumccqxlyloerzd.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpbHFuYnVtY2NxeGx5bG9lcnpkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODcyMzAyOCwiZXhwIjoyMDg0Mjk5MDI4fQ.XUKQTfMrtg2gYwIiJX_dMBX6C4VSlKZS09cNC7h7yVQ'; // ← Replace with your service_role key from Supabase Dashboard → Settings → API
+const APP_URL = 'https://toxicor-nah.vercel.app';
 
-// Get the scenario JSON from the Airtable record
-// The scenario data should be passed through from the pipeline
-const scenarioJson = input.scenarioJson || input.scenario;
+// Get action and scenarioName from the callback handler node
+const callback = $('Parse Callback').first().json;
+const action = callback.action;
+const scenarioName = callback.scenarioName;
+
+// Only save if action is approve
+if (action !== 'approve') {
+  return [{ json: { skipped: true, reason: 'Action is not approve: ' + action } }];
+}
+
+// Get scenario_json from the Find Scenario node (not $input — after Update Status, input only has id+status)
+const airtableRecord = $('Find Scenario (Callback)').first().json;
+let scenarioJson = airtableRecord.scenario_json || airtableRecord.fields?.scenario_json;
 
 if (!scenarioJson) {
-  return [{ json: { error: true, message: 'No scenario JSON found in input' } }];
+  return [{ json: { error: true, message: 'No scenario_json found in Airtable record. Fields: ' + Object.keys(airtableRecord).join(', ') } }];
+}
+
+// Parse if stored as string in Airtable
+if (typeof scenarioJson === 'string') {
+  try {
+    scenarioJson = JSON.parse(scenarioJson);
+  } catch (e) {
+    return [{ json: { error: true, message: 'Failed to parse scenario_json: ' + e.message } }];
+  }
 }
 
 // Supabase REST API insert
-const supabaseUrl = $env.SUPABASE_URL || 'https://iilqnbumccqxlyloerzd.supabase.co';
-const supabaseKey = $env.SUPABASE_SERVICE_KEY;
 
-if (!supabaseKey) {
-  return [{ json: { error: true, message: 'SUPABASE_SERVICE_KEY not configured in n8n environment' } }];
-}
-
-const response = await fetch(supabaseUrl + '/rest/v1/content_scenarios', {
+const response = await fetch(SUPABASE_URL + '/rest/v1/content_scenarios', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
-    'apikey': supabaseKey,
-    'Authorization': 'Bearer ' + supabaseKey,
+    'apikey': SUPABASE_KEY,
+    'Authorization': 'Bearer ' + SUPABASE_KEY,
     'Prefer': 'return=representation',
   },
   body: JSON.stringify({
@@ -53,14 +103,14 @@ const response = await fetch(supabaseUrl + '/rest/v1/content_scenarios', {
 
 if (!response.ok) {
   const errorText = await response.text();
-  return [{ json: { error: true, message: 'Supabase insert failed: ' + response.status + ' ' + errorText } }];
+  return [{ json: { error: true, scenarioName, message: 'Supabase insert failed: ' + response.status + ' ' + errorText } }];
 }
 
 const [inserted] = await response.json();
 const uuid = inserted.id;
 
 // Build the demo URL
-const appUrl = $env.APP_URL || 'https://toxicornah.com';
+const appUrl = APP_URL;
 const demoUrl = appUrl + '/?sid=' + uuid;
 
 return [{

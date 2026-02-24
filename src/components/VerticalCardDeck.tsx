@@ -156,7 +156,7 @@ export function VerticalCardDeck({ analysisId, isFirstTimeFree = false, onPaywal
   if (showSkeleton) {
     return (
       <div className="w-full max-w-md mx-auto pt-24">
-        <div className="mb-8 px-[30px]">
+        <div className="mb-8 px-[30px] text-center">
           <p className="text-white/50 uppercase mb-2" style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}>
             Message Breakdown
           </p>
@@ -204,7 +204,7 @@ export function VerticalCardDeck({ analysisId, isFirstTimeFree = false, onPaywal
 
   return (
     <div className="w-full max-w-md mx-auto pt-24">
-      <div className="mb-8 px-[30px]">
+      <div className="mb-8 px-[30px] text-center">
         <p className="text-white/50 uppercase mb-2" style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}>
           Message Breakdown
         </p>

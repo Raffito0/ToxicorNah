@@ -54,11 +54,7 @@ export function DynamicCard({
   const isBackSideLocked = isFirstTimeFree;
 
   const handleClick = () => {
-    // If trying to flip to back side and it's locked, open paywall
-    if (!isFlipped && isBackSideLocked) {
-      onPaywallOpen?.();
-      return;
-    }
+    // Always flip — paywall is triggered by tapping the pill itself
     setIsFlipped(!isFlipped);
   };
 
@@ -330,12 +326,39 @@ export function DynamicCard({
                 >
                   Why This Happens
                 </h3>
-                <p
-                  className="text-white/70"
-                  style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
-                >
-                  {whyThisHappens}
-                </p>
+                <div className="relative w-full">
+                  <p
+                    className="text-white/70"
+                    style={{
+                      fontSize: '14px',
+                      fontFamily: 'Plus Jakarta Sans, sans-serif',
+                      fontWeight: 200,
+                      letterSpacing: '1.5px',
+                      ...(isBackSideLocked ? { filter: 'blur(6px)', userSelect: 'none' as const } : {}),
+                    }}
+                  >
+                    {whyThisHappens}
+                  </p>
+                  {isBackSideLocked && (
+                    <div
+                      className="absolute inset-0 flex items-center justify-center"
+                      style={{ padding: '12px', cursor: 'pointer' }}
+                      onClick={(e) => { e.stopPropagation(); onPaywallOpen?.(); }}
+                    >
+                      <div
+                        className="flex items-center gap-2 px-4 py-3 rounded-full"
+                        style={{
+                          background: '#7200B4',
+                        }}
+                      >
+                        <Lock className="w-4 h-4 text-white" />
+                        <span className="text-white font-medium uppercase" style={{ fontSize: '13px', fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px' }}>
+                          See the full truth
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Divider */}
@@ -358,12 +381,39 @@ export function DynamicCard({
                 >
                   Your Next Move
                 </h3>
-                <p
-                  className="text-white/70"
-                  style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
-                >
-                  {patternBreak}
-                </p>
+                <div className="relative w-full">
+                  <p
+                    className="text-white/70"
+                    style={{
+                      fontSize: '14px',
+                      fontFamily: 'Plus Jakarta Sans, sans-serif',
+                      fontWeight: 200,
+                      letterSpacing: '1.5px',
+                      ...(isBackSideLocked ? { filter: 'blur(6px)', userSelect: 'none' as const } : {}),
+                    }}
+                  >
+                    {patternBreak}
+                  </p>
+                  {isBackSideLocked && (
+                    <div
+                      className="absolute inset-0 flex items-center justify-center"
+                      style={{ padding: '12px', cursor: 'pointer' }}
+                      onClick={(e) => { e.stopPropagation(); onPaywallOpen?.(); }}
+                    >
+                      <div
+                        className="flex items-center gap-2 px-4 py-3 rounded-full"
+                        style={{
+                          background: '#7200B4',
+                        }}
+                      >
+                        <Lock className="w-4 h-4 text-white" />
+                        <span className="text-white font-medium uppercase" style={{ fontSize: '13px', fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px' }}>
+                          See the full truth
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </motion.div>
           </div>
@@ -380,10 +430,7 @@ export function DynamicCard({
           transition={{ duration: 2, repeat: Infinity }}
         >
           <img src="/hand.png" alt="" className="w-4 h-4 opacity-70" />
-          <span>Tap to {isFlipped ? 'flip back' : 'reveal more'}</span>
-          {isBackSideLocked && !isFlipped && (
-            <Lock className="w-4 h-4 text-purple-400" />
-          )}
+          <span>Tap to {isFlipped ? (isBackSideLocked ? 'unlock' : 'flip back') : 'reveal more'}</span>
         </motion.p>
       </div>
     </div>

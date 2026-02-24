@@ -98,8 +98,6 @@ export function MessageInsightCard({
   const accentColor = defaults.accent;
   const translateY = visualIndex * 20;
 
-  // Ref to track pending paywall open - ensures animation completes first
-  const pendingPaywallRef = useRef(false);
   // Track drag state to distinguish taps from drags
   const isDraggingRef = useRef(false);
   const dragDistanceRef = useRef(0);
@@ -107,13 +105,13 @@ export function MessageInsightCard({
 
   // Lock states for first-time free users:
   // - Card 0 front: UNLOCKED
-  // - Card 0 solution (flip): LOCKED
+  // - Card 0 solution (flip): UNLOCKED (first one free)
   // - Cards 1+ front: LOCKED (blurred)
   // - Cards 1+ solution: LOCKED
   const isCardLocked = isFirstTimeFree && cardIndex > 0;
-  const isSolutionLocked = isFirstTimeFree; // All solutions are locked for first-time free
+  const isSolutionLocked = isFirstTimeFree && cardIndex > 0;
 
-  // Handle tap: if card or solution is locked, open paywall instead
+  // Handle tap: always flip the card (paywall is triggered by tapping the pill itself)
   const handleTap = () => {
     // Don't handle tap if we just finished dragging
     if (isDraggingRef.current || dragDistanceRef.current > 10) {
@@ -121,17 +119,7 @@ export function MessageInsightCard({
     }
     if (!isTop) return;
     haptics.medium();
-
-    if (isCardLocked) {
-      // Card is locked - open paywall
-      onPaywallOpen?.();
-    } else if (isSolutionLocked && !isFlipped) {
-      // Trying to flip to see solution, but it's locked - open paywall
-      onPaywallOpen?.();
-    } else {
-      // Normal flip
-      onTap();
-    }
+    onTap();
   };
 
   // Dynamic line clamp: title + description = 6 lines total
@@ -149,16 +137,19 @@ export function MessageInsightCard({
         zIndex: visualIndex,
         height: '220px',
         top: 0,
+        willChange: 'transform, filter',
       }}
       initial={false}
       animate={hasDealt ? {
         y: translateY,
         scale: scale,
         opacity: 1,
+        filter: 'blur(0px)',
       } : {
         y: 0,
         scale: 0.92,
         opacity: 0,
+        filter: 'blur(10px)',
       }}
       transition={{
         type: "spring",
@@ -190,20 +181,7 @@ export function MessageInsightCard({
 
           if (Math.abs(offset.y) > swipeThreshold || Math.abs(velocity.y) > swipeVelocityThreshold) {
             haptics.swipe();
-            // If first-time free, open paywall instead of allowing swipe
-            if (isFirstTimeFree) {
-              // Mark that we need to open paywall after animation
-              pendingPaywallRef.current = true;
-              // Wait for dragSnapToOrigin animation to fully complete
-              setTimeout(() => {
-                if (pendingPaywallRef.current) {
-                  pendingPaywallRef.current = false;
-                  onPaywallOpen?.();
-                }
-              }, 400);
-            } else {
-              onSwipe();
-            }
+            onSwipe();
           }
 
           // Reset drag state after a short delay to allow tap check
@@ -245,36 +223,9 @@ export function MessageInsightCard({
           }
           layout={false}
         >
-          {/* Dim overlay for non-top cards that aren't locked */}
-          {!isTop && !isCardLocked && (
+          {/* Dim overlay for non-top cards */}
+          {!isTop && (
             <div className="absolute inset-0 bg-black/30 z-20" style={{ borderRadius: '28px' }}></div>
-          )}
-
-          {/* Lock overlay for ALL locked cards (cards 2+ for first-time free users) - shows blur regardless of position */}
-          {isCardLocked && (
-            <div
-              className="absolute inset-0 z-30 flex flex-col items-center justify-center"
-              style={{
-                borderRadius: '28px',
-                background: 'rgba(0, 0, 0, 0.6)',
-                backdropFilter: 'blur(6px)',
-                WebkitBackdropFilter: 'blur(6px)',
-              }}
-            >
-              {/* Lock badge visible on ALL locked cards */}
-              <div
-                className="flex flex-col items-center gap-2 px-5 py-4 rounded-2xl"
-                style={{
-                  background: 'rgba(139, 92, 246, 0.2)',
-                  border: '1px solid rgba(139, 92, 246, 0.4)',
-                }}
-              >
-                <Lock className="w-6 h-6 text-purple-300" />
-                <span className="text-white text-center" style={{ fontSize: '12px', fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px' }}>
-                  Unlock to See More
-                </span>
-              </div>
-            </div>
           )}
 
           <div
@@ -382,23 +333,42 @@ export function MessageInsightCard({
                 {title}
               </h3>
 
-              <p style={{
-                fontSize: '12px',
-                fontFamily: 'Plus Jakarta Sans, sans-serif',
-                fontWeight: 200,
-                letterSpacing: '1.5px',
-                color: 'rgba(255, 255, 255, 0.7)',
-                overflow: 'hidden',
-              }}>
-                {description}
-              </p>
-
-              <div className="absolute bottom-3 right-5 text-white/50 flex items-center gap-1.5" style={{ fontSize: '11px', fontWeight: 500 }}>
-                {messageCount}
-                {/* Lock indicator for card 1 (solution locked but front visible) */}
-                {isSolutionLocked && !isCardLocked && (
-                  <Lock className="w-3 h-3 text-purple-400" />
+              <div className="relative">
+                <p style={{
+                  fontSize: '12px',
+                  fontFamily: 'Plus Jakarta Sans, sans-serif',
+                  fontWeight: 200,
+                  letterSpacing: '1.5px',
+                  color: 'rgba(255, 255, 255, 0.7)',
+                  overflow: 'hidden',
+                  ...(isCardLocked ? { filter: 'blur(5px)', userSelect: 'none' as const } : {}),
+                }}>
+                  {description}
+                </p>
+                {isCardLocked && (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center"
+                    style={{ padding: '12px', cursor: 'pointer' }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onPointerUp={(e) => { e.stopPropagation(); onPaywallOpen?.(); }}
+                  >
+                    <div
+                      className="flex items-center gap-2 px-4 py-3 rounded-full"
+                      style={{
+                        background: '#7200B4',
+                      }}
+                    >
+                      <Lock className="w-4 h-4 text-white" />
+                      <span className="text-white font-medium uppercase" style={{ fontSize: '13px', fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px' }}>
+                        Reveal
+                      </span>
+                    </div>
+                  </div>
                 )}
+              </div>
+
+              <div className="absolute bottom-3 right-5 text-white/50" style={{ fontSize: '11px', fontWeight: 500 }}>
+                {messageCount}
               </div>
             </div>
           </div>
@@ -479,9 +449,38 @@ export function MessageInsightCard({
                 <h4 className="text-white mb-2" style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'Outfit, sans-serif', letterSpacing: '1.5px' }}>
                   What It Really Means
                 </h4>
-                <p style={{ fontSize: '12px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', color: 'rgba(255, 255, 255, 0.7)' }}>
-                  {solution}
-                </p>
+                <div className="relative">
+                  <p style={{
+                    fontSize: '12px',
+                    fontFamily: 'Plus Jakarta Sans, sans-serif',
+                    fontWeight: 200,
+                    letterSpacing: '1.5px',
+                    color: 'rgba(255, 255, 255, 0.7)',
+                    ...(isSolutionLocked ? { filter: 'blur(5px)', userSelect: 'none' as const } : {}),
+                  }}>
+                    {solution}
+                  </p>
+                  {isSolutionLocked && (
+                    <div
+                      className="absolute inset-0 flex items-center justify-center"
+                      style={{ padding: '12px', cursor: 'pointer' }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onPointerUp={(e) => { e.stopPropagation(); onPaywallOpen?.(); }}
+                    >
+                      <div
+                        className="flex items-center gap-2 px-4 py-3 rounded-full"
+                        style={{
+                          background: '#7200B4',
+                        }}
+                      >
+                        <Lock className="w-4 h-4 text-white" />
+                        <span className="text-white font-medium uppercase" style={{ fontSize: '13px', fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px' }}>
+                          Reveal
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </motion.div>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Check, Loader2, Lock, MessageCircle, Users } from 'lucide-react';
+import { X, Check, Loader2, MessageCircle, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type PlanType = 'annual' | 'monthly' | 'single';
@@ -12,7 +12,7 @@ interface PaywallModalProps {
   canUseSingleUnlock: boolean;
   singleUnlocksRemaining: number;
   isFirstAnalysis?: boolean;
-  archetypeImage?: string; // Only show header image when this is provided (Analyze page only)
+  showSingleUnlock?: boolean;
 }
 
 export function PaywallModal({
@@ -23,7 +23,7 @@ export function PaywallModal({
   canUseSingleUnlock,
   singleUnlocksRemaining,
   isFirstAnalysis = false,
-  archetypeImage
+  showSingleUnlock = false
 }: PaywallModalProps) {
   const [billingPeriod, setBillingPeriod] = useState<'annual' | 'monthly'>('annual');
   const [selectedPlan, setSelectedPlan] = useState<PlanType>('annual');
@@ -78,18 +78,14 @@ export function PaywallModal({
 
   const getReassuranceText = () => {
     if (selectedPlan === 'annual') return 'No charge today.';
-    return 'Private. No names stored.';
+    return 'Private. No chat stored.';
   };
 
   return (
     <AnimatePresence>
-      {/* Container - always top-aligned so modal expands only downward */}
+      {/* Container - centered vertically, no scroll */}
       <div
-        className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto"
-        style={{
-          paddingBottom: '72px',
-          paddingTop: archetypeImage ? '60px' : 'calc((100vh - 72px - 560px) / 2)'
-        }}
+        className="fixed inset-0 z-50 flex items-center justify-center"
       >
         {/* Backdrop with glassmorphism */}
         <motion.div
@@ -110,66 +106,35 @@ export function PaywallModal({
           animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
           exit={{ opacity: 0, scale: 0.9, filter: 'blur(10px)' }}
           transition={{ duration: 0.25, ease: 'easeOut' }}
-          className="relative w-full max-w-md bg-[#0a0a0a] rounded-[32px] overflow-hidden border border-white/10 mx-4"
-          style={{ maxHeight: 'calc(100vh - 150px)' }}
+          className="relative w-full max-w-md bg-[#0a0a0a] rounded-[32px] overflow-hidden border border-white/10 mx-4 overflow-y-auto"
+          style={{ maxHeight: 'calc(100vh - 80px)' }}
         >
-          {/* A) HEADER CINEMATIC - Only shown on Analyze page when archetypeImage is provided */}
-          {archetypeImage ? (
-            <div className="relative pt-4 px-6 pb-2">
-              {/* Close button */}
-              <button
-                onClick={onClose}
-                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 transition-colors border border-white/10 z-10"
-              >
-                <X className="w-5 h-5 text-white/50" />
-              </button>
-
-              {/* Archetype image - 9:16 aspect ratio, smaller */}
-              <div className="flex justify-center">
-                <div
-                  className="w-[72px] h-[128px] rounded-xl overflow-hidden border border-white/10"
-                  style={{
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
-                  }}
-                >
-                  <img
-                    src={archetypeImage}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* Close button only when no image - positioned at top right */
-            <div className="relative pt-4 pr-4 flex justify-end">
-              <button
-                onClick={onClose}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 transition-colors border border-white/10"
-              >
-                <X className="w-5 h-5 text-white/50" />
-              </button>
-            </div>
-          )}
+          {/* Close button */}
+          <div className="relative pt-4 pr-4 flex justify-end">
+            <button
+              onClick={onClose}
+              className="w-8 h-8 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 transition-colors border border-white/10"
+            >
+              <X className="w-5 h-5 text-white/50" />
+            </button>
+          </div>
 
           {/* Content area */}
           <div className="px-6 pb-8 pt-2">
             {/* B) HEADLINE + SUBHEADLINE */}
             <div className="text-center mb-3">
-              {/* Blue checkmark icon - only shown when NOT in Analyze page */}
-              {!archetypeImage && (
-                <div className="flex justify-center mb-3">
-                  <div
-                    className="w-14 h-14 rounded-full flex items-center justify-center"
-                    style={{
-                      background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                      boxShadow: '0 4px 20px rgba(59, 130, 246, 0.4)'
-                    }}
-                  >
-                    <Check className="w-7 h-7 text-white" strokeWidth={3} />
-                  </div>
+              {/* Purple checkmark icon */}
+              <div className="flex justify-center mb-3">
+                <div
+                  className="w-14 h-14 rounded-full flex items-center justify-center"
+                  style={{
+                    background: 'linear-gradient(135deg, #7200B4 0%, #4A0075 100%)',
+                    boxShadow: '0 4px 20px rgba(114, 0, 180, 0.4)'
+                  }}
+                >
+                  <Check className="w-7 h-7 text-white" strokeWidth={3} />
                 </div>
-              )}
+              </div>
               <h2
                 className="text-[26px] font-bold text-white"
                 style={{ fontFamily: 'Outfit, sans-serif' }}
@@ -226,7 +191,7 @@ export function PaywallModal({
                   onClick={() => handleBillingToggle(billingPeriod === 'annual' ? 'monthly' : 'annual')}
                   className="relative w-[44px] h-[24px] rounded-full transition-colors"
                   style={{
-                    backgroundColor: billingPeriod === 'annual' ? '#3b82f6' : 'rgba(255,255,255,0.2)'
+                    backgroundColor: billingPeriod === 'annual' ? '#7200B4' : 'rgba(255,255,255,0.2)'
                   }}
                 >
                   <motion.div
@@ -252,13 +217,13 @@ export function PaywallModal({
               {/* Subscription Plan Card - Changes based on toggle with animations */}
               <button
                 onClick={() => setSelectedPlan(billingPeriod)}
-                className={`w-full p-4 rounded-2xl border relative transition-colors duration-300 ${
+                className={`w-full px-4 py-5 rounded-2xl border relative transition-colors duration-300 ${
                   selectedPlan === billingPeriod
                     ? billingPeriod === 'annual'
-                      ? 'border-blue-400/40 bg-blue-500/15'
+                      ? 'border-[#7200B4]/40 bg-[#7200B4]/15'
                       : 'border-white/40 bg-white/10'
                     : billingPeriod === 'annual'
-                      ? 'border-blue-400/30 bg-blue-500/10'
+                      ? 'border-[#7200B4]/30 bg-[#7200B4]/10'
                       : 'border-white/10 bg-white/5'
                 }`}
               >
@@ -277,7 +242,7 @@ export function PaywallModal({
                   )}
                 </AnimatePresence>
 
-                <div className="flex justify-between pr-8">
+                <div className="flex justify-between items-center pr-8">
                   {/* Left side - Title and subtitle */}
                   <div className="text-left">
                     <AnimatePresence mode="wait">
@@ -292,7 +257,7 @@ export function PaywallModal({
                           {billingPeriod === 'annual' ? 'Annual' : 'Monthly'}
                         </p>
                         {billingPeriod === 'annual' ? (
-                          <p className="text-blue-400 text-xs" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+                          <p className="text-[#A855F7] text-xs mt-1" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
                             7-day free trial
                           </p>
                         ) : (
@@ -367,8 +332,8 @@ export function PaywallModal({
                 </div>
               </button>
 
-              {/* Or divider + Single Unlock - Only show on Analyze page */}
-              {archetypeImage && (
+              {/* Or divider + Single Unlock */}
+              {showSingleUnlock && (
                 <>
                   <div className="flex items-center gap-3 -my-1">
                     <div className="flex-1 h-px bg-white/10" />
@@ -391,7 +356,7 @@ export function PaywallModal({
                         <p className="text-white font-semibold" style={{ fontFamily: 'Outfit, sans-serif' }}>
                           Unlock this chat
                         </p>
-                        <p className="text-white/20 text-[10px]" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+                        <p className="text-white/20 text-[10px] mt-1" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
                           One read only.
                         </p>
                       </div>
@@ -424,16 +389,14 @@ export function PaywallModal({
             <button
               onClick={handleCTA}
               disabled={isLoading}
-              className={`w-full py-4 rounded-full font-semibold transition-all active:scale-[0.98] disabled:opacity-70 uppercase tracking-wide ${
-                selectedPlan === 'annual'
-                  ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                  : 'bg-white hover:bg-white/90 text-black'
-              }`}
+              className="w-full py-4 rounded-full font-semibold transition-all active:scale-[0.98] disabled:opacity-70 uppercase tracking-wide text-white"
               style={{
                 fontFamily: 'Outfit, sans-serif',
                 fontSize: '14px',
+                background: selectedPlan === 'annual' ? '#7200B4' : '#FFFFFF',
+                color: selectedPlan === 'annual' ? '#FFFFFF' : '#000000',
                 boxShadow: selectedPlan === 'annual'
-                  ? '0 8px 32px rgba(59, 130, 246, 0.3)'
+                  ? '0 8px 32px rgba(114, 0, 180, 0.3)'
                   : '0 8px 32px rgba(255, 255, 255, 0.15)'
               }}
             >

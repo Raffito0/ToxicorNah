@@ -7,6 +7,56 @@ const { scenario } = $('Validate Scenario').first().json;
 const { captionTemplates, voTemplates, hookTexts, socialExamples } = $('Build Scenario Prompt').first().json;
 
 // ============================================================
+// OUTRO CATEGORY SELECTION (from Outro Examples pool)
+// ============================================================
+
+// Read outro examples from upstream Airtable node
+let outroExamples = [];
+try {
+  outroExamples = $('Get Outro Examples').all().map(i => i.json);
+} catch(e) {
+  // Node might not exist yet — fall back to empty
+}
+
+// Parse outro_categories_json from concept (weights per category)
+// Format: {"app_store": 30, "cta_lipsync": 35, "organic": 35}
+let outroCategoryWeights = null;
+if (concept.outro_categories_json) {
+  try {
+    outroCategoryWeights = typeof concept.outro_categories_json === 'string'
+      ? JSON.parse(concept.outro_categories_json)
+      : concept.outro_categories_json;
+  } catch(e) { outroCategoryWeights = null; }
+}
+
+// Pick a category based on weights
+let selectedOutroCategory = 'organic'; // default
+let selectedOutroText = '';
+let selectedOutroVO = '';
+
+if (outroCategoryWeights && typeof outroCategoryWeights === 'object') {
+  const categories = Object.entries(outroCategoryWeights).filter(([_, w]) => w > 0);
+  if (categories.length > 0) {
+    const totalWeight = categories.reduce((sum, [_, w]) => sum + w, 0);
+    let rand = Math.random() * totalWeight;
+    for (const [cat, w] of categories) {
+      rand -= w;
+      if (rand <= 0) { selectedOutroCategory = cat; break; }
+    }
+  }
+}
+
+// Pick a random active example from the selected category
+if (outroExamples.length > 0) {
+  const pool = outroExamples.filter(e => e.category === selectedOutroCategory && e.is_active !== false);
+  if (pool.length > 0) {
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+    selectedOutroText = picked.text || '';
+    selectedOutroVO = picked.vo_text || picked.text || '';
+  }
+}
+
+// ============================================================
 // BODY CLIP SECTIONS (fixed order, first 2 always included)
 // ============================================================
 
@@ -145,7 +195,9 @@ BAD lengths (over 50 chars — WILL NOT FIT IN 3 SECONDS):
   - CALLOUT: "Tell me this isn't [toxic pattern]"
   - CONFESSION: "He really thought [action] would fix everything"
   GOOD: "The way he gaslit me in the apology", "He texted at 3am after ghosting me", "If you have a crush don't do this", "Tell me this isn't manipulation"
-  BAD: "This man is unserious" (too generic, not specific enough — WHAT did he do?), "He's so annoying" (vague, boring), "I can't with him" (lazy), "Why is he like this" (too generic)
+  BAD: "This man is unserious" (too generic — WHAT did he do?), "He's so annoying" (vague, boring), "I can't with him" (lazy), "Why is he like this" (too generic)
+  BAD: "If he's deflecting, don't use this" (makes NO SENSE — "deflecting" is a clinical term, not a dramatic situation. The [X] slot must be a RELATABLE SITUATION like "have a crush", "love your boyfriend", "just got back together" — NOT a behavior label like "deflecting", "gaslighting", "manipulating")
+  CRITICAL: The hook must describe a SITUATION or ACTION, never a clinical behavior label. "He forgot my birthday and STILL got mad at me" = GOOD (specific action). "He's being emotionally unavailable" = BAD (therapy term, not viral).
   The hook must be a COMPLETE thought — never truncated.
 - hookVO: What she SAYS out loud. MAX 50 CHARACTERS. Must ALSO be viral — create SUSPENSE. She's teasing what viewers are about to see. Make them think "wait what happened?!". NEVER mention the app.
   GOOD: "No because look what he just said", "I caught him and he still denied it", "Be honest am I overreacting or no?", "No because this cannot be real"
@@ -214,10 +266,12 @@ BAD VO examples (scripted, robotic, AI-sounding):
 For EACH section: the text overlay is her EMOTIONAL REACTION, never data from the screen.
 
 - Toxic Score:
-  Text GOOD: "48???", "wait what", "oh.", "that's not good"
+  Text GOOD: "48???", "wait what", "oh.", "that's not good", "bro.", "not surprised", "LMAO"
   Text BAD: "Toxic Score: 48" (label), "Score reveal" (label), "Not the 💯 emoji" (random reference — NOT a gut reaction), "The number..." (vague)
-  VO: React to the NUMBER — shock, denial, or dark humor.
-  VO examples: "Forty-eight? That feels low... I'm scared.", "Why is it not higher though?", "Middle score is worse honestly."
+  VO: React to the score. VARY THE STRUCTURE — do NOT always use "Number? Comment." pattern. Pick a DIFFERENT structure each time from these:
+  VARY the structure every time. Mentioning the score number is OK sometimes, but NOT every time. Use different patterns:
+  WITH number (sometimes): "Seventy-eight? Damn.", "Eighty-five and I'm still here... wow."
+  WITHOUT number (most of the time): "I already knew it was bad but damn.", "My taste in men is genuinely criminal.", "Bro... that is not giving.", "Yeah no that checks out.", "Cool cool cool. Love that for me.", "Wow. Just... wow."
 
 - Soul Type:
   Text GOOD: "I can't 💀", "this is so him", "excuse me???", "not this again"
@@ -259,6 +313,22 @@ The goal: generate comment wars, saves, and shares. NOT explain the app.`;
 // USER PROMPT
 // ============================================================
 
+// Randomly pick a VO structure for Toxic Score to force variety
+// Mix of structures — some mention the number, most don't (forces variety)
+const VO_SCORE_STRUCTURES = [
+  'Say the score number + a reaction: e.g. "Seventy-eight? Damn." — short and punchy, number first.',
+  'Say the score number + denial: e.g. "Eighty-five and I\'m still here... wow." — number woven into a thought.',
+  'Statement first, NO number: e.g. "I already knew it was bad but damn." — react without saying any number.',
+  'Dark humor, NO number: e.g. "That\'s lower than I expected honestly." — no number mentioned.',
+  'Trailing off, NO number: e.g. "Bro... that is not giving." — no number.',
+  'Self-drag, NO number: e.g. "My taste in men is genuinely criminal." — about HER, not the score.',
+  'Casual acceptance, NO number: e.g. "Yeah no that checks out." — no number.',
+  'Sarcastic resignation, NO number: e.g. "Cool cool cool. Love that for me." — no number.',
+  'Shock without score: e.g. "Wait— that high? Nah I\'m done." — references it being high but no exact number.',
+  'One-word gut punch: e.g. "Wow. Just... wow." — pure emotion, no number.'
+];
+const randomVOStructure = VO_SCORE_STRUCTURES[Math.floor(Math.random() * VO_SCORE_STRUCTURES.length)];
+
 // Only include data for active sections — prevents DeepSeek from leaking data across clips
 const activeSectionIds = activeSections.map(s => s.id);
 const scenarioLines = [
@@ -285,6 +355,9 @@ ${scenarioLines.join('\n')}
 
 CRITICAL: Each body clip's text and VO must ONLY reference data from THAT section's "Actual data on screen". Do NOT use data from other sections. The WTF Happening clip talks about categories (Intentions, Chemistry, Effort, etc.), NOT about dynamics or soul types.
 
+🎲 TOXIC SCORE VO — USE THIS EXACT STRUCTURE: ${randomVOStructure}
+Follow this structure closely. Do NOT default to "Number? Comment." unless the structure above specifically tells you to mention the number.
+
 ${sectionsForPrompt}
 
 ## VO TEMPLATE
@@ -304,5 +377,13 @@ ${socialFormatted}
 Generate the content copy JSON now.`;
 
 return [{
-  json: { systemPrompt, userPrompt, scenario }
+  json: {
+    systemPrompt,
+    userPrompt,
+    scenario,
+    // Outro category selection (override Gemini's output in Validate Copy)
+    selectedOutroCategory,
+    selectedOutroText,
+    selectedOutroVO,
+  }
 }];

@@ -533,7 +533,7 @@ Provide your analysis in the following JSON format:
   "profile": {
     "type": "<Mixed Profile|Red Flag Alert|Green Light|Toxic Zone|Comfort Zone>",
     "subtitle": "<Gen Z creative one-liner. Be HONEST: if the other person isn't toxic, say so>",
-    "description": "<1-2 sentences, casual Gen Z tone. Be OBJECTIVE>"
+    "description": "<1 SHORT sentence, MAX 15 words. Casual Gen Z tone. Be OBJECTIVE>"
   },
   "categoryAnalysis": {
     "redFlagsGreenFlags": {
@@ -785,7 +785,7 @@ Respond with ONLY this JSON (no other text):
   "profile": {
     "type": "<Mixed Profile|Red Flag Alert|Green Light|Toxic Zone|Comfort Zone>",
     "subtitle": "<Gen Z one-liner, be honest>",
-    "description": "<1-2 sentences, casual Gen Z tone>"
+    "description": "<1 SHORT sentence, MAX 15 words. Casual Gen Z tone>"
   },
   "personArchetype": {
     "name": "Him",

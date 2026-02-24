@@ -53,7 +53,7 @@ Your output must be a single valid JSON object matching the ContentScenario inte
     "passionScore": number,
     "profileType": string,
     "profileSubtitle": string,
-    "profileDescription": string,
+    "profileDescription": string (1 SHORT sentence, MAX 15 words),
     "personSoulType": string,
     "userSoulType": string,
     "personDescription": string,
@@ -151,9 +151,17 @@ Your output must be a single valid JSON object matching the ContentScenario inte
     - GOOD solution (ANY tag): "When someone drops to one-word replies after you open up, it's not that they don't care. He read every word. But vulnerability makes him uncomfortable, so he's shrinking the conversation to feel safe again. His 'haha' is a shield."
     - GOOD solution (ANY tag): "This is a classic avoidant move. He WANTS you to choose him but he won't ask directly because asking = vulnerability = risk of rejection. So he frames it as 'your choice' but he's 100% keeping score of what you pick."
     - GOOD solution (RED FLAG): "He waited 4 minutes to send a single letter because you challenged his narrative. In his mind, you weren't supposed to push back. The 'k' says: 'I'm withdrawing my attention until you comply.' It's emotional withholding disguised as casualness."
+13. profileDescription: 1 SHORT sentence, MAX 15 words. Casual Gen Z tone. This appears under the toxic score — keep it punchy.
 14. No timestamps in message text: Timestamps go in the separate "time" field.
 15. Natural texting: lowercase, abbreviations (wyd, lol, ngl, tbh, omg), emojis where natural. Real 18-28 year olds.
 16. Conversation flow: Messages must flow naturally. No random topic jumps.
+17. Dynamic subtitle/whyThisHappens/patternBreak: ALWAYS address the user as "You/Your", NEVER "Her/She". The dynamic card speaks TO the user. "Ignoring Your Needs" = GOOD. "Ignoring Her Needs" = BAD.
+18. ALL text that refers to the user ("me" in the chat) MUST use "you/your", NEVER "she/her" or "he/him" for the user. This applies EVERYWHERE: messageInsights description, messageInsights solution, category descriptions, dynamic fields. The app speaks DIRECTLY TO the user.
+    - BAD: "he avoids accountability by implying she 'owes' him effort" ← who is "she"? That's the USER
+    - GOOD: "he avoids accountability by implying you 'owe' him effort" ← speaks to the user
+    - BAD: "He wants her to feel guilty for expressing a need" ← "her" = the user
+    - GOOD: "He wants you to feel guilty for expressing a need" ← direct address
+    - The ONLY "he/him/she/her" allowed is for the PERSON BEING ANALYZED (the contact), NEVER for the user.
 
 ## VIRAL CHAT RULES — THIS IS THE #1 PRIORITY
 
@@ -178,6 +186,39 @@ CHAT STRUCTURE FOR VIRALITY:
 - Include moments where "me" calls him out OR moments where she misses the red flag (both are viral)
 - Natural texting: lowercase, abbreviations (wyd, lol, ngl, tbh), emojis. NOT formal grammar.
 - Some messages should be short punchy texts, not paragraphs
+
+⚠️ CHAT OPENING VARIETY — CRITICAL (DO NOT ALWAYS START WITH "how was yesterday/last night/the weekend")
+Every chat must start from a DIFFERENT context. NEVER use the same opener twice. Pick a RANDOM starting point from this list and ROTATE:
+
+OPENING CONTEXTS (pick ONE, do NOT default to "how was your night"):
+- MID-ARGUMENT: Chat starts in the middle of a fight ("so you're really not gonna say anything about last night?")
+- CAUGHT RED-HANDED: She saw something and opens with it ("why is jess commenting hearts on all your pics")
+- SCREENSHOT EVIDENCE: She found something ("so i just saw your location was at her place at 2am")
+- LATE NIGHT TEXT: He texts out of nowhere ("u up?" at 1:47am after a week of silence)
+- AFTER BEING IGNORED: She breaks the silence ("so you can post stories but you can't text me back?")
+- POST-HANGOUT: Something happened in person ("what you said in front of your friends was so embarrassing")
+- HE STARTS SWEET: Lovebombing opening that turns ("good morning beautiful ❤️" → then the mask slips)
+- PLANS GONE WRONG: Making plans that reveal priorities ("so are you coming to my thing saturday or not")
+- JEALOUSY TRIGGER: One of them did something social ("who was at that party with you")
+- APOLOGY ATTEMPT: He's trying to make up for something ("babe i said i was sorry what else do you want")
+- RANDOM CHECK-IN THAT ESCALATES: Innocent question that uncovers something ("wyd" → "at mike's" → "who's mike" → spirals)
+- SHARED SOCIAL MEDIA: Something on socials sparked it ("your ex just followed you back and you didn't think to tell me?")
+- MONEY/EFFORT: About doing something for her ("you forgot my birthday and now you wanna act like it's fine?")
+- THE COMEBACK: He comes back after ghosting ("hey stranger" after disappearing for 2 weeks)
+- FRIEND TOLD HER: Third party info ("so maya told me what you said about me")
+
+BAD OPENERS (overused — NEVER generate these):
+- "hey how was your day/night/weekend" → BANNED, this is the #1 problem
+- "hey what are you doing" → too generic
+- "how was yesterday" → too generic
+- Any variation of asking about their day/night/plans as opener
+
+GOOD OPENERS (specific, dramatic, immediately hooks):
+- "so you're just not gonna mention the girl in your car yesterday?"
+- "babe i'm sorry" "sorry for WHAT exactly"
+- "u up?" (at 2:34am, after 5 days of nothing)
+- "your mom literally told me you were with someone else"
+- "why did you unfollow me and then follow me back"
 
 BAD CHAT (boring, not viral — NEVER generate this):
 - "Hey how's your week?" "Good, you?" "Want to grab dinner?" "Sure!" "Great see you at 8"
@@ -221,6 +262,31 @@ GOOD CHAT (viral, toxic, dramatic):
 // USER PROMPT
 // ============================================================
 
+// Randomly pick a chat context to force variety each generation
+const CHAT_CONTEXTS = [
+  { context: 'CAUGHT RED-HANDED', hint: 'She found evidence (a text, a photo, a location, a social media post) and confronts him directly. He deflects/denies.' },
+  { context: 'LATE NIGHT BREADCRUMB', hint: 'He texts at 1-3am after days/weeks of silence. She either calls it out or falls for it.' },
+  { context: 'POST-HANGOUT FALLOUT', hint: 'Something happened in person (he said something, did something, ignored her in front of friends) and she confronts him over text.' },
+  { context: 'APOLOGY GONE WRONG', hint: 'He\'s apologizing but badly — deflecting blame, minimizing, or making it about himself. The apology IS the red flag.' },
+  { context: 'GHOSTING COMEBACK', hint: 'He disappeared for days/weeks and now texts like nothing happened. She either confronts or he acts casual about it.' },
+  { context: 'JEALOUSY SPIRAL', hint: 'Something on social media or with another girl sparked a confrontation. He gaslights her into feeling crazy for asking.' },
+  { context: 'BROKEN PROMISE', hint: 'He forgot/bailed on something important (birthday, plans, meeting her family). She brings it up, he dismisses it.' },
+  { context: 'FRIEND EXPOSED HIM', hint: 'Her friend told her something he did/said behind her back. She confronts him with the info.' },
+  { context: 'MID-ARGUMENT CONTINUATION', hint: 'Chat picks up mid-fight — they had an argument earlier (in person or text) and it\'s continuing. No "hey" opener, straight into the tension.' },
+  { context: 'DOUBLE STANDARDS', hint: 'She did something he does all the time (hung out with a guy friend, went out late) and he flips out. The hypocrisy is the red flag.' },
+  { context: 'HE STARTS SWEET THEN FLIPS', hint: 'Opens with lovebombing/sweetness ("good morning beautiful") but within a few messages shows his real colors.' },
+  { context: 'SHE SETS A BOUNDARY', hint: 'She tries to express a need or set a boundary. He guilt-trips, dismisses, or turns it around on her.' },
+  { context: 'THE "WHAT ARE WE" TALK', hint: 'She asks about the relationship status. He dodges, deflects, gets annoyed, or gives a non-answer.' },
+  { context: 'EX DRAMA', hint: 'His ex is somehow involved — still texting him, he\'s still following her, she found old messages. He downplays it.' },
+  { context: 'MONEY/EFFORT IMBALANCE', hint: 'She does everything (plans dates, buys gifts, drives to him) and he does nothing. She finally brings it up.' }
+];
+const randomContext = CHAT_CONTEXTS[Math.floor(Math.random() * CHAT_CONTEXTS.length)];
+
+// Force a specific score each run (Gemini defaults to 85 every time without this)
+// Toxic score range: 70-99 → overallScore range: 1-30
+const randomToxicScore = Math.floor(Math.random() * 30) + 70; // 70-99
+const randomOverallScore = 100 - randomToxicScore;
+
 const userPrompt = `Generate a ContentScenario JSON with these parameters:
 
 CONCEPT: ${concept.concept_name}
@@ -233,6 +299,15 @@ SCENARIOS NEEDED: ${concept.scenarios_per_video || 1}
 
 BODY CLIP STRUCTURE (what the video will show):
 ${bodyClipsFormatted}
+
+🎲 CHAT CONTEXT FOR THIS SCENARIO: ${randomContext.context}
+${randomContext.hint}
+You MUST use this specific context as the starting point for the chat. Do NOT ignore this and default to "how was your night".
+
+🎯 SCORE FOR THIS SCENARIO: overallScore MUST be exactly ${randomOverallScore} (toxic score = ${randomToxicScore}/100).
+Do NOT change this number. Use exactly ${randomOverallScore} for overallScore in your JSON output.
+
+🎲 CONTACT NAME: Pick a random, creative first name for the contactName. NEVER use "Jake" — pick something different every time. Use any real name that fits a Gen Z person (18-28). Be creative and varied.
 
 ⚠️ THE #1 RULE — READ THIS FIRST ⚠️
 The CHAT ITSELF must contain ACTUAL TOXIC BEHAVIOR. NOT a normal conversation with a toxic analysis slapped on top.

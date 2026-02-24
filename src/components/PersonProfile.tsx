@@ -184,29 +184,32 @@ function HeroSection({ data }: { data: PersonProfileData }) {
         </h1>
 
         {/* Relationship Status Pill */}
-        {person.relationshipStatus && (
-          <div
-            className="mt-2 px-3 py-1 rounded-full"
-            style={{
-              background: 'rgba(255, 255, 255, 0.1)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-            }}
-          >
-            <span
+        {person.relationshipStatus && (() => {
+          const statusOpt = RELATIONSHIP_STATUS_OPTIONS.find(o => o.value === person.relationshipStatus);
+          return statusOpt ? (
+            <div
+              className="mt-2 px-3 py-1 rounded-full flex items-center gap-1.5"
               style={{
-                fontSize: '12px',
-                fontFamily: 'Plus Jakarta Sans, sans-serif',
-                fontWeight: 200,
-                letterSpacing: '1.5px',
-                color: 'rgba(255, 255, 255, 0.7)',
+                background: 'rgba(255, 255, 255, 0.1)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
               }}
             >
-              {RELATIONSHIP_STATUS_OPTIONS.find(o => o.value === person.relationshipStatus)?.emoji}{' '}
-              {RELATIONSHIP_STATUS_OPTIONS.find(o => o.value === person.relationshipStatus)?.label}
-            </span>
-          </div>
-        )}
+              <img src={statusOpt.icon} alt="" className="w-5 h-5" />
+              <span
+                style={{
+                  fontSize: '12px',
+                  fontFamily: 'Plus Jakarta Sans, sans-serif',
+                  fontWeight: 200,
+                  letterSpacing: '1.5px',
+                  color: 'rgba(255, 255, 255, 0.7)',
+                }}
+              >
+                {statusOpt.label}
+              </span>
+            </div>
+          ) : null;
+        })()}
 
         {/* Archetype title */}
         <p
@@ -2573,8 +2576,9 @@ function PersonSettingsBottomSheet({
                           background: person.relationshipStatus === option.value ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
                         }}
                       >
-                        <span style={{ ...menuItemStyle, color: 'rgba(255, 255, 255, 0.9)' }}>
-                          {option.emoji} {option.label}
+                        <span className="flex items-center gap-2" style={{ ...menuItemStyle, color: 'rgba(255, 255, 255, 0.9)' }}>
+                          <img src={option.icon} alt="" className="w-5 h-5" />
+                          {option.label}
                         </span>
                         {person.relationshipStatus === option.value && (
                           <Check size={18} style={{ color: '#7c3aed' }} />

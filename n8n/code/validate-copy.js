@@ -64,8 +64,45 @@ const errors = [];
 
 // Character limit for all VOs (50 chars = ~3 seconds of natural speech)
 const VO_CHAR_LIMIT = 50;
-// Hard limit with some grace (validation fails above this)
-const VO_CHAR_HARD_LIMIT = 55;
+// Hard limit — above this we auto-trim instead of failing
+const VO_CHAR_HARD_LIMIT = 65;
+
+// Auto-trim VOs that exceed the character limit (Gemini can't count chars)
+function trimVO(vo) {
+  // Allow small grace (up to 55) — only actively trim above that
+  const TRIM_THRESHOLD = 55;
+  if (!vo || vo.length <= TRIM_THRESHOLD) return vo;
+
+  let trimmed = vo;
+
+  // Step 1: Remove trailing filler words
+  const TRAILING_FILLERS = [', lol', ' lol', ', honestly', ' honestly', ', like', ' tho', ', bro', ' fr', ', ngl'];
+  for (const filler of TRAILING_FILLERS) {
+    if (trimmed.toLowerCase().endsWith(filler) || trimmed.toLowerCase().endsWith(filler + '.')) {
+      trimmed = trimmed.substring(0, trimmed.length - (trimmed.toLowerCase().endsWith(filler + '.') ? filler.length + 1 : filler.length)).trim();
+      // Re-add period if it makes sense
+      if (!/[.!?—…]$/.test(trimmed)) trimmed += '.';
+      if (trimmed.length <= VO_CHAR_LIMIT) return trimmed;
+    }
+  }
+
+  // Step 2: If two sentences, try keeping just the first
+  const sentenceBreak = trimmed.match(/^(.{20,}?[.!?])\s+/);
+  if (sentenceBreak && sentenceBreak[1].length <= VO_CHAR_LIMIT && sentenceBreak[1].length >= 20) {
+    return sentenceBreak[1];
+  }
+
+  // Step 3: Cut at last word boundary before limit and add ellipsis
+  if (trimmed.length > VO_CHAR_LIMIT) {
+    const cut = trimmed.substring(0, VO_CHAR_LIMIT - 1);
+    const lastSpace = cut.lastIndexOf(' ');
+    if (lastSpace > 20) {
+      trimmed = cut.substring(0, lastSpace).replace(/[,.\s]+$/, '') + '—';
+    }
+  }
+
+  return trimmed;
+}
 
 // Valid body clip section IDs
 const ALL_SECTION_IDS = ['toxic_score', 'soul_type', 'wtf_happening', 'between_the_lines', 'souls_together'];
@@ -78,11 +115,18 @@ if (!copy.hookText || typeof copy.hookText !== 'string') {
   errors.push('hookText too long: ' + copy.hookText.split(' ').length + ' words (max 8-10)');
 }
 
-// Hook VO (50 chars max for 3s speech)
+// Hook VO (50 chars max for 3s speech) — auto-trim if over limit
 if (!copy.hookVO || typeof copy.hookVO !== 'string') {
   errors.push('Missing hookVO');
-} else if (copy.hookVO.length > VO_CHAR_HARD_LIMIT) {
-  errors.push('hookVO too long: ' + copy.hookVO.length + ' chars (max ' + VO_CHAR_LIMIT + '). Text: "' + copy.hookVO + '"');
+} else {
+  const originalHookVO = copy.hookVO;
+  copy.hookVO = trimVO(copy.hookVO);
+  if (originalHookVO !== copy.hookVO) {
+    errors.push('hookVO auto-trimmed: "' + originalHookVO + '" → "' + copy.hookVO + '" (auto-fixed)');
+  }
+  if (copy.hookVO.length > VO_CHAR_HARD_LIMIT) {
+    errors.push('hookVO too long even after trim: ' + copy.hookVO.length + ' chars (max ' + VO_CHAR_LIMIT + '). Text: "' + copy.hookVO + '"');
+  }
 }
 
 // Body clips
@@ -105,8 +149,15 @@ if (!Array.isArray(copy.bodyClips)) {
     }
     if (!clip.vo || typeof clip.vo !== 'string') {
       errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): missing vo');
-    } else if (clip.vo.length > VO_CHAR_HARD_LIMIT) {
-      errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): vo too long (' + clip.vo.length + ' chars, max ' + VO_CHAR_LIMIT + '). Text: "' + clip.vo + '"');
+    } else {
+      const originalVO = clip.vo;
+      clip.vo = trimVO(clip.vo);
+      if (originalVO !== clip.vo) {
+        errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): vo auto-trimmed: "' + originalVO + '" → "' + clip.vo + '" (auto-fixed)');
+      }
+      if (clip.vo.length > VO_CHAR_HARD_LIMIT) {
+        errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): vo too long even after trim (' + clip.vo.length + ' chars, max ' + VO_CHAR_LIMIT + '). Text: "' + clip.vo + '"');
+      }
     }
   });
 
@@ -120,18 +171,32 @@ if (!Array.isArray(copy.bodyClips)) {
   }
 }
 
-// Outro text (max 5 words)
+// ═══ Outro category override from pool selection (Build Copy Prompt) ═══
+const { selectedOutroCategory, selectedOutroText, selectedOutroVO: selectedOutroVOText } = $('Build Copy Prompt').first().json;
+if (selectedOutroText) {
+  copy.outroText = selectedOutroText;
+  copy.outroVO = selectedOutroVOText || selectedOutroText;
+}
+// Tag the copy JSON with the selected category for Workflow 3 routing
+copy.outroCategory = selectedOutroCategory || 'organic';
+
+// Outro text (max 7 words — pool examples can be longer)
 if (!copy.outroText || typeof copy.outroText !== 'string') {
   errors.push('Missing outroText');
-} else if (copy.outroText.split(' ').length > 7) {
-  errors.push('outroText too long: ' + copy.outroText.split(' ').length + ' words (max 5)');
 }
 
-// Outro VO (50 chars max for 3s speech)
+// Outro VO (50 chars max for 3s speech) — auto-trim if over limit
 if (!copy.outroVO || typeof copy.outroVO !== 'string') {
   errors.push('Missing outroVO');
-} else if (copy.outroVO.length > VO_CHAR_HARD_LIMIT) {
-  errors.push('outroVO too long: ' + copy.outroVO.length + ' chars (max ' + VO_CHAR_LIMIT + '). Text: "' + copy.outroVO + '"');
+} else {
+  const originalOutroVO = copy.outroVO;
+  copy.outroVO = trimVO(copy.outroVO);
+  if (originalOutroVO !== copy.outroVO) {
+    errors.push('outroVO auto-trimmed: "' + originalOutroVO + '" → "' + copy.outroVO + '" (auto-fixed)');
+  }
+  if (copy.outroVO.length > VO_CHAR_HARD_LIMIT) {
+    errors.push('outroVO too long even after trim: ' + copy.outroVO.length + ' chars (max ' + VO_CHAR_LIMIT + '). Text: "' + copy.outroVO + '"');
+  }
 }
 
 // Social caption
