@@ -1264,7 +1264,7 @@ async function processTwoPhaseAnalysis(analysisId: string, imageFiles: File[]): 
   // ═══════════════════════════════════════════════════════════
   // DEMO MODE: Skip AI, return hardcoded super-toxic result
   // ═══════════════════════════════════════════════════════════
-  const DEMO_MODE = true; // ← SET TO false TO USE REAL GEMINI AI
+  const DEMO_MODE = false; // ← SET TO true FOR HARDCODED DEMO RESULT
   if (DEMO_MODE) {
     console.log('[DEMO MODE] Returning hardcoded toxic result');
 

@@ -226,13 +226,18 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   }, [analysisId]);
 
   async function loadUserState() {
-    const state = await getUserState();
-    setUserState({
-      isPremium: state.isPremium,
-      canUseSingleUnlock: canPurchaseSingleUnlock(state),
-      singleUnlocksRemaining: 2 - state.singleUnlocksThisMonth,
-      isFirstAnalysis: canUseFirstFreeAnalysis(state)
-    });
+    try {
+      const state = await getUserState();
+      setUserState({
+        isPremium: state.isPremium,
+        canUseSingleUnlock: canPurchaseSingleUnlock(state),
+        singleUnlocksRemaining: 2 - state.singleUnlocksThisMonth,
+        isFirstAnalysis: canUseFirstFreeAnalysis(state)
+      });
+    } catch (err) {
+      console.warn('[ResultsPage] Failed to load user state, using defaults (locked):', err);
+      // Keep defaults: isPremium=false, isFirstAnalysis=false → content stays locked
+    }
   }
 
   function handleBlurredContentClick() {
@@ -371,11 +376,14 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
 
   // Determine lock state:
   // - isPremium or analysis.isUnlocked = everything unlocked
-  // - isFirstAnalysis (first-time free) = partial unlock (teaser mode)
-  // - Otherwise = fully locked
+  // - Otherwise = locked (score + soul type visible, rest blurred)
+  // Same lock for ALL non-premium users (first-time and returning)
   const isFullyUnlocked = isDev || userState.isPremium || analysis.isUnlocked;
-  // When TEST_LOCKS is true, force first-time free mode for testing
-  const isFirstTimeFree = TEST_LOCKS || (!isFullyUnlocked && userState.isFirstAnalysis);
+  const isLocked = TEST_LOCKS || !isFullyUnlocked;
+  // isFirstTimeFree passed to child components for lock UI (same lock for all non-premium)
+  const isFirstTimeFree = isLocked;
+  // First-time user flag (only for hero section visibility — no person added yet)
+  const isFirstTime = !isFullyUnlocked && userState.isFirstAnalysis;
 
   // Profile hero data
   const personAvatarUrl = analysis.personAvatar || null;
@@ -385,7 +393,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   return (
     <div className="min-h-screen bg-black text-white">
       {/* ===== Profile Hero Section (hidden for first-time users who haven't added a person yet) ===== */}
-      {!isFirstTimeFree && (
+      {!isFirstTime && (
       <div className="relative w-full overflow-hidden" style={{ minHeight: '38vh' }}>
         {/* Blurred archetype background */}
         <img
@@ -488,7 +496,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
       )}
 
       {/* Content — overlaps hero by 40px to hide any seam (same pattern as PersonProfile) */}
-      <div className="relative flex flex-col items-center justify-center pb-4 bg-black" style={{ marginTop: isFirstTimeFree ? '0px' : '-40px', zIndex: 10 }}>
+      <div className="relative flex flex-col items-center justify-center pb-4 bg-black" style={{ marginTop: isFirstTime ? '0px' : '-40px', zIndex: 10 }}>
         <div className="w-full max-w-md px-[30px]">
           <div className="bg-black pt-4 pb-12">
             <div className="text-center mb-3">
@@ -942,7 +950,9 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             transition={{ delay: 0.15, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
           >
             <button
-              className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-full active:scale-95 transition-all"
+              onClick={handleShareArchetype}
+              disabled={isGeneratingShare}
+              className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-full active:scale-95 transition-all disabled:opacity-50"
               style={{
                 background: '#7200B4',
                 fontFamily: 'Plus Jakarta Sans, sans-serif',
@@ -952,7 +962,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             >
               <img src="/devil (1).png" alt="" className="w-5 h-5" />
               <span className="text-white font-medium" style={{ fontSize: '15px' }}>
-                SHARE YOUR DYNAMIC
+                {isGeneratingShare ? 'GENERATING...' : 'SHARE YOUR DYNAMIC'}
               </span>
             </button>
           </motion.div>

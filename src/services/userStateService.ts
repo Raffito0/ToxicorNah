@@ -138,14 +138,8 @@ export function canPurchaseSingleUnlock(state: UserState): boolean {
 }
 
 export function shouldShowBlurredContent(state: UserState): boolean {
-  // DEV MODE: Always unlocked for design work
-  return false;
-
-  // Original logic (uncomment when done):
-  // if (state.isPremium) return false;
-  // if (canUseFirstFreeAnalysis(state)) return false;
-  // if (canUseBonusUnlock(state)) return false;
-  // return true;
+  if (state.isPremium) return false;
+  return true;
 }
 
 export async function consumeFirstFreeAnalysis(): Promise<void> {
