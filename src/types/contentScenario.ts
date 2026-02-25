@@ -11,6 +11,7 @@ export interface ContentScenario {
     appStyle: 'imessage' | 'instagram' | 'whatsapp';
     messages: ChatMessage[];
   };
+  personAvatar?: string;
   results: {
     personName: string;
     personGender: 'male' | 'female';

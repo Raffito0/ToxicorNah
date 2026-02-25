@@ -188,6 +188,7 @@ export function buildStoredResult(scenario: ContentScenario): StoredAnalysisResu
       patternBreak: r.dynamic.patternBreak,
       powerBalance: r.dynamic.powerBalance,
     },
+    personAvatar: scenario.personAvatar || null,
   };
 }
 

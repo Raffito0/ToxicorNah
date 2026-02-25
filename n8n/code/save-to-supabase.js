@@ -84,6 +84,20 @@ if (typeof scenarioJson === 'string') {
   }
 }
 
+// Pick a random profile pic for the avatar circle
+const PROFILE_PICS = [
+  '/GUYS PROFILE PICS/openart-image_43m08NP7_1772054346917_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_767eF_NR_1772054370739_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_76WI-X36_1772054341562_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_CX2wvxHx_1772054327378_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_Igx9x5Tb_1772054336505_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_-Jv_st6o_1772054314707_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_k34F-chA_1772054331278_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_l7RhnYOF_1771785086054_raw.png',
+  '/GUYS PROFILE PICS/openart-image_q7qc-3aA_1772054349021_raw.jpg',
+];
+scenarioJson.personAvatar = PROFILE_PICS[Math.floor(Math.random() * PROFILE_PICS.length)];
+
 // Supabase REST API insert
 
 const response = await fetch(SUPABASE_URL + '/rest/v1/content_scenarios', {
