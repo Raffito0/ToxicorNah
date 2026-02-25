@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { generateShareVideo } from '../utils/shareVideo';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, Lock, MoreVertical, X, Pencil, Camera, MessageCircle, Archive, Trash2, Check } from 'lucide-react';
 import { SoulTypeMedia } from './SoulTypeMedia';
@@ -21,6 +22,9 @@ import {
 } from '../services/personProfileService';
 import { DynamicCard } from './DynamicCard';
 import { haptics } from '../utils/haptics';
+import { getAvatarBackground } from '../data/soulTypes';
+import { CallOutOverlay } from './CallOutOverlay';
+import { isDevMode } from '../utils/platform';
 import { getUserState, UserState, canPurchaseSingleUnlock } from '../services/userStateService';
 import { createSubscriptionCheckout, createSingleUnlockCheckout } from '../services/stripeService';
 
@@ -79,7 +83,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
   const accentColor = `rgb(${Math.round((from.r + to.r) / 2)}, ${Math.round((from.g + to.g) / 2)}, ${Math.round((from.b + to.b) / 2)})`;
 
   const avatarUrl = person.avatar || '/openart-image_l7RhnYOF_1771785086054_raw.png';
-  const archetypeImageUrl = '/image_r6qZ9PP4_1770361994322_1024.jpg';
+  const archetypeImageUrl = getAvatarBackground(archetype.title) || '/image_r6qZ9PP4_1770361994322_1024.jpg';
 
   return (
     <div className="relative w-full overflow-hidden" style={{ minHeight: '45vh' }}>
@@ -111,13 +115,14 @@ function HeroSection({ data }: { data: PersonProfileData }) {
 
       {/* Content */}
       <div className="relative flex flex-col items-center justify-center text-center px-8 pt-12" style={{ zIndex: 3, minHeight: '45vh' }}>
-        {/* Avatar with Pulsing Halo Ring */}
-        <div className="relative">
+        {/* Avatar + Pulsing Halo Ring */}
+        <div className="relative flex items-center justify-center">
           {/* Outer pulsing halo ring */}
           <motion.div
-            className="absolute inset-0 rounded-full"
+            className="absolute rounded-full"
             style={{
-              margin: '-4px',
+              width: '100px',
+              height: '100px',
               border: `1.5px solid ${accentColor}`,
             }}
             animate={{
@@ -1626,25 +1631,15 @@ function ReceiptsSection({ data, isLocked, onUnlockClick }: { data: PersonProfil
   const redTags = ['RED FLAG'];
   const greenTags = ['GREEN FLAG'];
 
-  // Mock green flag messages for preview
-  const mockGreenFlags = [
-    { messageText: 'I just want you to know I appreciate you being honest with me', insightTitle: 'Emotional Maturity', insightTag: 'GREEN FLAG', tagColor: '#4ade80', description: 'This shows genuine appreciation for vulnerability and honesty in the relationship.', solution: '' },
-    { messageText: 'Take your time, no pressure at all. I\'ll be here whenever you\'re ready', insightTitle: 'Respects Boundaries', insightTag: 'GREEN FLAG', tagColor: '#4ade80', description: 'They\'re giving you space without guilt-tripping. That\'s healthy communication.', solution: '' },
-    { messageText: 'Hey I noticed you seemed off today, everything okay?', insightTitle: 'Emotionally Attentive', insightTag: 'GREEN FLAG', tagColor: '#43A047', description: 'They pay attention to your mood and check in without being asked. Major green flag.', solution: '' },
-  ];
-
   const allMessages = activeFilter === 'red'
     ? receipts.messages.filter(msg => {
         const upper = (msg.insightTag || '').toUpperCase();
         return redTags.some(t => upper.includes(t));
       })
-    : [
-        ...receipts.messages.filter(msg => {
-          const upper = (msg.insightTag || '').toUpperCase();
-          return greenTags.some(t => upper.includes(t));
-        }),
-        ...mockGreenFlags,
-      ];
+    : receipts.messages.filter(msg => {
+        const upper = (msg.insightTag || '').toUpperCase();
+        return greenTags.some(t => upper.includes(t));
+      });
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -1769,9 +1764,20 @@ function ReceiptsSection({ data, isLocked, onUnlockClick }: { data: PersonProfil
 
       {allMessages.length === 0 ? (
         <div className="rounded-[28px] p-8 text-center" style={{ background: 'rgba(255,255,255,0.03)' }}>
-          <p className="text-white/30 text-sm" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}>
-            No {activeFilter === 'red' ? 'red flags' : 'green flags'} found
-          </p>
+          {activeFilter === 'green' ? (
+            <>
+              <p className="text-white/60 text-lg mb-2" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, letterSpacing: '0.5px' }}>
+                Zero green flags{data.person.totalAnalyses > 1 ? ` across ${data.person.totalAnalyses} conversations` : ''}.
+              </p>
+              <p className="text-white/30 text-sm" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 300, letterSpacing: '1px' }}>
+                Let that sink in.
+              </p>
+            </>
+          ) : (
+            <p className="text-white/30 text-sm" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}>
+              No red flags found
+            </p>
+          )}
         </div>
       ) : (
         <>
@@ -2675,6 +2681,7 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
   const [userState, setUserState] = useState<UserState | null>(null);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showCallOutPreview, setShowCallOutPreview] = useState(false);
   const [paywallState, setPaywallState] = useState({
     canUseSingleUnlock: true,
     singleUnlocksRemaining: 2,
@@ -2682,8 +2689,10 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
   });
 
   // Determine if premium content should be locked
-  // TEMPORARILY UNLOCKED - set to false to unlock all sections
-  const isLocked = false;
+  // Set TEST_LOCKS to true to test the lock system locally
+  const TEST_LOCKS = false;
+  const isDev = !TEST_LOCKS && isDevMode();
+  const isLocked = TEST_LOCKS || !(isDev || userState?.isPremium);
 
   useEffect(() => {
     loadProfile();
@@ -2829,6 +2838,7 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
           transition={{ duration: 0.5, delay: 0.3 }}
         >
           <button
+            onClick={() => { haptics.medium(); setShowCallOutPreview(true); }}
             className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-full active:scale-95 transition-all"
             style={{
               background: '#7200B4',
@@ -2874,6 +2884,20 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
         onPersonUpdated={reloadProfile}
         onPersonDeleted={handlePersonDeleted}
         onPersonArchived={handlePersonArchived}
+      />
+
+      {/* CALL HIM OUT — Preview Overlay */}
+      <CallOutOverlay
+        isOpen={showCallOutPreview}
+        onClose={() => setShowCallOutPreview(false)}
+        soulTypeTitle={data.archetype.title}
+        soulTypeTagline={data.archetype.shareableTagline || data.archetype.tagline || data.archetype.description}
+        soulTypeImageUrl={data.archetype.imageUrl || DEV_ARCHETYPE_IMAGE_FALLBACK}
+        overallScore={data.verdict.overallScore}
+        personGender="male"
+        gradientFrom={data.archetype.gradientFrom}
+        gradientTo={data.archetype.gradientTo}
+        sideProfileImageUrl={data.archetype.sideProfileImageUrl}
       />
     </div>
   );

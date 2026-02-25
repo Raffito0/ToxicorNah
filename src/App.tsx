@@ -6,6 +6,7 @@ import { ConnectionsPage } from './components/ConnectionsPage';
 import { PersonProfile } from './components/PersonProfile';
 import { SoulPage } from './components/SoulPage';
 import { PaymentSuccessPage } from './components/PaymentSuccessPage';
+import { ShareLandingPage } from './components/ShareLandingPage';
 import { BottomNav, TabId } from './components/BottomNav';
 import { supabase } from './lib/supabase';
 import { loadScenario, loadScenarioFromSupabase } from './services/contentModeService';
@@ -121,6 +122,15 @@ function App() {
   }
 
   // Show payment success page if redirected from Stripe
+  // Share landing page — public, no auth needed
+  // Handles both /share/{id} (direct) and /?share={id} (redirect from Edge Function)
+  const sharePath = window.location.pathname.match(/^\/share\/([a-f0-9-]+)$/i);
+  const shareParam = new URLSearchParams(window.location.search).get('share');
+  const shareId = sharePath?.[1] || shareParam;
+  if (shareId) {
+    return <ShareLandingPage shareId={shareId} />;
+  }
+
   if (showPaymentSuccess) {
     return <PaymentSuccessPage onComplete={handlePaymentComplete} />;
   }

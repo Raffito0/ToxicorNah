@@ -429,6 +429,13 @@ export function getFemaleSoulTypeByName(name: string): SoulType | undefined {
   return FEMALE_SOUL_TYPES.find(st => st.name.toLowerCase() === name.toLowerCase());
 }
 
+/** Get avatar background image URL for a male Soul Type name */
+export function getAvatarBackground(soulTypeName: string): string | null {
+  const match = MALE_SOUL_TYPES.find(st => st.name.toLowerCase() === soulTypeName.toLowerCase());
+  if (!match) return null;
+  return `/Background images for avatar circle section/${match.name}.jpg`;
+}
+
 // Get all Soul Types
 export function getAllSoulTypes(): SoulType[] {
   return [...MALE_SOUL_TYPES, ...FEMALE_SOUL_TYPES];

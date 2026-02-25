@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Lock } from 'lucide-react';
-import { toPng } from 'html-to-image';
+import { Lock, X } from 'lucide-react';
+import { generateShareVideo } from '../utils/shareVideo';
 import { getColorAtPercentage } from './ScoreRing';
 import { ToxicOrb } from './ToxicOrb';
 import { SwipeableCardDeck } from './SwipeableCardDeck';
@@ -17,6 +17,50 @@ import { createSubscriptionCheckout, createSingleUnlockCheckout } from '../servi
 import { supabase } from '../lib/supabase';
 import { isDevMode } from '../utils/platform';
 import { RELATIONSHIP_STATUS_OPTIONS } from '../services/personProfileService';
+import { getAvatarBackground } from '../data/soulTypes';
+import { CallOutOverlay } from './CallOutOverlay';
+
+// ===== Loading Screen =====
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+
+// Loading phrase pools — 5 steps, each ~2s, building tension
+const LOADING_STEPS: string[][] = [
+  // STEP 1 — OPEN
+  ['Looking at this...', 'Let me see', 'Opening the chat', 'Give me a second', 'Alright', 'Okay'],
+  // STEP 2 — READING
+  ['Reading carefully', 'Looking closer', 'Noticing details', "There's something here", 'Hmm', "I'm seeing it"],
+  // STEP 3 — PATTERN
+  ['This feels familiar', "There's a pattern", 'That keeps happening', "Something's off", 'Yeah...', 'Interesting'],
+  // STEP 4 — REALIZATION
+  ['That explains a lot', 'Now it makes sense', 'I see the dynamic', 'There it is', 'Okay', 'Got it'],
+  // STEP 5 — PRE REVEAL
+  ['Almost there', "I've got it", 'Ready', 'This is clear', 'Here we go', 'Alright'],
+];
+// Spicy variants injected into step 3 ~15% of the time
+const SPICY_STEP3 = ['Oh', 'Yikes', 'Hmm', 'Right...', 'Okay wow'];
+
+function pickLoadingSequence(): string[] {
+  const sequence = LOADING_STEPS.map((pool, i) => {
+    // 15% chance of spicy variant at step 3
+    if (i === 2 && Math.random() < 0.15) {
+      return SPICY_STEP3[Math.floor(Math.random() * SPICY_STEP3.length)];
+    }
+    return pool[Math.floor(Math.random() * pool.length)];
+  });
+  return sequence;
+}
+const LOADING_STORAGE = `${SUPABASE_URL}/storage/v1/object/public/dynamic-archetypes/loading-screens`;
+const LOADING_VIDEOS = [
+  `${LOADING_STORAGE}/Loading-1.mp4`,
+  `${LOADING_STORAGE}/Loading-2.mp4`,
+  `${LOADING_STORAGE}/Loading-3.mp4`,
+  `${LOADING_STORAGE}/Loading-4.mp4`,
+  `${LOADING_STORAGE}/Loading-5.mp4`,
+];
+// Pick one randomly per mount (stable across re-renders)
+function pickRandomLoadingVideo() {
+  return LOADING_VIDEOS[Math.floor(Math.random() * LOADING_VIDEOS.length)];
+}
 
 /**
  * Computes the DynamicCard gradient based on color similarity between
@@ -110,7 +154,9 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   const [analysis, setAnalysis] = useState<StoredAnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(true); // True until Phase 1 (quick) completes
   const [isDetailedLoading, setIsDetailedLoading] = useState(true); // True until Phase 2 (detailed) completes
-  const [loadingMessage, setLoadingMessage] = useState("Reading the vibes...");
+  const [loadingStep, setLoadingStep] = useState(0);
+  const loadingVideoUrl = useMemo(() => pickRandomLoadingVideo(), []);
+  const loadingSequence = useMemo(() => pickLoadingSequence(), []);
   const [showPaywall, setShowPaywall] = useState(false);
 
   // Compute halo color based on score zone (matches ToxicOrb palette)
@@ -130,9 +176,9 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   const [isArchetypeCardFlipped, setIsArchetypeCardFlipped] = useState(false);
   const [showArchetypeContent, setShowArchetypeContent] = useState(false);
   const [isGeneratingShare, setIsGeneratingShare] = useState(false);
+  const [showCallOutPreview, setShowCallOutPreview] = useState(false);
   const [showKeepEyeModal, setShowKeepEyeModal] = useState(false);
   const [keepEyeModalDismissed, setKeepEyeModalDismissed] = useState(false);
-  const shareableArchetypeRef = useRef<HTMLDivElement>(null);
 
   // Show "Keep an eye on him" modal 1s after paywall closes for first-time users
   const paywallWasOpened = useRef(false);
@@ -157,22 +203,16 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
     loadUserState();
   }, [analysisId]);
 
-  // Rotating loading messages
+  // Step-based loading phrases — 5 steps, ~2s each
   useEffect(() => {
     if (!isLoading) return;
 
-    const messages = [
-      "Reading the vibes...",
-      "Detecting patterns...",
-      "Analyzing chemistry...",
-      "Almost there..."
-    ];
-    let index = 0;
-
     const interval = setInterval(() => {
-      index = (index + 1) % messages.length;
-      setLoadingMessage(messages[index]);
-    }, 3000);
+      setLoadingStep(prev => {
+        if (prev >= 4) return 4; // Stay on last step
+        return prev + 1;
+      });
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [isLoading]);
@@ -247,19 +287,18 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   }
 
   const handleShareArchetype = useCallback(async () => {
-    if (!shareableArchetypeRef.current || isGeneratingShare || !analysis) return;
+    if (isGeneratingShare || !analysis) return;
     setIsGeneratingShare(true);
 
     try {
-      const dataUrl = await toPng(shareableArchetypeRef.current, {
-        pixelRatio: 2,
-        backgroundColor: '#0a0a0a',
-        skipFonts: true,
+      const videoBlob = await generateShareVideo({
+        videoSrc: analysis.personArchetype.imageUrl,
+        title: analysis.personArchetype.title,
+        tagline: analysis.personArchetype.tagline || '',
+        score: analysis.overallScore,
       });
-
-      const response = await fetch(dataUrl);
-      const blob = await response.blob();
-      const file = new File([blob], 'toxic-or-nah-soul-type.png', { type: 'image/png' });
+      const ext = videoBlob.type.includes('mp4') ? 'mp4' : 'webm';
+      const file = new File([videoBlob], `toxic-or-nah-soul-type.${ext}`, { type: videoBlob.type });
 
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
         await navigator.share({
@@ -268,10 +307,12 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
           text: `${analysis.personArchetype.title} - ${getToxicityLabel(analysis.overallScore)}`
         });
       } else {
+        const url = URL.createObjectURL(videoBlob);
         const link = document.createElement('a');
-        link.href = dataUrl;
-        link.download = 'toxic-or-nah-soul-type.png';
+        link.href = url;
+        link.download = `toxic-or-nah-soul-type.${ext}`;
         link.click();
+        URL.revokeObjectURL(url);
       }
     } catch (err) {
       console.error('Share failed:', err);
@@ -315,56 +356,85 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   }
 
   if (isLoading || !analysis) {
-    // Show skeleton loading state - immediate redirect from upload
+    // Fullscreen video + glassmorphism + progressive loading phrases
     return (
-      <div className="min-h-screen bg-black text-white">
-        <div className="flex flex-col items-center justify-center pt-4 pb-4">
-          <div className="w-full max-w-md px-[30px]">
-            <div className="bg-black py-12">
-              <div className="text-center mb-3">
-                <motion.p
-                  className="text-white/50 uppercase tracking-widest mb-2"
-                  style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                >
-                  Toxicity Score
-                </motion.p>
-                <motion.h1
-                  className="text-white text-3xl mb-2"
-                  style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px' }}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                >
-                  Analyzing...
-                </motion.h1>
-              </div>
+      <motion.div
+        className="min-h-screen bg-black text-white relative overflow-hidden"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+      >
+        {/* Fullscreen video background */}
+        <video
+          src={loadingVideoUrl}
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="auto"
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ zIndex: 0 }}
+        />
 
-              {/* Loading ToxicOrb */}
-              <div className="my-8">
-                <ToxicOrb score={0} size={140} isLoading={true} />
-              </div>
-
-              {/* Rotating loading message */}
-              <motion.div
-                className="text-center"
-                key={loadingMessage}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.3 }}
-              >
-                <p
-                  className="text-white/50 uppercase"
-                  style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
-                >
-                  {loadingMessage}
-                </p>
-              </motion.div>
-            </div>
-          </div>
+        {/* Glassmorphism — layer extends 60px beyond screen, parent clips it */}
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            top: '-60px',
+            left: '-60px',
+            right: '-60px',
+            bottom: '-60px',
+            maskImage: 'linear-gradient(to bottom, transparent 45%, black 70%, black 100%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 45%, black 70%, black 100%)',
+            zIndex: 1,
+          }}
+        >
+          <video
+            src={loadingVideoUrl}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            className="absolute inset-0 w-full h-full object-cover"
+            style={{ filter: 'blur(30px)' }}
+          />
         </div>
-      </div>
+        {/* Dark gradient overlay — bottom 45% */}
+        <div
+          className="absolute inset-x-0 bottom-0"
+          style={{
+            height: '45%',
+            background: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.25) 25%, rgba(0,0,0,0.55) 55%, rgba(0,0,0,0.85) 100%)',
+            zIndex: 2,
+          }}
+        />
+
+        {/* Loading phrase — anchored at bottom, glassmorphism entrance/exit */}
+        <div
+          className="absolute inset-0 flex items-end justify-center"
+          style={{ zIndex: 3, paddingBottom: '38%' }}
+        >
+          <AnimatePresence mode="wait">
+            <motion.p
+              key={loadingStep}
+              initial={{ opacity: 0, filter: 'blur(12px)', y: 6, scale: 0.97 }}
+              animate={{ opacity: 0.85, filter: 'blur(0px)', y: 0, scale: 1 }}
+              exit={{ opacity: 0, filter: 'blur(12px)', y: -6, scale: 0.97 }}
+              transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+              className="text-white text-center"
+              style={{
+                fontSize: '22px',
+                fontFamily: 'Plus Jakarta Sans, sans-serif',
+                fontWeight: 300,
+                letterSpacing: '0.5px',
+              }}
+            >
+              {loadingSequence[loadingStep]}
+            </motion.p>
+          </AnimatePresence>
+        </div>
+      </motion.div>
     );
   }
 
@@ -395,9 +465,9 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
       {/* ===== Profile Hero Section (hidden for first-time users who haven't added a person yet) ===== */}
       {!isFirstTime && (
       <div className="relative w-full overflow-hidden" style={{ minHeight: '38vh' }}>
-        {/* Blurred archetype background */}
+        {/* Blurred archetype background — matched to Soul Type */}
         <img
-          src="/image_r6qZ9PP4_1770361994322_1024.jpg"
+          src={getAvatarBackground(analysis.personArchetype.title) || '/image_r6qZ9PP4_1770361994322_1024.jpg'}
           alt=""
           className="absolute inset-0 w-full h-full object-cover"
           style={{ filter: 'blur(18px) brightness(0.9)', transform: 'scale(1.15)' }}
@@ -843,9 +913,8 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
               transition={{ duration: 0.5, delay: 0.6 }}
             >
               <button
-                onClick={handleShareArchetype}
-                disabled={isGeneratingShare}
-                className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-full active:scale-95 transition-all disabled:opacity-50"
+                onClick={() => setShowCallOutPreview(true)}
+                className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-full active:scale-95 transition-all"
                 style={{
                   background: '#7200B4',
                   fontFamily: 'Plus Jakarta Sans, sans-serif',
@@ -855,7 +924,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
               >
                 <img src="/devil (1).png" alt="" className="w-5 h-5" />
                 <span className="text-white font-medium" style={{ fontSize: '15px' }}>
-                  {isGeneratingShare ? 'Generating...' : `CALL ${analysis.personGender === 'female' ? 'HER' : 'HIM'} OUT`}
+                  {`CALL ${analysis.personGender === 'female' ? 'HER' : 'HIM'} OUT`}
                 </span>
               </button>
             </motion.div>
@@ -970,151 +1039,21 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
 
       </div>
 
-      {/* Hidden Shareable Archetype Card (for html-to-image capture) */}
-      <div
-        ref={shareableArchetypeRef}
-        className="fixed"
-        style={{
-          left: '-9999px',
-          top: 0,
-          width: '375px',
-          background: '#0a0a0a',
-          padding: '16px',
-        }}
-      >
-        {analysis && (
-          <>
-            {/* Logo */}
-            <div className="flex items-center justify-center mb-5">
-              <img
-                src="/logo-full.png"
-                alt="Toxic or Nah?"
-                className="h-7 object-contain"
-              />
-            </div>
-
-            {/* The Shareable Card */}
-            <div
-              className="rounded-[28px] overflow-hidden"
-              style={{ aspectRatio: '9/16', backgroundColor: '#111111' }}
-            >
-              {/* Full vertical archetype image */}
-              <div className="relative w-full h-full">
-                <SoulTypeMedia
-                  src={analysis.personArchetype.imageUrl}
-                  alt={analysis.personArchetype.title}
-                  className="absolute inset-0 w-full h-full object-cover"
-                />
-
-                {/* Glassmorphism layer - extended outside card bounds to cover edge glitches */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    bottom: '-2px',
-                    left: '-2px',
-                    right: '-2px',
-                    height: 'calc(65% + 2px)',
-                    backdropFilter: 'blur(20px)',
-                    WebkitBackdropFilter: 'blur(20px)',
-                    maskImage: 'linear-gradient(to bottom, transparent 0%, black 50%, black 100%)',
-                    WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 50%, black 100%)',
-                  }}
-                />
-
-                {/* Dark gradient overlay - extended to match */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    bottom: '-2px',
-                    left: '-2px',
-                    right: '-2px',
-                    height: 'calc(55% + 2px)',
-                    background: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 40%, rgba(0,0,0,0.6) 70%, rgba(0,0,0,0.85) 100%)',
-                  }}
-                />
-
-                {/* Content layer - with Toxic Score instead of pills */}
-                <div
-                  className="absolute left-0 right-0 px-6 flex flex-col items-center text-center"
-                  style={{ top: 'calc(50% + 50% * 0.35 - 8px)' }}
-                >
-                  {/* Archetype Title */}
-                  <h3
-                    style={{
-                      fontSize: '32px',
-                      fontFamily: 'Outfit, sans-serif',
-                      fontWeight: 500,
-                      letterSpacing: '1.5px',
-                      lineHeight: '1.3',
-                      color: '#FFFFFF'
-                    }}
-                  >
-                    {analysis.personArchetype.title}
-                  </h3>
-
-                  {/* Tagline */}
-                  <p
-                    className="mt-2 max-w-[280px]"
-                    style={{
-                      fontSize: '17px',
-                      fontFamily: 'Plus Jakarta Sans, sans-serif',
-                      fontWeight: 300,
-                      letterSpacing: '1.5px',
-                      color: 'rgba(255, 255, 255, 0.85)',
-                      fontStyle: 'italic'
-                    }}
-                  >
-                    {analysis.personArchetype.tagline}
-                  </p>
-
-                  {/* Description */}
-                  <p
-                    className="mt-2 max-w-[280px]"
-                    style={{
-                      fontSize: '13px',
-                      fontFamily: 'Plus Jakarta Sans, sans-serif',
-                      fontWeight: 200,
-                      letterSpacing: '1.5px',
-                      color: 'rgba(255, 255, 255, 0.6)'
-                    }}
-                  >
-                    {analysis.personArchetype.description}
-                  </p>
-
-                  {/* Toxic Score Badge (instead of pills) */}
-                  <div className="flex items-center justify-center gap-3 mt-4">
-                    <MiniScoreRing score={analysis.overallScore} />
-                    <div className="flex flex-col items-start">
-                      <span
-                        className="text-white"
-                        style={{
-                          fontSize: '18px',
-                          fontFamily: 'Outfit, sans-serif',
-                          fontWeight: 500,
-                          letterSpacing: '1.5px'
-                        }}
-                      >
-                        {getToxicityLabel(analysis.overallScore)}
-                      </span>
-                      <span
-                        className="text-white/40"
-                        style={{
-                          fontSize: '12px',
-                          fontFamily: 'Plus Jakarta Sans, sans-serif',
-                          fontWeight: 200,
-                          letterSpacing: '1.5px'
-                        }}
-                      >
-                        Toxicity Score
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+      {/* CALL HIM OUT — Preview Overlay */}
+      {analysis && (
+        <CallOutOverlay
+          isOpen={showCallOutPreview}
+          onClose={() => setShowCallOutPreview(false)}
+          soulTypeTitle={analysis.personArchetype.title}
+          soulTypeTagline={analysis.personArchetype.tagline || ''}
+          soulTypeImageUrl={analysis.personArchetype.imageUrl}
+          overallScore={analysis.overallScore}
+          personGender={analysis.personGender}
+          gradientFrom={analysis.personArchetype.gradientFrom}
+          gradientTo={analysis.personArchetype.gradientTo}
+          sideProfileImageUrl={analysis.personArchetype.sideProfileImageUrl}
+        />
+      )}
 
       <KeepEyeOnHimModal
         isOpen={showKeepEyeModal}

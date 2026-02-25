@@ -392,8 +392,8 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
               />
             </div>
 
-            {/* PERSON SELECTION - Hidden for first-time users and content mode */}
-            {!isContentMode && !isFirstTime && (
+            {/* PERSON SELECTION - Hidden for first-time users, content mode, and while loading user state */}
+            {!isContentMode && !isFirstTime && !isLoadingState && (
               <div className="mb-6">
                 <label className="text-white text-base mb-3 block" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}>
                   Select the person you want to analyze:

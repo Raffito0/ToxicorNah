@@ -1,6 +1,7 @@
 {
   "rewrites": [
-    { "source": "/.well-known/assetlinks.json", "destination": "/assetlinks.json" }
+    { "source": "/.well-known/assetlinks.json", "destination": "/assetlinks.json" },
+    { "source": "/share/:id", "destination": "/api/share/:id" }
   ],
   "headers": [
     {

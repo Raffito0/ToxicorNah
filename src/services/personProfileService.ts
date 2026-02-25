@@ -1787,13 +1787,20 @@ function buildArchetype(archetypes: any[], analyses: any[], totalAnalyses: numbe
     }
   }
 
+  // Look up Soul Type data for tagline and side profile image
+  const latestTitle = latest?.archetype_title || 'Unknown';
+  const soulTypeData = getMaleSoulTypeByName(latestTitle);
+
   return {
-    title: latest?.archetype_title || 'Unknown',
+    title: latestTitle,
+    tagline: soulTypeData?.tagline || '',
     description: latest?.description || '',
     imageUrl: latest?.image_url || '',
+    sideProfileImageUrl: soulTypeData?.sideProfileImage || '',
     traits: latest?.traits || [],
     gradientFrom: latest?.gradient_from || '#1a1a2e',
     gradientTo: latest?.gradient_to || '#0f0f1a',
+    shareableTagline: latest?.shareable_tagline || soulTypeData?.tagline || '',
     consistency: {
       matchCount: dominantTitle?.[1] || 1,
       totalCount: totalAnalyses,

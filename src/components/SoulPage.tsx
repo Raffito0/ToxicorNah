@@ -11,7 +11,9 @@ import { PaywallModal } from './PaywallModal';
 import { getUserState, UserState, canPurchaseSingleUnlock } from '../services/userStateService';
 import { createSubscriptionCheckout, createSingleUnlockCheckout, createCustomerPortalSession, getSubscriptionDetails } from '../services/stripeService';
 import { supabase } from '../lib/supabase';
-import { getMaleSoulTypeByName } from '../data/soulTypes';
+import { getMaleSoulTypeByName, getFemaleSoulTypeByName } from '../data/soulTypes';
+import { getDailyDuality } from '../data/soulTypeDuality';
+import { isDevMode } from '../utils/platform';
 
 // ===== Section animation wrapper =====
 function Section({ children, className = '', style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
@@ -498,9 +500,11 @@ export function SoulPage() {
   });
 
   // Determine if premium sections should be locked
-  // TEMPORARILY UNLOCKED - set to false to unlock all sections
+  // Set TEST_LOCKS to true to test the lock system locally
+  const TEST_LOCKS = false;
+  const isDev = !TEST_LOCKS && isDevMode();
   const isPremium = userState?.isPremium ?? false;
-  const sectionsLocked = false;
+  const sectionsLocked = TEST_LOCKS || !(isDev || isPremium);
 
   useEffect(() => {
     const loadData = async () => {
@@ -619,7 +623,7 @@ export function SoulPage() {
       <YourArchetypeSection data={data} />
 
       {/* Good/Bad Traits Section - FREE for all users */}
-      <GoodBadTraitsSection />
+      <GoodBadTraitsSection data={data} />
 
       {/* PREMIUM SECTIONS - Cards blurred for non-subscribers, headers visible */}
 
@@ -627,16 +631,16 @@ export function SoulPage() {
       {/* <SoulRaritySection isLocked={sectionsLocked} onUnlockClick={handlePaywallOpen} /> */}
 
       {/* The Soul You Attract Section - PREMIUM */}
-      <TypeYouAttractSection isLocked={sectionsLocked} onUnlockClick={handlePaywallOpen} />
+      <TypeYouAttractSection data={data} isLocked={sectionsLocked} onUnlockClick={handlePaywallOpen} />
 
       {/* Soul Compatibility Section - PREMIUM */}
-      <SoulCompatibilitySection isLocked={sectionsLocked} onUnlockClick={handlePaywallOpen} />
+      <SoulCompatibilitySection data={data} isLocked={sectionsLocked} onUnlockClick={handlePaywallOpen} />
 
       {/* Mistakes You Keep Making Section - PREMIUM */}
-      <MistakesSection isLocked={sectionsLocked} onUnlockClick={handlePaywallOpen} />
+      <MistakesSection data={data} isLocked={sectionsLocked} onUnlockClick={handlePaywallOpen} />
 
       {/* You Are Becoming Section - PREMIUM */}
-      <YouAreBecomingSection isLocked={sectionsLocked} onUnlockClick={handlePaywallOpen} />
+      <YouAreBecomingSection data={data} isLocked={sectionsLocked} onUnlockClick={handlePaywallOpen} />
 
       {/* Sigils Screen Overlay */}
       <SigilsScreen
@@ -672,26 +676,15 @@ export function SoulPage() {
 }
 
 // ===== DAILY TRUTH - Your Two Sides (Tarot Reveal Style) =====
-function GoodBadTraitsSection() {
+function GoodBadTraitsSection({ data }: { data: SoulProfileData }) {
   const [shadowRevealed, setShadowRevealed] = useState(false);
 
-  // Mock data - changes daily based on date seed
-  const today = new Date().getDate();
-  const lightTraits = [
-    { trait: "Emotionally Intelligent", tagline: "You see what others miss." },
-    { trait: "Fiercely Loyal", tagline: "All in or nothing at all." },
-    { trait: "Intuitively Aware", tagline: "Your gut is rarely wrong." },
-    { trait: "Deeply Empathetic", tagline: "You feel everything they hide." },
-  ];
-  const shadowTraits = [
-    { trait: "Over-Giver", tagline: "You drain yourself for crumbs." },
-    { trait: "Excuse Maker", tagline: "Red flags look pink through your eyes." },
-    { trait: "Chaos Seeker", tagline: "Stability bores you. Dangerous." },
-    { trait: "Boundary Blurrer", tagline: "You erase your own lines for him." },
-  ];
+  // Dynamic data from Soul Type duality map — changes daily
+  const dailyDuality = getDailyDuality(data.dominantArchetype.title);
 
-  const lightIndex = today % lightTraits.length;
-  const shadowIndex = (today + 2) % shadowTraits.length;
+  // Fallback if soul type not in map
+  const todaysLight = dailyDuality?.light || { trait: "Self-Aware", tagline: "You see your patterns clearly." };
+  const todaysShadow = dailyDuality?.shadow || { trait: "Pattern Repeater", tagline: "Knowing isn't the same as changing." };
 
   const handleRevealShadow = () => {
     setShadowRevealed(true);
@@ -804,14 +797,14 @@ function GoodBadTraitsSection() {
               className="text-white font-bold mb-2"
               style={{ fontSize: '20px', fontFamily: 'Satoshi, sans-serif' }}
             >
-              {shadowTraits[shadowIndex].trait}
+              {todaysShadow.trait}
             </h3>
 
             {/* Tagline */}
             <p
               style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', lineHeight: 1.6, color: 'rgba(255, 255, 255, 0.7)' }}
             >
-              {shadowTraits[shadowIndex].tagline}
+              {todaysShadow.tagline}
             </p>
           </motion.div>
         </motion.div>
@@ -881,14 +874,14 @@ function GoodBadTraitsSection() {
               className="text-white font-bold mb-2"
               style={{ fontSize: '20px', fontFamily: 'Satoshi, sans-serif' }}
             >
-              {lightTraits[lightIndex].trait}
+              {todaysLight.trait}
             </h3>
 
             {/* Tagline */}
             <p
               style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', lineHeight: 1.6, color: 'rgba(255, 255, 255, 0.7)' }}
             >
-              {lightTraits[lightIndex].tagline}
+              {todaysLight.tagline}
             </p>
 
           </div>
@@ -1060,16 +1053,19 @@ function SoulRaritySection({ isLocked = false, onUnlockClick }: { isLocked?: boo
 }
 
 // ===== THE SOUL YOU ATTRACT SECTION =====
-function TypeYouAttractSection({ isLocked = false, onUnlockClick }: { isLocked?: boolean; onUnlockClick?: () => void }) {
+function TypeYouAttractSection({ data, isLocked = false, onUnlockClick }: { data: SoulProfileData; isLocked?: boolean; onUnlockClick?: () => void }) {
   const [isFlipped, setIsFlipped] = useState(false);
 
-  // Mock data
+  // Dynamic data from soulProfileService
+  const attracted = data.attractedSoulType;
   const attractedType = {
-    archetype: "The Faded Crown",
-    traits: ["Entitled", "Nostalgic", "Delusional"],
-    why: "Your loyalty draws those who take it for granted. They disappear and return expecting nothing has changed—because with you, it never did.",
-    description: "He resurfaces months later like nothing happened. Still expects the throne, still acts like royalty—but you've already built a kingdom without him.",
-    imageUrl: getMaleSoulTypeByName('The Faded Crown')?.normalImage || '',
+    archetype: attracted.archetype,
+    traits: attracted.traits,
+    why: attracted.why,
+    description: attracted.tagline,
+    imageUrl: attracted.imageUrl,
+    frequency: attracted.frequency,
+    percentage: attracted.percentage,
   };
 
   const handleFlip = () => {
@@ -1319,45 +1315,26 @@ function TypeYouAttractSection({ isLocked = false, onUnlockClick }: { isLocked?:
 }
 
 // ===== SOUL COMPATIBILITY SECTION =====
-function SoulCompatibilitySection({ isLocked = false, onUnlockClick }: { isLocked?: boolean; onUnlockClick?: () => void }) {
+function SoulCompatibilitySection({ data, isLocked = false, onUnlockClick }: { data: SoulProfileData; isLocked?: boolean; onUnlockClick?: () => void }) {
   const [stackOrder, setStackOrder] = useState<number[]>([2, 1, 0]); // Bottom to top
   const [flippedCards, setFlippedCards] = useState<boolean[]>([false, false, false]);
 
-  const compatibilities = [
-    {
-      type: 'most',
-      label: 'Most Compatible',
-      archetype: 'The Secure One',
-      percentage: 94,
-      reason: 'Grounds your intensity with stability',
-      description: 'This type provides the emotional safety you crave. They show up consistently, communicate clearly, and make you feel seen without the chaos.',
-      color: '#99c379',
-      imageUrl: '/Adobe Express - file 1 (5) (1).png',
-      tag: 'SAFE',
-    },
-    {
-      type: 'least',
-      label: 'Least Compatible',
-      archetype: 'The Avoidant',
-      percentage: 23,
-      reason: 'Triggers your anxious attachment',
-      description: 'Their emotional distance activates your worst patterns. You chase, they pull away. The cycle repeats until you\'re exhausted.',
-      color: '#d07070',
-      imageUrl: '/Adobe Express - file 1 (4).png',
-      tag: 'RED FLAG',
-    },
-    {
-      type: 'surprising',
-      label: 'Surprising Match',
-      archetype: 'The Free Spirit',
-      percentage: 78,
-      reason: 'Teaches you to let go of control',
-      description: 'Against all odds, this unpredictable type helps you grow. Their spontaneity challenges your need for certainty in a healthy way.',
-      color: '#c78ce7',
-      imageUrl: '/Adobe Edsdxpress - file 1 (3).png',
-      tag: 'WILD CARD',
-    },
-  ];
+  // Tag color mapping
+  const tagColors: Record<string, string> = { 'SAFE': '#99c379', 'RED FLAG': '#d07070', 'SURPRISING': '#c78ce7' };
+  const tagTypeMap: Record<string, string> = { 'SAFE': 'most', 'RED FLAG': 'least', 'SURPRISING': 'surprising' };
+
+  // Dynamic compatibility from soulProfileService
+  const compatibilities = data.compatibility.map(card => ({
+    type: tagTypeMap[card.tag] || 'surprising',
+    label: card.label,
+    archetype: card.hisType,
+    percentage: card.score,
+    reason: card.hisTagline,
+    description: card.description + (card.realConversations ? ` (Based on ${card.realConversations} real conversation${card.realConversations > 1 ? 's' : ''})` : ''),
+    color: tagColors[card.tag] || '#c78ce7',
+    imageUrl: card.hisImageUrl,
+    tag: card.tag === 'SURPRISING' ? 'WILD CARD' : card.tag,
+  }));
 
   const moveTopToBottom = () => {
     haptics.light();
@@ -1677,35 +1654,20 @@ function SoulCompatibilitySection({ isLocked = false, onUnlockClick }: { isLocke
 }
 
 // ===== MISTAKES SECTION =====
-function MistakesSection({ isLocked = false, onUnlockClick }: { isLocked?: boolean; onUnlockClick?: () => void }) {
+function MistakesSection({ data, isLocked = false, onUnlockClick }: { data: SoulProfileData; isLocked?: boolean; onUnlockClick?: () => void }) {
   const [flippedCards, setFlippedCards] = useState<boolean[]>([false, false, false]);
   const [stackOrder, setStackOrder] = useState<number[]>([2, 1, 0]); // Bottom to top
   const isDraggingRef = useRef(false);
   const dragDistanceRef = useRef(0);
 
-  const mistakes = [
-    {
-      title: "Responding too fast",
-      description: "You reply in seconds. He replies in hours. The pattern is clear.",
-      frequency: "In 4 out of 5 conversations",
-      why: "You confuse availability with value. Being instantly reachable feels like showing love, but it signals desperation.",
-      image: "/openart-7b0893c9-4dab-4ef0-af7a-03e2aa060c71.jpg",
-    },
-    {
-      title: "Ignoring the first red flag",
-      description: "You saw it. You felt it. You explained it away anyway.",
-      frequency: "Every single time",
-      why: "Hope is addictive. You'd rather believe the exception than accept the pattern.",
-      image: "/openart-7b0893c9-4dab-4efasdads0-af7a-03e2aa060c71.jpg",
-    },
-    {
-      title: "Over-explaining yourself",
-      description: "When a simple 'no' would do, you write paragraphs hoping he'll understand.",
-      frequency: "In 3 out of 5 conversations",
-      why: "You think if you explain well enough, he'll finally get it. But he already understands—he just doesn't care.",
-      image: "/openart-7b0893c9-4dab-4asdasdef0-af7a-03e2aa060c71(3).jpg",
-    },
-  ];
+  // Dynamic mistake data from soulProfileService
+  const mistakes = data.mistakes.map((m, i) => ({
+    title: m.title,
+    description: m.description,
+    frequency: m.frequencyString,
+    why: m.description, // description serves as the "why" on the back
+    image: `/openart-7b0893c9-4dab-4ef0-af7a-03e2aa060c71${i > 0 ? `(${i})` : ''}.jpg`, // placeholder images
+  }));
 
   const handleFlip = (cardIndex: number) => {
     // Only flip if it wasn't a drag
@@ -2035,16 +1997,17 @@ function MistakesSection({ isLocked = false, onUnlockClick }: { isLocked?: boole
 // ===== YOU ARE BECOMING SECTION =====
 // Golden accent for future archetype
 const FUTURE_ARCHETYPE_ACCENT = '#d4af37';
-// Dev: hardcoded image for future archetype
-const DEV_FUTURE_ARCHETYPE_IMAGE = '/Adobe Expreasdss - file 1 (3).png';
 
-function YouAreBecomingSection({ isLocked = false, onUnlockClick }: { isLocked?: boolean; onUnlockClick?: () => void }) {
-  // Mock data for future self
+function YouAreBecomingSection({ data, isLocked = false, onUnlockClick }: { data: SoulProfileData; isLocked?: boolean; onUnlockClick?: () => void }) {
+  // Dynamic data from soulProfileService
+  const becoming = data.becoming;
+  const futureTypeData = getFemaleSoulTypeByName(becoming.futureArchetype);
   const futureArchetype = {
-    title: "The Crown",
-    tagline: "You know your worth — and so does everyone else",
-    traits: ["Self-assured", "Boundary Queen", "High Standards"],
+    title: becoming.futureArchetype,
+    tagline: becoming.futureTagline || futureTypeData?.tagline || '',
+    traits: futureTypeData?.traits || [],
   };
+  const futureImageUrl = becoming.futureImageUrl || futureTypeData?.normalImage || '';
 
   return (
     <Section className="px-5 relative" style={{ marginTop: '45px' }}>
@@ -2066,7 +2029,7 @@ function YouAreBecomingSection({ isLocked = false, onUnlockClick }: { isLocked?:
       >
         {/* Full vertical archetype image */}
         <img
-          src={DEV_FUTURE_ARCHETYPE_IMAGE}
+          src={futureImageUrl}
           alt={futureArchetype.title}
           className="absolute inset-0 w-full h-full object-cover"
         />
@@ -2110,12 +2073,19 @@ function YouAreBecomingSection({ isLocked = false, onUnlockClick }: { isLocked?:
             {futureArchetype.title}
           </h3>
 
-          {/* Description - 2-3 lines */}
+          {/* Confidence percentage */}
+          <div className="flex items-center gap-2 mt-2">
+            <span style={{ fontSize: '11px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 600, color: FUTURE_ARCHETYPE_ACCENT, letterSpacing: '1px' }}>
+              {becoming.confidence}% CONFIDENCE
+            </span>
+          </div>
+
+          {/* Journey description */}
           <p
             className="text-white/70 mt-2 max-w-[280px]"
             style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', lineHeight: '1.6' }}
           >
-            {futureArchetype.tagline}
+            {becoming.journeyDescription}
           </p>
 
           {/* Trait Pills - matching HIS SOUL TYPE standard */}
