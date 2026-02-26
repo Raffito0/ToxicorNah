@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { getUserState, consumeFirstFreeAnalysis, consumeBonusUnlock, canUseFirstFreeAnalysis, canUseBonusUnlock, getOrCreateSessionId } from './userStateService';
-import { analyzeChatScreenshots, analyzeQuick, analyzeDetailed, QuickAnalysisResult, DetailedAnalysisResult, ExtractionResult, generatePersonalizedSoulTypeDescriptions } from './geminiService';
+import { analyzeChatScreenshots, analyzeQuick, analyzeDetailed, QuickAnalysisResult, DetailedAnalysisResult, ExtractionResult, generatePersonalizedSoulTypeDescriptions, PreviousAnalysisSummary } from './geminiService';
 import { selectBestArchetype, personalizeDescription, selectTraitsFromPool, matchSoulTypeByKeywords } from './archetypeMatchingService';
 import { findMostSimilarColor, generateDarkGradient } from '../utils/colorUtils';
 import { getMaleSoulTypeByName, getFemaleSoulTypeByName, MALE_SOUL_TYPES, FEMALE_SOUL_TYPES, SoulType } from '../data/soulTypes';
@@ -372,9 +372,86 @@ export async function processAnalysis(personId: string, imageFiles: File[]): Pro
   }
 
   console.log('processAnalysis: Analysis result created:', analysisResult.id);
+
+  // ── Continuity Mode: fetch person status + previous analyses ──
+  let relationshipStatus: string | null = null;
+  let previousAnalyses: PreviousAnalysisSummary[] = [];
+  try {
+    // Fetch relationship status from person profile
+    const { data: personData } = await supabase
+      .from('persons')
+      .select('relationship_status')
+      .eq('id', personId)
+      .single();
+    if (personData?.relationship_status) {
+      relationshipStatus = personData.relationship_status;
+      console.log(`processAnalysis: Relationship status: "${relationshipStatus}"`);
+    }
+    // Query previous completed analyses for this person (exclude current)
+    const { data: prevResults } = await supabase
+      .from('analysis_results')
+      .select('id, overall_score, profile_type, created_at')
+      .eq('person_id', personId)
+      .eq('processing_status', 'completed')
+      .neq('id', analysisResult.id)
+      .order('created_at', { ascending: false })
+      .limit(3);
+
+    if (prevResults && prevResults.length > 0) {
+      // Fetch soul type names for each previous analysis
+      const prevIds = prevResults.map(r => r.id);
+      const { data: prevArchetypes } = await supabase
+        .from('analysis_relationship_archetypes')
+        .select('analysis_id, archetype_title')
+        .in('analysis_id', prevIds)
+        .eq('person_type', 'person');
+
+      // Fetch top traits from emotional profiles
+      const { data: prevProfiles } = await supabase
+        .from('analysis_emotional_profiles')
+        .select('analysis_id, selected_traits')
+        .in('analysis_id', prevIds)
+        .order('display_order');
+
+      // Build archetype map: analysis_id → soul type name
+      const archetypeMap = new Map<string, string>();
+      if (prevArchetypes) {
+        for (const a of prevArchetypes) {
+          archetypeMap.set(a.analysis_id, a.archetype_title || 'Unknown');
+        }
+      }
+
+      // Build patterns map: analysis_id → top patterns (deduplicated traits across categories)
+      const patternsMap = new Map<string, string[]>();
+      if (prevProfiles) {
+        for (const p of prevProfiles) {
+          const existing = patternsMap.get(p.analysis_id) || [];
+          const traits = (p.selected_traits || []) as string[];
+          for (const t of traits) {
+            if (!existing.includes(t)) existing.push(t);
+          }
+          patternsMap.set(p.analysis_id, existing);
+        }
+      }
+
+      previousAnalyses = prevResults.map(r => ({
+        overallScore: r.overall_score || 50,
+        profileType: r.profile_type || 'Unknown',
+        soulTypeName: archetypeMap.get(r.id) || 'Unknown',
+        topPatterns: (patternsMap.get(r.id) || []).slice(0, 5),
+        analysisDate: r.created_at,
+      }));
+
+      console.log(`processAnalysis: Continuity Mode — found ${previousAnalyses.length} previous analyses for person ${personId}`);
+    }
+  } catch (err) {
+    console.warn('processAnalysis: Failed to fetch previous analyses (non-critical):', err);
+    // Non-critical — continue with fresh analysis
+  }
+
   console.log('processAnalysis: Starting AI analysis...');
 
-  await runAIAnalysis(analysisResult.id, imageFiles, personId);
+  await runAIAnalysis(analysisResult.id, imageFiles, personId, previousAnalyses, relationshipStatus);
 
   console.log('processAnalysis: AI analysis complete');
 
@@ -547,12 +624,18 @@ async function processAnalysisDevMode(personId: string, imageFiles: File[]): Pro
   }
 }
 
-async function runAIAnalysis(analysisId: string, imageFiles: File[], personId: string): Promise<void> {
+async function runAIAnalysis(analysisId: string, imageFiles: File[], personId: string, previousAnalyses?: PreviousAnalysisSummary[], relationshipStatus?: string | null): Promise<void> {
   try {
     console.log('Starting AI analysis with Gemini 2.0 Flash...');
+    if (previousAnalyses && previousAnalyses.length > 0) {
+      console.log(`[Continuity Mode] Passing ${previousAnalyses.length} previous analyses to AI`);
+    }
+    if (relationshipStatus) {
+      console.log(`[Continuity Mode] Relationship status: "${relationshipStatus}"`);
+    }
 
     // Gemini API call - uses position-based extraction (left=person, right=user)
-    const aiResult = await analyzeChatScreenshots(imageFiles);
+    const aiResult = await analyzeChatScreenshots(imageFiles, undefined, previousAnalyses, relationshipStatus);
 
     console.log('Gemini analysis complete:', aiResult);
 

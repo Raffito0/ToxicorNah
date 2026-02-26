@@ -108,6 +108,191 @@ export interface DetailedAnalysisResult {
   relationshipDynamic: RelationshipDynamic;
 }
 
+// ============================================
+// CONTINUITY MODE — "L'app ricorda chi è lui"
+// ============================================
+// When a person has been analyzed before, inject context so AI uses
+// pattern/progression/stagnation language instead of fresh-analysis tone.
+
+export interface PreviousAnalysisSummary {
+  overallScore: number;
+  profileType: string;
+  soulTypeName: string;
+  topPatterns: string[];  // e.g. ["deflecting", "breadcrumbing"]
+  analysisDate: string;   // ISO date string
+}
+
+function getTimeAgo(dateStr: string): string {
+  const now = new Date();
+  const then = new Date(dateStr);
+  const diffMs = now.getTime() - then.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return 'today';
+  if (diffDays === 1) return 'yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+  if (diffDays < 14) return '1 week ago';
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+  if (diffDays < 60) return '1 month ago';
+  return `${Math.floor(diffDays / 30)} months ago`;
+}
+
+export function buildContinuityContext(
+  previousAnalyses: PreviousAnalysisSummary[],
+  relationshipStatus?: string | null
+): string {
+  const hasPrevious = previousAnalyses && previousAnalyses.length > 0;
+  const hasStatus = relationshipStatus && relationshipStatus !== '';
+
+  if (!hasPrevious && !hasStatus) return '';
+
+  const parts: string[] = [];
+
+  // ── PART 1: Relationship Status Context (silent framing) ──
+  if (hasStatus) {
+    const statusFraming = buildStatusFraming(relationshipStatus);
+    if (statusFraming) parts.push(statusFraming);
+  }
+
+  // ── PART 2: Previous Analyses Context (continuity tone) ──
+  if (hasPrevious) {
+    const analysisNumber = previousAnalyses.length + 1;
+
+    const previousEntries = previousAnalyses
+      .map((a, i) => {
+        const num = previousAnalyses.length - i;
+        const timeAgo = getTimeAgo(a.analysisDate);
+        const patterns = a.topPatterns.length > 0 ? a.topPatterns.join(', ') : 'no specific patterns';
+        return `- Analysis #${num} (${timeAgo}): Toxic score ${a.overallScore}, "${a.profileType}", Soul Type: ${a.soulTypeName}. Key patterns: ${patterns}`;
+      })
+      .join('\n');
+
+    parts.push(`
+CONTINUITY CONTEXT — THIS PERSON HAS BEEN ANALYZED BEFORE:
+This is analysis #${analysisNumber} for this person. The user is tracking his behavior over time.
+
+Previous analyses (most recent first):
+${previousEntries}
+
+TONE SHIFT FOR RETURNING ANALYSES:
+- Do NOT introduce him like a new person. The app already knows who he is.
+- Use PATTERN language: "still", "again", "same dynamic", "nothing has changed", "the pattern holds"
+- Use PROGRESSION language: "escalating", "getting worse", "new low", "doubled down"
+- Use STAGNATION language: "same loop different day", "still choosing", "hasn't shifted"
+- Compare to previous: if score was lower and now behavior looks worse, say "this is escalating"
+- Compare to previous: if score was similar, say "the pattern is consistent"
+- Do NOT overdo it. No "like last time" every sentence. Just a subtle undertone of continuity.
+- Keep scores OBJECTIVE — based on THIS chat only. Continuity affects TONE, not scores.
+
+EXAMPLES — RETURNING vs NEW:
+Category descriptions:
+- NEW: "He wants attention without commitment."
+- RETURNING: "Still choosing attention over effort. Nothing here shows real intention."
+
+- NEW: "He's putting in minimal effort."
+- RETURNING: "Effort hasn't increased. You're still the one carrying this."
+
+- NEW: "This could become inconsistent."
+- RETURNING: "This hasn't moved forward. Same loop, different day."
+
+messageInsight descriptions:
+- NEW: "He's deflecting."
+- RETURNING: "Same deflection pattern. Vague by design."
+
+- NEW: "He's going cold after being warm."
+- RETURNING: "The cycle repeats. Warm when it suits him."
+
+Profile descriptions:
+- NEW: "He gives mixed signals and avoids real conversations."
+- RETURNING: "The signals haven't cleared up. Same avoidance, different chat."
+`);
+  }
+
+  return parts.join('\n');
+}
+
+function buildStatusFraming(status: string): string {
+  const STATUS_CONTEXT: Record<string, {
+    label: string;
+    framingRule: string;
+    categoryExample: string;
+    whyExample: string;
+    nextMoveExample: string;
+  }> = {
+    crush: {
+      label: 'crush',
+      framingRule: 'This is someone she likes but nothing is defined. The emotional stakes are anticipation, hope, and uncertainty. Frame inconsistency as "early signals to watch", not relationship failures.',
+      categoryExample: 'For a crush, this keeps you guessing. Watch if consistency follows.',
+      whyExample: 'In early dynamics, mixed signals create confusion. You deserve clarity before investing more.',
+      nextMoveExample: 'Pull back and watch consistency. If he steps up, that tells you something. If he doesn\'t, that tells you everything.',
+    },
+    talking: {
+      label: 'talking stage',
+      framingRule: 'They are in the "talking" phase — getting to know each other, nothing official. The emotional stakes are curiosity and testing compatibility. Frame red flags as "patterns worth noticing before going deeper."',
+      categoryExample: 'In the talking stage, this is where patterns start forming. Pay attention.',
+      whyExample: 'This is the phase where people show you who they are. Believe the pattern, not the potential.',
+      nextMoveExample: 'Don\'t fill in the blanks for him. If effort drops now, it won\'t magically appear later.',
+    },
+    situationship: {
+      label: 'situationship',
+      framingRule: 'Undefined relationship — she wants more, he keeps it vague. The emotional stakes are frustration, hope, and feeling stuck. Frame patterns as "this ambiguity is a choice, not an accident."',
+      categoryExample: 'In a situationship, this ambiguity isn\'t confusion. It\'s convenience. His convenience.',
+      whyExample: 'Situationships survive on just enough effort to keep you hoping. This is that.',
+      nextMoveExample: 'Stop accepting "almost." Define it or walk. Staying undefined benefits him, not you.',
+    },
+    boyfriend: {
+      label: 'boyfriend',
+      framingRule: 'This is her actual boyfriend — committed relationship. The emotional stakes are HIGHER. The same behavior that\'s a yellow flag for a crush is a red flag for a boyfriend. Frame patterns as "this is not enough for someone committed to you."',
+      categoryExample: 'For a boyfriend, this is not enough. Commitment means consistency, not when it\'s convenient.',
+      whyExample: 'Inside a relationship, this dynamic builds resentment. Effort shouldn\'t decrease after becoming official.',
+      nextMoveExample: 'Have a direct conversation. Not a fight — a standard. "This is what I need. Can you meet it?"',
+    },
+    ex: {
+      label: 'ex',
+      framingRule: 'This is an ex reaching out or still in contact. The emotional stakes are nostalgia, unfinished business, and the danger of going back. Frame patterns as "re-entry behavior" — he\'s testing if the door is still open without committing to walk through it.',
+      categoryExample: 'This is re-entry behavior. He\'s testing access, not rebuilding trust.',
+      whyExample: 'Exes reach out when they miss the comfort, not the person. This is about his needs, not yours.',
+      nextMoveExample: 'Don\'t reward late-night check-ins. If he wanted to come back properly, he\'d lead with accountability, not "wyd."',
+    },
+  };
+
+  const config = STATUS_CONTEXT[status];
+  if (!config) return '';
+
+  return `
+RELATIONSHIP STATUS CONTEXT — SILENT FRAMING:
+The user has labeled this person as: "${config.label}"
+
+CRITICAL RULES FOR STATUS-BASED FRAMING:
+1. NEVER let status change the toxic score, red flag detection, or message decoding. Those are PURE — based only on chat content.
+2. Status changes the EMOTIONAL FRAMING: how you describe "why this happens", category descriptions, profile subtitle, and "next move" advice.
+3. The app should feel like: "I read the chat for what it is. But I also know who he is to you."
+4. NEVER say "because he's your ${config.label}" explicitly. The framing should feel natural, not formulaic.
+5. Do NOT lower severity because of status. A boyfriend being distant is WORSE, not better. An ex breadcrumbing is manipulation, not nostalgia.
+
+FRAMING GUIDE FOR "${config.label.toUpperCase()}":
+${config.framingRule}
+
+EXAMPLES — HOW STATUS SHIFTS FRAMING (same messages, different context):
+Category description: "${config.categoryExample}"
+Why This Happens: "${config.whyExample}"
+Next Move: "${config.nextMoveExample}"
+
+WHERE TO APPLY STATUS FRAMING:
+✅ Category personalizedDescription — emotional interpretation
+✅ relationshipDynamic.whyThisHappens — context-aware explanation
+✅ relationshipDynamic.patternBreak — status-appropriate advice
+✅ profile.subtitle — secondary framing line
+✅ messageInsight description — emotional recognition (NOT the tag or message selection)
+
+WHERE TO NEVER APPLY STATUS:
+❌ Toxic score / subscores — always objective
+❌ Red flag / green flag / decoded TAG selection — always based on chat content
+❌ messageInsight message selection — always [THEIR MESSAGE] only
+❌ observedBehaviors keywords — always objective behavioral extraction
+`;
+}
+
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 // Initialize the Gemini client
@@ -234,6 +419,68 @@ BAD TONE (too clinical - NEVER write like this):
 - "You're seeking clarity and security, but he's resistant to commitment"
 - "There's a positive and light chemistry present, fostered by the playful nature"
 - "Both individuals are actively participating"
+
+MESSAGEINSIGHT DESCRIPTION TONE — THIS IS THE #1 VIRALITY FACTOR:
+The "description" field (front of card, 40-60 chars) must sound like EMOTIONAL RECOGNITION, not AI explanation.
+It must feel like something she'd text her best friend. NOT something a therapist would write.
+
+The rule: LESS explaining, MORE recognizing. She already KNOWS — you're just saying it out loud.
+
+BAD DESCRIPTIONS (too clinical/explanatory — NEVER write like this):
+- "His excuse for ignoring you is vague and dismissive" ← report language
+- "Accusing you of overreacting to his bad behavior" ← therapy explanation
+- "He minimizes your feelings and tries to shut you down" ← textbook analysis
+- "The classic late-night text after a period of silence" ← article headline
+
+GOOD DESCRIPTIONS (emotional recognition — THIS is what goes viral):
+- "No real answer. Just enough to keep you there." ← she FEELS this
+- "Suddenly you're the problem. Not his behavior." ← gut punch
+- "Your feelings got parked. Again." ← recognition
+- "Two weeks of silence. Now he's bored." ← sharp observation
+- "He's shrinking the convo to feel safe" ← insight into his head
+- "Conversation over. You didn't get a vote." ← she screenshots this
+
+Structure: Trigger → Reality → Implication (pick 2 of 3, fit in 40-60 chars)
+
+OBSERVATION > EXPLANATION — THE #1 RULE FOR GOING VIRAL:
+The difference between 8/10 and 10/10 is: SHOW the situation, don't EXPLAIN the psychology.
+Your job is to make her say "that's literally what happens", NOT "oh interesting analysis."
+
+BAD (explaining the psychology — sounds like a report):
+- "He deflects, minimizes, and manipulates to avoid accountability. He's skilled at turning the blame back on others."
+- "Red flags waving like a parade. The gaslighting and blame-shifting are out of control."
+- "He won't validate your emotions, because then he'd have to be accountable."
+
+GOOD (observing the situation — sounds like recognition):
+- "He deflects and minimizes when confronted. Accountability makes him uncomfortable. Blame is easier."
+- "Red flags aren't subtle here. Blame shifts fast. You're left explaining yourself."
+- "He won't validate you. Because then he'd have to own it."
+
+Key technique: BREAK long sentences into 2-3 short ones. Don't combine everything into one explanatory clause.
+BAD: "He avoids accountability by making you justify yourself, which keeps him in control."
+GOOD: "He shifts it onto you. You end up defending yourself. That's how he stays in control."
+
+ANTI-REPETITION — CRITICAL FOR CREDIBILITY:
+NEVER use the same core concept word more than 2 times across the ENTIRE analysis.
+If you've used "accountability" once, switch to: "owning it", "facing it", "standing in it", "taking ownership"
+If you've used "responsibility" once, switch to: "his mess", "what he did", "his part in this"
+If you've used "deflect" once, switch to: "dodge", "sidestep", "redirect", "flip it"
+If you've used "manipulate" once, switch to: "twist", "spin", "work the angle", "play it"
+If you've used "control" once, switch to: "running the show", "steering this", "calling the shots"
+If you've used "blame" once, switch to: "point the finger", "flip the script", "make it your fault"
+Repetition makes the AI sound like it has 5 words in its vocabulary. Variation = intelligence.
+
+SOUL TYPE DESCRIPTION TONE:
+The Soul Type card description must sound EXPERIENTIAL, not diagnostic.
+BAD (psych report): "He deflects, minimizes, and manipulates to avoid accountability. He's skilled at turning the blame back on others."
+GOOD (pattern observation): "He deflects and minimizes when confronted. Accountability makes him uncomfortable. Blame is easier."
+Describe the PATTERN of behavior, not a clinical diagnosis. It should read like someone who KNOWS him, not someone who studied him.
+
+"YOUR NEXT MOVE" TONE:
+Must be clean, direct, actionable. NOT Instagram therapy.
+BAD: "Refuse to be drawn into circular arguments or defend your perfectly valid feelings."
+GOOD: "Don't argue in circles. His actions are his responsibility."
+NEVER use phrases: "perfectly valid feelings", "honor your truth", "you deserve to be seen", "set healthy boundaries" — these are therapy clichés.
 `;
 
 const MESSAGE_ATTRIBUTION_RULES = `
@@ -422,14 +669,16 @@ RULES:
 
 STRICT messageInsights DESCRIPTION LENGTH - THIS IS CRITICAL FOR UI:
 - The "description" field MUST be EXACTLY 40-60 characters (6-10 words MAX)
-- It should be a SHORT PREVIEW of what the "solution" (back of card) reveals
-- Think of it as a teaser: "What It Really Means" summarized in one punchy phrase
-- Format: ONE punchy phrase, no periods, no commas
+- It's the FRONT of the card — must feel like emotional recognition, not explanation
+- Think: what would she text her best friend about this moment?
+- Format: ONE punchy phrase that hits like a realization
 - Examples:
+  - "No real answer. Just enough to keep you there." (47 chars)
+  - "Suddenly you're the problem. Not his behavior." (47 chars)
+  - "Two weeks of silence. Now he's bored." (37 chars)
+  - "Your feelings got parked. Again." (32 chars)
   - "He's shrinking the convo to feel safe" (38 chars)
-  - "Classic avoidant move disguised as chill" (41 chars)
-  - "His silence is punishment not laziness" (38 chars)
-  - "He's keeping score while playing cool" (37 chars)
+  - "Conversation over. You didn't get a vote." (42 chars)
 
 STRICT messageInsights SOLUTION LENGTH:
 - The "solution" field = "What It Really Means" for ALL tags (RED FLAG, GREEN FLAG, DECODED)
@@ -1115,7 +1364,7 @@ export async function extractMessagesFromImages(imageFiles: File[]): Promise<Ext
   };
 }
 
-function buildAnalysisPromptWithMessages(extraction: ExtractionResult): string {
+function buildAnalysisPromptWithMessages(extraction: ExtractionResult, continuityContext?: string): string {
   const transcript = extraction.messages
     .map((m) => {
       const label =
@@ -1130,7 +1379,7 @@ function buildAnalysisPromptWithMessages(extraction: ExtractionResult): string {
   const userMessages = extraction.messages.filter((m) => m.sender === 'user');
 
   return `${ANALYSIS_PROMPT}
-
+${continuityContext || ''}
 ==========================================================================
 CHAT TRANSCRIPT (pre-extracted and labeled - DO NOT question these labels):
 ==========================================================================
@@ -1173,7 +1422,9 @@ NEVER use "Early Stage" as a personalizedTrait. NEVER say "early stages", "it's 
 
 export async function analyzeChatScreenshots(
   imageFiles: File[],
-  validatedExtraction?: ExtractionResult
+  validatedExtraction?: ExtractionResult,
+  previousAnalyses?: PreviousAnalysisSummary[],
+  relationshipStatus?: string | null
 ): Promise<ChatAnalysisResult> {
   const genAI = getGeminiClient();
 
@@ -1198,7 +1449,11 @@ export async function analyzeChatScreenshots(
 
     // STEP 2: Analyze using pre-labeled text
     console.log('[Gemini] Step 2: Analyzing pre-labeled messages with Gemini 2.0 Flash...');
-    const analysisPrompt = buildAnalysisPromptWithMessages(extraction);
+    const continuityContext = buildContinuityContext(previousAnalyses || [], relationshipStatus);
+    if (continuityContext) {
+      console.log('[Gemini] Continuity context injected (returning analysis)');
+    }
+    const analysisPrompt = buildAnalysisPromptWithMessages(extraction, continuityContext || undefined);
 
     // Use gemini-2.0-flash for analysis (fast + smart)
     const model = genAI.getGenerativeModel({
@@ -1377,7 +1632,7 @@ export function calculateProfileColor(score: number): { start: string; end: stri
 // TWO-PHASE ANALYSIS FUNCTIONS
 // ============================================
 
-function buildQuickAnalysisPrompt(extraction: ExtractionResult): string {
+function buildQuickAnalysisPrompt(extraction: ExtractionResult, continuityContext?: string): string {
   const transcript = extraction.messages
     .map((m) => {
       const label = m.sender === 'person'
@@ -1388,7 +1643,7 @@ function buildQuickAnalysisPrompt(extraction: ExtractionResult): string {
     .join('\n');
 
   return `${QUICK_ANALYSIS_PROMPT}
-
+${continuityContext || ''}
 CHAT TRANSCRIPT:
 Person being analyzed: the other person
 --- TRANSCRIPT ---
@@ -1400,7 +1655,7 @@ Use short, descriptive keywords like: "ghosting", "hot cold", "manipulation", "l
 NEVER use a contact name from the chat header in descriptions. Use "he"/"him" or "she"/"her".`;
 }
 
-function buildDetailedAnalysisPrompt(extraction: ExtractionResult, phase1Reasoning?: ContextReasoning): string {
+function buildDetailedAnalysisPrompt(extraction: ExtractionResult, phase1Reasoning?: ContextReasoning, continuityContext?: string): string {
   const transcript = extraction.messages
     .map((m) => {
       const label = m.sender === 'person'
@@ -1423,7 +1678,7 @@ Your reasoning block MUST match this Phase 1 assessment. Do NOT contradict it.
 ` : '';
 
   return `${DETAILED_ANALYSIS_PROMPT}
-${phase1Context}
+${phase1Context}${continuityContext || ''}
 CHAT TRANSCRIPT:
 Person being analyzed: the other person
 Total [THEIR MESSAGE] count: ${personMessages.length}
@@ -1444,7 +1699,7 @@ NEVER use "Early Stage" as a personalizedTrait. NEVER write "early stages" or "i
  * PHASE 1: Quick analysis - scores + archetypes only (~5-6 seconds)
  * Shows: Toxic Score section + Soul Type section
  */
-export async function analyzeQuick(imageFiles: File[]): Promise<{ quick: QuickAnalysisResult; extraction: ExtractionResult }> {
+export async function analyzeQuick(imageFiles: File[], previousAnalyses?: PreviousAnalysisSummary[], relationshipStatus?: string | null): Promise<{ quick: QuickAnalysisResult; extraction: ExtractionResult }> {
   const genAI = getGeminiClient();
 
   console.log('[Gemini Phase 1] Extracting messages...');
@@ -1460,7 +1715,11 @@ export async function analyzeQuick(imageFiles: File[]): Promise<{ quick: QuickAn
     },
   });
 
-  const prompt = buildQuickAnalysisPrompt(extraction);
+  const continuityContext = buildContinuityContext(previousAnalyses || [], relationshipStatus);
+  if (continuityContext) {
+    console.log('[Gemini Phase 1] Continuity context injected (returning analysis)');
+  }
+  const prompt = buildQuickAnalysisPrompt(extraction, continuityContext || undefined);
   const result = await model.generateContent(prompt);
   const content = result.response.text();
 
@@ -1499,7 +1758,7 @@ export async function analyzeQuick(imageFiles: File[]): Promise<{ quick: QuickAn
  * PHASE 2: Detailed analysis - cards + insights (runs in background)
  * Shows: SwipeableCardDeck, VerticalCardDeck, DynamicCard
  */
-export async function analyzeDetailed(extraction: ExtractionResult, phase1Reasoning?: ContextReasoning): Promise<DetailedAnalysisResult> {
+export async function analyzeDetailed(extraction: ExtractionResult, phase1Reasoning?: ContextReasoning, previousAnalyses?: PreviousAnalysisSummary[], relationshipStatus?: string | null): Promise<DetailedAnalysisResult> {
   const genAI = getGeminiClient();
 
   console.log('[Gemini Phase 2] Starting detailed analysis...');
@@ -1514,7 +1773,11 @@ export async function analyzeDetailed(extraction: ExtractionResult, phase1Reason
     },
   });
 
-  const prompt = buildDetailedAnalysisPrompt(extraction, phase1Reasoning);
+  const continuityContext = buildContinuityContext(previousAnalyses || [], relationshipStatus);
+  if (continuityContext) {
+    console.log('[Gemini Phase 2] Continuity context injected (returning analysis)');
+  }
+  const prompt = buildDetailedAnalysisPrompt(extraction, phase1Reasoning, continuityContext || undefined);
   const result = await model.generateContent(prompt);
   const content = result.response.text();
 
