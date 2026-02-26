@@ -439,25 +439,62 @@ GOOD CHAT (viral, toxic, dramatic):
 // USER PROMPT
 // ============================================================
 
-// Randomly pick a chat context to force variety each generation
-const CHAT_CONTEXTS = [
-  { context: 'CAUGHT RED-HANDED', hint: 'She found evidence (a text, a photo, a location, a social media post) and confronts him directly. He deflects/denies.' },
-  { context: 'LATE NIGHT BREADCRUMB', hint: 'He texts at 1-3am after days/weeks of silence. She either calls it out or falls for it.' },
-  { context: 'POST-HANGOUT FALLOUT', hint: 'Something happened in person (he said something, did something, ignored her in front of friends) and she confronts him over text.' },
-  { context: 'APOLOGY GONE WRONG', hint: 'He\'s apologizing but badly — deflecting blame, minimizing, or making it about himself. The apology IS the red flag.' },
-  { context: 'GHOSTING COMEBACK', hint: 'He disappeared for days/weeks and now texts like nothing happened. She either confronts or he acts casual about it.' },
-  { context: 'JEALOUSY SPIRAL', hint: 'Something on social media or with another girl sparked a confrontation. He gaslights her into feeling crazy for asking.' },
-  { context: 'BROKEN PROMISE', hint: 'He forgot/bailed on something important (birthday, plans, meeting her family). She brings it up, he dismisses it.' },
-  { context: 'FRIEND EXPOSED HIM', hint: 'Her friend told her something he did/said behind her back. She confronts him with the info.' },
-  { context: 'MID-ARGUMENT CONTINUATION', hint: 'Chat picks up mid-fight — they had an argument earlier (in person or text) and it\'s continuing. No "hey" opener, straight into the tension.' },
-  { context: 'DOUBLE STANDARDS', hint: 'She did something he does all the time (hung out with a guy friend, went out late) and he flips out. The hypocrisy is the red flag.' },
-  { context: 'HE STARTS SWEET THEN FLIPS', hint: 'Opens with lovebombing/sweetness ("good morning beautiful") but within a few messages shows his real colors.' },
-  { context: 'SHE SETS A BOUNDARY', hint: 'She tries to express a need or set a boundary. He guilt-trips, dismisses, or turns it around on her.' },
-  { context: 'THE "WHAT ARE WE" TALK', hint: 'She asks about the relationship status. He dodges, deflects, gets annoyed, or gives a non-answer.' },
-  { context: 'EX DRAMA', hint: 'His ex is somehow involved — still texting him, he\'s still following her, she found old messages. He downplays it.' },
-  { context: 'MONEY/EFFORT IMBALANCE', hint: 'She does everything (plans dates, buys gifts, drives to him) and he does nothing. She finally brings it up.' }
-];
-const randomContext = CHAT_CONTEXTS[Math.floor(Math.random() * CHAT_CONTEXTS.length)];
+// Chat contexts mapped to compatible relationship statuses
+// Each context only appears under statuses where it makes narrative sense
+const STATUS_CONTEXT_MAP = {
+  'boyfriend': [
+    { context: 'CAUGHT RED-HANDED', hint: 'She found evidence (a text, a photo, a location, a social media post) and confronts her boyfriend directly. He deflects/denies.' },
+    { context: 'POST-HANGOUT FALLOUT', hint: 'Something happened in person (he said something, did something, ignored her in front of friends) and she confronts her boyfriend over text.' },
+    { context: 'JEALOUSY SPIRAL', hint: 'Something on social media or with another girl sparked a confrontation with her boyfriend. He gaslights her into feeling crazy for asking.' },
+    { context: 'BROKEN PROMISE', hint: 'Her boyfriend forgot/bailed on something important (birthday, plans, meeting her family). She brings it up, he dismisses it.' },
+    { context: 'FRIEND EXPOSED HIM', hint: 'Her friend told her something her boyfriend did/said behind her back. She confronts him with the info.' },
+    { context: 'DOUBLE STANDARDS', hint: 'She did something her boyfriend does all the time (hung out with a guy friend, went out late) and he flips out. The hypocrisy is the red flag.' },
+    { context: 'SHE SETS A BOUNDARY', hint: 'She tries to express a need or set a boundary with her boyfriend. He guilt-trips, dismisses, or turns it around on her.' },
+    { context: 'EX DRAMA', hint: 'His ex is somehow involved — still texting him, he\'s still following her, she found old messages. Her boyfriend downplays it.' },
+    { context: 'MONEY/EFFORT IMBALANCE', hint: 'She does everything in the relationship (plans dates, buys gifts, drives to him) and her boyfriend does nothing. She finally brings it up.' },
+    { context: 'MID-ARGUMENT CONTINUATION', hint: 'Chat picks up mid-fight with her boyfriend — they had an argument earlier and it\'s continuing. No "hey" opener, straight into the tension.' },
+  ],
+  'ex': [
+    { context: 'GHOSTING COMEBACK', hint: 'Her ex disappeared after the breakup and now texts like nothing happened. "hey stranger" energy. She either confronts or he acts casual.' },
+    { context: 'LATE NIGHT BREADCRUMB', hint: 'Her ex texts at 1-3am after weeks/months of silence since the breakup. Classic "u up?" or "i miss you" at 2am.' },
+    { context: 'APOLOGY GONE WRONG', hint: 'Her ex is trying to apologize for the breakup/what he did but badly — deflecting blame, minimizing, making it about himself. The apology IS the red flag.' },
+    { context: 'HE STARTS SWEET THEN FLIPS', hint: 'Her ex opens with nostalgia/sweetness ("i was thinking about us") but within a few messages shows he hasn\'t changed at all.' },
+    { context: 'POST-BREAKUP DISCOVERY', hint: 'She found out something new about her ex AFTER the breakup (he was cheating the whole time, he\'s already with someone new, mutual friends told her things). She confronts him.' },
+    { context: 'THE COMEBACK ATTEMPT', hint: 'Her ex wants to get back together. He says he\'s changed, misses her, made a mistake. But his messages reveal he hasn\'t changed at all.' },
+    { context: 'FRIEND EXPOSED HIM', hint: 'After the breakup, her friend told her something her ex did/said while they were together. She confronts him with the info.' },
+    { context: 'MID-ARGUMENT CONTINUATION', hint: 'They broke up recently and are still fighting over text. Unresolved stuff. No "hey" opener, straight into post-breakup tension.' },
+  ],
+  'crush': [
+    { context: 'HE STARTS SWEET THEN FLIPS', hint: 'Her crush opens sweet/flirty but within a few messages shows red flags — goes cold, gets dismissive, or reveals something sketchy.' },
+    { context: 'LATE NIGHT BREADCRUMB', hint: 'Her crush only texts at night. "wyd" at midnight but never during the day. She\'s reading into every message.' },
+    { context: 'GHOSTING COMEBACK', hint: 'Her crush disappeared for days after they were texting constantly. Now he\'s back acting casual. She\'s confused.' },
+    { context: 'MIXED SIGNALS OVERLOAD', hint: 'Her crush is hot and cold — super flirty one moment, then "haha" the next. She can\'t tell if he\'s interested or just bored.' },
+    { context: 'THE FRIEND ZONE FLIP', hint: 'She thought they had something but he mentions another girl casually, or calls her "bro", or treats her like a buddy. Confusing signals.' },
+    { context: 'SOCIAL MEDIA GAMES', hint: 'Her crush liked all her posts, watched every story, but won\'t text first. Or he\'s flirting in DMs but ignores her in person/group settings.' },
+  ],
+  'situationship': [
+    { context: 'THE "WHAT ARE WE" TALK', hint: 'She asks her situationship about the relationship status. He dodges, deflects, gets annoyed, or gives a non-answer like "why do we need labels".' },
+    { context: 'LATE NIGHT BREADCRUMB', hint: 'Her situationship only hits her up late at night. Never during the day, never for real plans. She calls it out.' },
+    { context: 'JEALOUSY SPIRAL', hint: 'She saw something on social media (him with another girl) but they\'re "not official" so he says she has no right to be upset.' },
+    { context: 'SHE SETS A BOUNDARY', hint: 'She tries to set expectations in the situationship. He guilt-trips or says "I thought we were just having fun" or "don\'t make this weird".' },
+    { context: 'DOUBLE STANDARDS', hint: 'He acts like her boyfriend (gets jealous, texts 24/7) but won\'t commit. She calls out the double standard.' },
+    { context: 'GHOSTING COMEBACK', hint: 'Her situationship disappeared for a week then texts "hey" like nothing happened. No explanation, no apology. Classic breadcrumb.' },
+    { context: 'APOLOGY GONE WRONG', hint: 'He stood her up or did something shitty and his "apology" is just "my bad" or "i was busy". Zero accountability.' },
+  ],
+  'talking': [
+    { context: 'GHOSTING COMEBACK', hint: 'They were in the talking stage, he disappeared for days, now he\'s back with a casual "heyyy". She either confronts or plays it cool.' },
+    { context: 'LATE NIGHT BREADCRUMB', hint: 'The guy she\'s been talking to only texts at night. "wyd" at 1am but never follows up during the day.' },
+    { context: 'HE STARTS SWEET THEN FLIPS', hint: 'He was being super attentive in the talking stage but suddenly goes cold, dry texts, takes hours to reply.' },
+    { context: 'MIXED SIGNALS OVERLOAD', hint: 'In the talking stage, he\'s sending mixed signals — super interested one day, distant the next. She can\'t read him.' },
+    { context: 'SOCIAL MEDIA GAMES', hint: 'They\'re in the talking stage but she notices he\'s liking other girls\' pics, or he posts but doesn\'t reply to her texts.' },
+    { context: 'THE "WHAT ARE WE" TALK', hint: 'They\'ve been talking for weeks and she tries to figure out where it\'s going. He gives vague answers or changes the subject.' },
+    { context: 'FRIEND EXPOSED HIM', hint: 'Her friend found out the guy she\'s been talking to is also talking to other girls. She confronts him.' },
+  ],
+};
+
+// Pick context that's compatible with the relationship status
+const compatibleContexts = STATUS_CONTEXT_MAP[randomRelStatus] || STATUS_CONTEXT_MAP['boyfriend'];
+const randomContext = compatibleContexts[Math.floor(Math.random() * compatibleContexts.length)];
 
 // Force a specific score each run (Gemini defaults to 85 every time without this)
 // Toxic score range: 70-99 → overallScore range: 1-30
@@ -487,13 +524,8 @@ Do NOT change this number. Use exactly ${randomOverallScore} for overallScore in
 🎲 CONTACT NAME: Use exactly "${randomName}" as the contactName.
 
 🎲 RELATIONSHIP STATUS: "${randomRelStatus}"
-The chat conversation MUST be coherent with this relationship status:
-- "ex" = post-breakup context: he comes back after the breakup, nostalgia, "I miss you" at 2am, or she discovers something after they broke up
-- "crush" = she likes him but he's giving mixed signals, she's reading into everything, he's hot and cold
-- "boyfriend" = they're official but he's doing shady stuff: caught texting someone, forgot anniversary, controlling behavior, lying
-- "situationship" = undefined relationship: "what are we" tension, breadcrumbing, he won't commit but won't let go
-- "talking" = early stage red flags: inconsistent texting, ghosting then coming back, keeping options open
-The ${randomContext.context} chat context you're using must FIT this relationship status. Adapt it.
+ABSOLUTE RULE: The chat MUST read as a "${randomRelStatus}" conversation. The viewer must immediately understand the relationship dynamic from the messages alone.
+${ randomRelStatus === 'ex' ? 'They already BROKE UP. She refers to the breakup, past relationship, or "when we were together". He\'s coming back, apologizing, or she discovered something post-breakup. They are NOT currently dating.' : '' }${ randomRelStatus === 'crush' ? 'She LIKES him but they\'re not together. There\'s nervousness, over-analyzing his texts, mixed signals. They are NOT dating and NOT exes.' : '' }${ randomRelStatus === 'boyfriend' ? 'They are OFFICIALLY together. She calls him her boyfriend or references their relationship ("you\'re MY boyfriend", "we\'ve been together for..."). The issues are within an active relationship.' : '' }${ randomRelStatus === 'situationship' ? 'They are NOT official. There\'s ambiguity — "what are we", he avoids labels, they act like a couple but he won\'t commit. She\'s frustrated by the undefined status.' : '' }${ randomRelStatus === 'talking' ? 'They\'re in the EARLY talking stage — just started texting, getting to know each other, haven\'t defined anything. The red flags are emerging early.' : '' }
 
 ⚠️ THE #1 RULE — READ THIS FIRST ⚠️
 The CHAT ITSELF must contain ACTUAL TOXIC BEHAVIOR. NOT a normal conversation with a toxic analysis slapped on top.
