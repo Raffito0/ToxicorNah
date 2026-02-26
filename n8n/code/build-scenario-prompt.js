@@ -4,6 +4,19 @@
 
 const { concept, vibe, appStyle, personGender, scenarioName } = $('Select Concept').first().json;
 
+// Random relationship status for content mode
+const RELATIONSHIP_STATUSES = ['crush', 'talking', 'situationship', 'boyfriend', 'ex'];
+const randomRelStatus = RELATIONSHIP_STATUSES[Math.floor(Math.random() * RELATIONSHIP_STATUSES.length)];
+
+// Random male first names (Gen Z age range, diverse)
+const MALE_NAMES = [
+  'Liam', 'Noah', 'Ethan', 'Mason', 'Lucas', 'Oliver', 'Aiden', 'Elijah',
+  'James', 'Logan', 'Alex', 'Ryan', 'Dylan', 'Tyler', 'Jayden', 'Brandon',
+  'Caleb', 'Nathan', 'Adrian', 'Marcus', 'Kai', 'Jace', 'Ryder', 'Dante',
+  'Mateo', 'Nico', 'Zion', 'Theo', 'Miles', 'Leo'
+];
+const randomName = MALE_NAMES[Math.floor(Math.random() * MALE_NAMES.length)];
+
 const bodyClipTemplates = $('Get Body Clip Templates').all().map(i => i.json);
 const captionTemplates = $('Get Caption Templates').all().map(i => i.json);
 const voTemplates = $('Get VO Templates').all().map(i => i.json);
@@ -471,7 +484,16 @@ You MUST use this specific context as the starting point for the chat. Do NOT ig
 🎯 SCORE FOR THIS SCENARIO: overallScore MUST be exactly ${randomOverallScore} (toxic score = ${randomToxicScore}/100).
 Do NOT change this number. Use exactly ${randomOverallScore} for overallScore in your JSON output.
 
-🎲 CONTACT NAME: Pick a random, creative first name for the contactName. NEVER use "Jake" — pick something different every time. Use any real name that fits a Gen Z person (18-28). Be creative and varied.
+🎲 CONTACT NAME: Use exactly "${randomName}" as the contactName.
+
+🎲 RELATIONSHIP STATUS: "${randomRelStatus}"
+The chat conversation MUST be coherent with this relationship status:
+- "ex" = post-breakup context: he comes back after the breakup, nostalgia, "I miss you" at 2am, or she discovers something after they broke up
+- "crush" = she likes him but he's giving mixed signals, she's reading into everything, he's hot and cold
+- "boyfriend" = they're official but he's doing shady stuff: caught texting someone, forgot anniversary, controlling behavior, lying
+- "situationship" = undefined relationship: "what are we" tension, breadcrumbing, he won't commit but won't let go
+- "talking" = early stage red flags: inconsistent texting, ghosting then coming back, keeping options open
+The ${randomContext.context} chat context you're using must FIT this relationship status. Adapt it.
 
 ⚠️ THE #1 RULE — READ THIS FIRST ⚠️
 The CHAT ITSELF must contain ACTUAL TOXIC BEHAVIOR. NOT a normal conversation with a toxic analysis slapped on top.
@@ -507,6 +529,8 @@ return [{
   json: {
     systemPrompt,
     userPrompt,
+    randomRelStatus,
+    randomName,
     // Pass templates through for content copy generation later
     bodyClipsFormatted,
     captionTemplates,

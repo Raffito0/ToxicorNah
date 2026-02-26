@@ -5,6 +5,7 @@
 // Basic LLM Chain outputs { text: "..." } with the raw LLM response
 const llmOutput = $input.first().json;
 const { vibe } = $('Select Concept').first().json;
+const { randomRelStatus, randomName } = $('Build Scenario Prompt').first().json;
 
 // --- JSON Repair utility ---
 function repairJson(raw) {
@@ -312,6 +313,11 @@ if (r) {
     errors.push('dynamic.powerBalance out of range: ' + (r.dynamic ? r.dynamic.powerBalance : 'undefined'));
   }
 }
+
+// Inject display metadata for content mode hero section
+// These are pipeline-level fields, not AI output — stored in scenario JSON for Supabase
+scenario.personDisplayName = scenario.chat ? scenario.chat.contactName : (randomName || 'Him');
+scenario.personRelationshipStatus = randomRelStatus || null;
 
 // Determine if we should pass the scenario through (allow minor errors)
 const criticalErrors = errors.filter(e =>

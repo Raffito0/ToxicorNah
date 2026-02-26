@@ -12,6 +12,8 @@ export interface ContentScenario {
     messages: ChatMessage[];
   };
   personAvatar?: string;
+  personDisplayName?: string;
+  personRelationshipStatus?: string;
   results: {
     personName: string;
     personGender: 'male' | 'female';

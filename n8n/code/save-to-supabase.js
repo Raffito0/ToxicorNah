@@ -98,6 +98,13 @@ const PROFILE_PICS = [
 ];
 scenarioJson.personAvatar = PROFILE_PICS[Math.floor(Math.random() * PROFILE_PICS.length)];
 
+// Display name and relationship status are already embedded in scenario JSON
+// (injected by validate-scenario.js in Workflow 1 before saving to Airtable)
+// Fallback: use contactName if personDisplayName wasn't set
+if (!scenarioJson.personDisplayName && scenarioJson.chat && scenarioJson.chat.contactName) {
+  scenarioJson.personDisplayName = scenarioJson.chat.contactName;
+}
+
 // Supabase REST API insert
 
 const response = await fetch(SUPABASE_URL + '/rest/v1/content_scenarios', {

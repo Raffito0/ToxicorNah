@@ -4,7 +4,7 @@
 
 const { concept, vibe, scenarioName, bodyClipCount } = $('Select Concept').first().json;
 const { scenario } = $('Validate Scenario').first().json;
-const { captionTemplates, voTemplates, hookTexts, socialExamples } = $('Build Scenario Prompt').first().json;
+const { captionTemplates, voTemplates, hookTexts, socialExamples, randomRelStatus, randomName } = $('Build Scenario Prompt').first().json;
 
 // ============================================================
 // OUTRO CATEGORY SELECTION (from Outro Examples pool)
@@ -199,6 +199,14 @@ BAD lengths (over 50 chars — WILL NOT FIT IN 3 SECONDS):
   BAD: "If he's deflecting, don't use this" (makes NO SENSE — "deflecting" is a clinical term, not a dramatic situation. The [X] slot must be a RELATABLE SITUATION like "have a crush", "love your boyfriend", "just got back together" — NOT a behavior label like "deflecting", "gaslighting", "manipulating")
   CRITICAL: The hook must describe a SITUATION or ACTION, never a clinical behavior label. "He forgot my birthday and STILL got mad at me" = GOOD (specific action). "He's being emotionally unavailable" = BAD (therapy term, not viral).
   The hook must be a COMPLETE thought — never truncated.
+  RELATIONSHIP STATUS FOR THIS VIDEO: "${randomRelStatus || 'unknown'}"
+  The hook MUST naturally reflect this relationship status. Examples by status:
+  - "ex": "He texted me THIS after the breakup", "My ex really said this with a straight face", "POV: your ex texts you this the next day"
+  - "crush": "If you have a crush don't look at this", "The way my crush just exposed himself"
+  - "boyfriend": "My boyfriend really thought this was okay", "If your boyfriend texts like this run"
+  - "situationship": "He's not my boyfriend but look what he said", "Situationship boys are UNHINGED"
+  - "talking": "We've been talking for 2 weeks and he said THIS", "The talking stage is actually hell"
+  The hookVO must also match — she's reacting as someone in THIS specific relationship status.
 - hookVO: What she SAYS out loud. MAX 50 CHARACTERS. Must ALSO be viral — create SUSPENSE. She's teasing what viewers are about to see. Make them think "wait what happened?!". NEVER mention the app.
   GOOD: "No because look what he just said", "I caught him and he still denied it", "Be honest am I overreacting or no?", "No because this cannot be real"
   BAD: "Wait why did he say that tho?" (too generic — WHAT did he say?), "Why is he acting weird?" (boring, no suspense), "I'm gonna upload this" (references app), "Let's see what the results say" (references app)
@@ -335,6 +343,7 @@ const scenarioLines = [
   '- Toxic Score: ' + toxicScore + '/100 (higher = more toxic)',
   '- Contact Name: ' + scenario.chat.contactName,
   '- Person Name: ' + scenario.results.personName,
+  '- Relationship Status: ' + (randomRelStatus || 'unknown'),
   '- Vibe: ' + vibe
 ];
 if (activeSectionIds.includes('soul_type')) {

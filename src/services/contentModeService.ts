@@ -151,7 +151,7 @@ export function buildStoredResult(scenario: ContentScenario): StoredAnalysisResu
     isUnlocked: true,
     unlockType: 'subscription',
     personGender: r.personGender,
-    personName: r.personName,
+    personName: scenario.personDisplayName || r.personName,
     emotionalProfiles,
     messageInsights,
     personArchetype: {
@@ -189,6 +189,7 @@ export function buildStoredResult(scenario: ContentScenario): StoredAnalysisResu
       powerBalance: r.dynamic.powerBalance,
     },
     personAvatar: scenario.personAvatar || null,
+    personRelationshipStatus: scenario.personRelationshipStatus || null,
   };
 }
 
