@@ -460,6 +460,18 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   const personRelStatus = analysis.personRelationshipStatus || null;
   const relStatusOption = personRelStatus ? RELATIONSHIP_STATUS_OPTIONS.find(o => o.value === personRelStatus) : null;
 
+  console.log('[ResultsPage Hero Debug]', {
+    isFirstTime,
+    isFullyUnlocked,
+    isFirstAnalysis: userState.isFirstAnalysis,
+    personAvatarUrl,
+    personName: analysis.personName,
+    personRelStatus,
+    soulTypeTitle: analysis.personArchetype?.title,
+    avatarBg: getAvatarBackground(analysis.personArchetype?.title),
+    heroVisible: !isFirstTime,
+  });
+
   return (
     <div className="min-h-screen bg-black text-white">
       {/* ===== Profile Hero Section (hidden for first-time users who haven't added a person yet) ===== */}
