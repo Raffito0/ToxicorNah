@@ -236,7 +236,13 @@ if (r) {
     }
 
     // Check each insight message is an exact quote from chat
+    // Only "them" messages are valid for insights (we analyze the OTHER person, not the user)
     const chatTexts = (scenario.chat && scenario.chat.messages ? scenario.chat.messages : []).map(m => m.text);
+    const theirChatTexts = (scenario.chat && scenario.chat.messages ? scenario.chat.messages : [])
+      .filter(m => m.sender === 'them')
+      .map(m => m.text);
+
+    // First pass: try to match/fix each insight
     r.messageInsights.forEach((insight, i) => {
       if (!chatTexts.includes(insight.message)) {
         const insightLower = insight.message.trim().toLowerCase();
@@ -253,13 +259,29 @@ if (r) {
         if (matched) {
           insight.message = matched; // Auto-fix to exact chat text
         } else {
-          errors.push('Insight ' + i + ': message "' + insight.message + '" not found in chat');
+          insight._hallucinated = true; // Mark for removal
+          errors.push('Insight ' + i + ': HALLUCINATED message "' + insight.message + '" not in chat (auto-removed)');
         }
       }
       if (!['RED FLAG', 'GREEN FLAG', 'DECODED'].includes(insight.tag)) {
         errors.push('Insight ' + i + ': invalid tag "' + insight.tag + '"');
       }
     });
+
+    // Remove hallucinated insights (messages the AI invented)
+    const beforeHallucinationFilter = r.messageInsights.length;
+    r.messageInsights = r.messageInsights.filter(ins => !ins._hallucinated);
+    // Clean up temp flag
+    r.messageInsights.forEach(ins => delete ins._hallucinated);
+    if (beforeHallucinationFilter !== r.messageInsights.length) {
+      const removed = beforeHallucinationFilter - r.messageInsights.length;
+      errors.push('Removed ' + removed + ' hallucinated insight(s) with invented messages. ' + r.messageInsights.length + ' remaining.');
+    }
+
+    // If too few insights remain after filtering, it's a critical problem
+    if (r.messageInsights.length < 3) {
+      errors.push('CRITICAL: Only ' + r.messageInsights.length + ' insights remain after removing hallucinated messages (need 3+). Scenario must be regenerated.');
+    }
 
     // Check DECODED requirement
     const hasDecoded = r.messageInsights.some(ins => ins.tag === 'DECODED');
@@ -295,9 +317,10 @@ if (r) {
 const criticalErrors = errors.filter(e =>
   !e.includes('auto-fixed') &&
   !e.includes('out of range') &&
-  !e.includes('not found in chat') && // partial quote mismatches are non-critical
+  !e.includes('auto-removed') &&
   !e.includes('non-critical') &&
-  !e.includes('Auto-removed')
+  !e.includes('Auto-removed') &&
+  !e.includes('hallucinated insight')
 );
 const valid = criticalErrors.length === 0;
 

@@ -69,7 +69,7 @@ Your output must be a single valid JSON object matching the ContentScenario inte
     },
     "messageInsights": [
       {
-        "message": string,
+        "message": string (MUST BE EXACT COPY from chat.messages[].text — NEVER invent new messages),
         "title": string,
         "tag": "RED FLAG" | "GREEN FLAG" | "DECODED",
         "description": string (40-60 chars, short preview of the solution insight),
@@ -129,7 +129,7 @@ Your output must be a single valid JSON object matching the ContentScenario inte
 ## ABSOLUTE RULES
 
 1. personName: ALWAYS "Him" if male, "Her" if female. NEVER use the contactName.
-2. messageInsights[].message: MUST be an EXACT copy-paste from chat.messages[].text. Character-for-character identical.
+2. messageInsights[].message: ABSOLUTE BAN ON INVENTED MESSAGES. Every messageInsights[].message MUST be an EXACT copy-paste from chat.messages[].text. Character-for-character identical. If a message does not exist WORD FOR WORD in the chat.messages array you generated, DO NOT USE IT. You CANNOT reference messages that are not in the chat. You CANNOT add new messages in the insights that weren't in the conversation. ONLY quote messages that appear in the chat above. This is the #1 validation check — insights with fake messages get DELETED.
 3. messageInsights tags: Include a MIX of tags. Minimum 1 DECODED insight per scenario.
 4. messageInsights selection: ONLY select messages from "them" (the person being analyzed). NEVER select "me" (user) messages. ONLY select genuinely noteworthy messages. NEVER select "hi", "hey", "hello", "what's up" or basic greetings.
 5. Insight titles: MUST start with "He" or "He's" (see MESSAGEINSIGHT TITLE FORMAT section below). Must describe what HE is doing in that specific message.
@@ -496,7 +496,7 @@ Generate the scenario now. Remember:
 - 14-22 messages in the conversation
 - The analysis must MATCH the chat content — if the chat is toxic, the analysis reflects WHY it's toxic
 - personName = "${personGender === 'male' ? 'Him' : 'Her'}"
-- messageInsights[].message must be EXACT quotes from the chat
+- messageInsights[].message must be EXACT quotes from chat.messages[].text you generated above. NEVER invent messages that aren't in the chat. Copy-paste ONLY.
 - Include exactly 4-5 messageInsights with proper tag mix for "${vibe}" vibe
 - All soul type IDs must be from the valid list
 - 5 traits per person, no banned traits
