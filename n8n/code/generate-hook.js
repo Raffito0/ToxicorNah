@@ -234,15 +234,11 @@ async function kieGenerate(prompt, imageRefs, options = {}) {
 }
 
 async function kiePoll(taskId) {
-  // Max 100 attempts × 5s = ~8 minutes before giving up cleanly
+  // Infinite polling — no timeout. Retries on network errors with doubled delay.
   const POLL_INTERVAL = 5000;
-  const MAX_ATTEMPTS = 100;
   let attempt = 0;
   while (true) {
     attempt++;
-    if (attempt > MAX_ATTEMPTS) {
-      throw new Error('kie.ai timeout: still pending after ' + MAX_ATTEMPTS + ' polls (~8 min). taskId=' + taskId);
-    }
     try {
       await new Promise(r => setTimeout(r, POLL_INTERVAL));
       const res = await fetch(KIE_API_URL + '/recordInfo?taskId=' + taskId, {
@@ -257,7 +253,7 @@ async function kiePoll(taskId) {
       if (state === 'fail') throw new Error(data.data.failMsg || 'Generation failed');
       // state === 'waiting' → keep polling
     } catch (err) {
-      if (err.message.includes('failed') || err.message.includes('Generation') || err.message.includes('timeout')) throw err;
+      if (err.message.includes('failed') || err.message.includes('Generation')) throw err;
       // Network error → wait longer and retry
       await new Promise(r => setTimeout(r, POLL_INTERVAL * 2));
     }
