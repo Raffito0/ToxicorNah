@@ -98,9 +98,20 @@ function sendTelegramAudio(botToken, chatId, audioBuffer, filename, caption, rep
   });
 }
 
-// ─── Fish.audio TTS config (same as generate-voiceover.js) ───
+// ─── TTS Provider Toggle ───
+// 'elevenlabs' = ElevenLabs v3 (primary)
+// 'fish'       = Fish.audio s1 (backup)
+const TTS_PROVIDER = 'elevenlabs';
+
+// ─── ElevenLabs config ───
+const ELEVENLABS_API_KEY = 'sk_a645bb67bdb3fecc5604c41b18588e7b1d8a35092d0c28fc';
+const ELEVENLABS_VOICE_ID = 'cIZgE1zTtJx92OFuLtNz';
+const ELEVENLABS_MODEL = 'eleven_v3';
+const ELEVENLABS_OUTPUT_FORMAT = 'mp3_44100_128';
+
+// ─── Fish.audio config (backup) ───
 const FISH_API_KEY = '145c958d4b194854b82e045f103472ee';
-const FISH_REFERENCE_ID = '9d84b9dd0a11472a99d0a16915bbc622';
+const FISH_REFERENCE_ID = '0b48750248ea42b68366d62bf2117edb';
 const FISH_MODEL = 's1';
 
 function stripEmojis(text) {
@@ -110,8 +121,41 @@ function stripEmojis(text) {
     .trim();
 }
 
-async function fishTTS(text, speed) {
+// ─── Strip ElevenLabs emotion tags (for Fish.audio which doesn't understand them) ───
+function stripEmotionTags(text) {
+  return text.replace(/\[(gasps|sighs|laughs|whispers|sarcastic|frustrated|curious|excited)\]\s*/gi, '').trim();
+}
+
+// ─── ElevenLabs v3 TTS with speed control ───
+async function elevenLabsTTS(text, speed) {
   text = stripEmojis(text);
+  const url = 'https://api.elevenlabs.io/v1/text-to-speech/' + ELEVENLABS_VOICE_ID + '?output_format=' + ELEVENLABS_OUTPUT_FORMAT;
+  const body = {
+    text,
+    model_id: ELEVENLABS_MODEL,
+  };
+  if (speed && speed !== 1.0) {
+    body.voice_settings = { speed };
+  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'xi-api-key': ELEVENLABS_API_KEY,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error('ElevenLabs: ' + response.status + ' ' + errorText);
+  }
+  const audioBuffer = await response.arrayBuffer();
+  return Buffer.from(audioBuffer);
+}
+
+// ─── Fish.audio TTS with speed control (backup) ───
+async function fishTTS(text, speed) {
+  text = stripEmotionTags(stripEmojis(text));
   const requestBody = { text, format: 'mp3' };
   if (FISH_REFERENCE_ID) requestBody.reference_id = FISH_REFERENCE_ID;
   if (speed && speed !== 1.0) requestBody.prosody = { speed };
@@ -130,6 +174,12 @@ async function fishTTS(text, speed) {
   }
   const audioBuffer = await response.arrayBuffer();
   return Buffer.from(audioBuffer);
+}
+
+// ─── Unified TTS dispatcher ───
+async function ttsGenerate(text, speed) {
+  if (TTS_PROVIDER === 'elevenlabs') return elevenLabsTTS(text, speed);
+  return fishTTS(text, speed);
 }
 
 // Section display labels
@@ -301,16 +351,16 @@ if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') |
       return [{ json: { type: 'vo_segment', action: 'redo_error', segIndex, error: 'No text' } }];
     }
 
-    // Call Fish.audio TTS with speed
+    // Call TTS with speed
     let audioBuffer;
     try {
-      audioBuffer = await fishTTS(voText, newSpeed);
+      audioBuffer = await ttsGenerate(voText, newSpeed);
     } catch (e) {
       try {
         await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: '\u274C Fish.audio failed for ' + label + ': ' + e.message }),
+          body: JSON.stringify({ chat_id: chatId, text: '\u274C TTS failed for ' + label + ': ' + e.message }),
         });
       } catch (_) { /* non-fatal */ }
       return [{ json: { type: 'vo_segment', action: 'redo_error', segIndex, error: e.message } }];

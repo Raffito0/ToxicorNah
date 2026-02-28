@@ -13,6 +13,8 @@ function repairJson(raw) {
 
   // 1. Strip markdown code fences
   s = s.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  // Replace smart/curly quotes with straight quotes
+  s = s.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
 
   // 2. Extract JSON object if there's text before/after it
   const firstBrace = s.indexOf('{');
@@ -21,51 +23,47 @@ function repairJson(raw) {
     s = s.substring(firstBrace, lastBrace + 1);
   }
 
-  // 3. Remove control characters inside strings (except \n \r \t)
-  // Replace literal tabs, carriage returns that break JSON
+  // 3. Remove control characters
   s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
 
-  // 4. Fix unescaped newlines inside JSON strings
-  // Walk through and escape newlines that are inside string values
+  // 4. Smart quote repair: walk through and escape internal quotes
+  // When we see a " inside a string, peek ahead — if the next non-whitespace
+  // char is NOT valid JSON continuation (, } ] :), it's an internal quote
   let result = '';
   let inString = false;
   let escaped = false;
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    if (escaped) {
-      result += ch;
-      escaped = false;
-      continue;
-    }
-    if (ch === '\\') {
-      result += ch;
-      escaped = true;
-      continue;
-    }
+    if (escaped) { result += ch; escaped = false; continue; }
+    if (ch === '\\') { result += ch; escaped = true; continue; }
     if (ch === '"') {
-      inString = !inString;
-      result += ch;
+      if (!inString) {
+        inString = true;
+        result += ch;
+      } else {
+        // Peek ahead: skip whitespace/newlines to find next meaningful char
+        let peekIdx = i + 1;
+        while (peekIdx < s.length && /[\s\r\n]/.test(s[peekIdx])) peekIdx++;
+        const nextChar = peekIdx < s.length ? s[peekIdx] : '';
+        // Valid JSON after closing a string value: , } ] : or EOF
+        if (nextChar === ',' || nextChar === '}' || nextChar === ']' || nextChar === ':' || nextChar === '') {
+          inString = false;
+          result += ch;
+        } else {
+          // Internal quote — escape it
+          result += '\\"';
+        }
+      }
       continue;
     }
-    if (inString && ch === '\n') {
-      result += '\\n';
-      continue;
-    }
-    if (inString && ch === '\r') {
-      continue; // skip carriage returns
-    }
+    if (inString && ch === '\n') { result += '\\n'; continue; }
+    if (inString && ch === '\r') { continue; }
     result += ch;
   }
   s = result;
 
   // 5. Fix trailing commas before } or ]
   s = s.replace(/,\s*([\]}])/g, '$1');
-
-  // 6. Fix unescaped double quotes inside strings (heuristic)
-  // Look for patterns like: "text "quoted" more" and fix to "text \"quoted\" more"
-  // This is tricky so we only do a conservative fix: doubled quotes "" -> \"
-  // (DeepSeek sometimes outputs "" inside strings)
-  s = s.replace(/([^\\])""/g, '$1\\"');
 
   return s;
 }
@@ -139,6 +137,77 @@ if (scenario.chat) {
     const toxicHits = TOXIC_INDICATORS.filter(t => allTheirText.includes(t));
     if (toxicHits.length < 2) {
       errors.push('Chat lacks toxicity: "them" messages contain only ' + toxicHits.length + ' toxic indicators (need 2+). Chat may be too boring/normal.');
+    }
+  }
+
+  // --- Relationship status coherence check ---
+  // The chat MUST contain explicit phrases that match the assigned relationship status.
+  // Without these, a viewer can't tell the status from the chat alone.
+  if (randomRelStatus && scenario.chat.messages) {
+    const allChatText = scenario.chat.messages.map(m => m.text.toLowerCase()).join(' ');
+
+    const STATUS_KEYWORDS = {
+      'ex': [
+        'broke up', 'breakup', 'break up', 'broken up',
+        'when we were together', 'when we were dating',
+        'my ex', 'you\'re my ex', 'youre my ex',
+        'we ended', 'after we split', 'since we split',
+        'not together anymore', 'we\'re done', 'were done',
+        'already moved on', 'moved on',
+        'after everything we had',
+        'we\'re not together', 'were not together',
+        'after the breakup', 'since the breakup',
+      ],
+      'boyfriend': [
+        'my boyfriend', 'my bf', 'your girlfriend', 'your gf',
+        'you\'re my boyfriend', 'youre my boyfriend',
+        'as your girlfriend', 'as your gf',
+        'i\'m your girlfriend', 'im your girlfriend',
+        'we\'ve been together', 'weve been together', 'been together for',
+        'in this relationship', 'our relationship',
+        'we\'re dating', 'were dating', 'we are dating',
+        'our anniversary', 'dating for',
+      ],
+      'crush': [
+        'i like you', 'i liked you', 'i\'ve liked', 'ive liked',
+        'catch feelings', 'caught feelings', 'catching feelings',
+        'just friends', 'friend zone', 'friendzone',
+        'do you like me', 'does he like', 'do you like',
+        'my crush', 'have a crush', 'had a crush',
+        'are we just friends', 'more than friends',
+        'i didn\'t think you', 'into me',
+        'feel the same', 'feelings for',
+      ],
+      'situationship': [
+        'what are we', 'are we together', 'are we official',
+        'not even official', 'not official',
+        'won\'t commit', 'wont commit',
+        'call me your girlfriend', 'your girlfriend but',
+        'just having fun', 'just vibing',
+        'we\'re not even together', 'not even dating',
+        'labels', 'define this', 'define what we',
+        'situationship',
+        'like your girlfriend but',
+        'girlfriend stuff', 'boyfriend privileges',
+      ],
+      'talking': [
+        'we\'ve been talking', 'weve been talking', 'been talking for',
+        'talking stage', 'talking for like',
+        'just started talking', 'we just started',
+        'barely know', 'i barely know you',
+        'only been talking', 'only been texting',
+        'just met', 'just got your number',
+        'been texting for', 'texting for like',
+        'just started texting',
+      ],
+    };
+
+    const keywords = STATUS_KEYWORDS[randomRelStatus];
+    if (keywords) {
+      const statusHit = keywords.some(kw => allChatText.includes(kw));
+      if (!statusHit) {
+        errors.push('CRITICAL: Chat missing status anchor for "' + randomRelStatus + '". No keyword found that establishes the relationship status. The chat could be ANY status. Needs explicit reference like: ' + keywords.slice(0, 3).map(k => '"' + k + '"').join(', '));
+      }
     }
   }
 }
@@ -244,18 +313,34 @@ if (r) {
       .map(m => m.text);
 
     // First pass: try to match/fix each insight
+    // STRICT matching: only exact match or case-insensitive exact match allowed.
+    // Substring matching was removed because it let hallucinated messages slip through
+    // by matching partial text fragments (e.g., hallucinated "why does it matter to you"
+    // would match real message containing "does it matter").
     r.messageInsights.forEach((insight, i) => {
-      if (!chatTexts.includes(insight.message)) {
+      // Step 1: Exact match against "them" messages (preferred)
+      if (theirChatTexts.includes(insight.message)) {
+        // Perfect match — keep as-is
+      }
+      // Step 2: Exact match against ALL messages (edge case: "me" message in DECODED context)
+      else if (chatTexts.includes(insight.message)) {
+        // Valid but not ideal — keep it
+      }
+      // Step 3: Case-insensitive exact match against "them" messages
+      else {
         const insightLower = insight.message.trim().toLowerCase();
-        // Try fuzzy match (trimmed, case-insensitive exact)
-        let matched = chatTexts.find(t => t.trim().toLowerCase() === insightLower);
-        // Try substring match: AI quoted part of a message
+        let matched = theirChatTexts.find(t => t.trim().toLowerCase() === insightLower);
+        // Step 4: Case-insensitive exact match against ALL messages
         if (!matched) {
-          matched = chatTexts.find(t => t.toLowerCase().includes(insightLower));
+          matched = chatTexts.find(t => t.trim().toLowerCase() === insightLower);
         }
-        // Try reverse substring: chat message is part of AI quote (less common)
-        if (!matched) {
-          matched = chatTexts.find(t => insightLower.includes(t.toLowerCase()) && t.length > 10);
+        // Step 5: AI quoted part of a "them" message (forward substring only, min 20 chars)
+        // The insight must be a substantial portion of the chat message (at least 50% length)
+        if (!matched && insightLower.length >= 20) {
+          matched = theirChatTexts.find(t => {
+            const tLower = t.toLowerCase();
+            return tLower.includes(insightLower) && insightLower.length >= tLower.length * 0.5;
+          });
         }
         if (matched) {
           insight.message = matched; // Auto-fix to exact chat text

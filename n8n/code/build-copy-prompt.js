@@ -4,7 +4,7 @@
 
 const { concept, vibe, scenarioName, bodyClipCount } = $('Select Concept').first().json;
 const { scenario } = $('Validate Scenario').first().json;
-const { captionTemplates, voTemplates, hookTexts, socialExamples, randomRelStatus, randomName } = $('Build Scenario Prompt').first().json;
+const { captionTemplates, voTemplates, hookTexts, socialExamples, randomRelStatus, randomName, selectedContext } = $('Build Scenario Prompt').first().json;
 
 // ============================================================
 // OUTRO CATEGORY SELECTION (from Outro Examples pool)
@@ -188,59 +188,98 @@ BAD lengths (over 50 chars — WILL NOT FIT IN 3 SECONDS):
 ## FIELD DEFINITIONS
 
 - hookText: Bold text overlay. 3-8 words. THE MOST IMPORTANT PART OF THE VIDEO — this makes someone STOP SCROLLING. It MUST match the SAME style, format, and energy as the 5 examples below. Feel like entry #6 in that list.
-  VIRAL HOOK PATTERNS (use one of these structures):
-  - WARNING: "If you [relationship status], don't use this app"
-  - EXPOSE: "The way he [toxic action] IN THE [context]"
-  - SETUP: "He [did something] after [dramatic context]"
-  - CALLOUT: "Tell me this isn't [toxic pattern]"
-  - CONFESSION: "He really thought [action] would fix everything"
-  GOOD: "The way he gaslit me in the apology", "He texted at 3am after ghosting me", "If you have a crush don't do this", "Tell me this isn't manipulation"
+  ABSOLUTE #1 RULE: The hook MUST reference something SPECIFIC that actually happened in the chat. Read the CHAT HIGHLIGHTS section above — your hook should be about a REAL moment, quote, or action from that conversation. A viewer who reads the hook and then sees the chat should think "oh THAT's what they meant."
+  GOOD (chat-specific): "He dumped me then texted 'I miss us'" (references actual chat event), "He really said 'it was a mistake' after leaving me" (quotes real message), "He called her 'bro' after she confessed" (specific moment)
+  BAD (generic/invented): "He said he changed then sent THIS" (he never said he changed — INVENTED), "The audacity of this man" (could be about anything — TOO VAGUE), "He's so toxic I can't" (says nothing about WHAT happened)
+  VIRAL HOOK PATTERNS (use one of these structures WITH chat-specific details):
+  - EXPOSE: "He really said '[actual quote from chat]' after [what happened]"
+  - SETUP: "He [specific action from chat] and STILL [reaction]"
+  - WARNING: "If your [relationship status] texts you [paraphrase of what he said]..."
+  - CALLOUT: "The way he said '[short quote]' like it's nothing"
+  - CONFESSION: "He [did specific thing from chat] and thought it was fine"
   BAD: "This man is unserious" (too generic — WHAT did he do?), "He's so annoying" (vague, boring), "I can't with him" (lazy), "Why is he like this" (too generic)
   BAD: "If he's deflecting, don't use this" (makes NO SENSE — "deflecting" is a clinical term, not a dramatic situation. The [X] slot must be a RELATABLE SITUATION like "have a crush", "love your boyfriend", "just got back together" — NOT a behavior label like "deflecting", "gaslighting", "manipulating")
-  CRITICAL: The hook must describe a SITUATION or ACTION, never a clinical behavior label. "He forgot my birthday and STILL got mad at me" = GOOD (specific action). "He's being emotionally unavailable" = BAD (therapy term, not viral).
+  CRITICAL: The hook must describe a SITUATION or ACTION from the ACTUAL CHAT, never a clinical behavior label or invented event. "He said 'it was a mistake' after dumping me" = GOOD (specific, from chat). "He's being emotionally unavailable" = BAD (therapy term, not viral, not from chat).
   The hook must be a COMPLETE thought — never truncated.
-  RELATIONSHIP STATUS FOR THIS VIDEO: "${randomRelStatus || 'unknown'}"
-  The hook MUST naturally reflect this relationship status. Examples by status:
-  - "ex": "He texted me THIS after the breakup", "My ex really said this with a straight face", "POV: your ex texts you this the next day"
-  - "crush": "If you have a crush don't look at this", "The way my crush just exposed himself"
-  - "boyfriend": "My boyfriend really thought this was okay", "If your boyfriend texts like this run"
-  - "situationship": "He's not my boyfriend but look what he said", "Situationship boys are UNHINGED"
-  - "talking": "We've been talking for 2 weeks and he said THIS", "The talking stage is actually hell"
-  The hookVO must also match — she's reacting as someone in THIS specific relationship status.
-- hookVO: What she SAYS out loud. MAX 50 CHARACTERS. Must ALSO be viral — create SUSPENSE. She's teasing what viewers are about to see. Make them think "wait what happened?!". NEVER mention the app.
-  GOOD: "No because look what he just said", "I caught him and he still denied it", "Be honest am I overreacting or no?", "No because this cannot be real"
-  BAD: "Wait why did he say that tho?" (too generic — WHAT did he say?), "Why is he acting weird?" (boring, no suspense), "I'm gonna upload this" (references app), "Let's see what the results say" (references app)
+  RELATIONSHIP STATUS: "${randomRelStatus || 'unknown'}"
+  The hook should FEEL like it belongs to a "${randomRelStatus}" story. It does NOT need to literally say the word "${randomRelStatus}" — what matters is that the SITUATION described in the hook naturally fits that dynamic.
+  ${randomRelStatus === 'ex' ? 'Ex energy hooks: focus on him coming back, post-breakup audacity, discovering something after it ended. E.g. "He texted me THIS after 3 weeks of silence", "The audacity of this man I swear", "POV: he comes back like nothing happened"' : ''}${randomRelStatus === 'crush' ? 'Crush energy hooks: focus on mixed signals, overthinking, the moment she realizes something. E.g. "The way he just exposed himself without even knowing", "If you overthink texts don\'t watch this", "He said THIS and I can\'t tell if he\'s serious"' : ''}${randomRelStatus === 'boyfriend' ? 'Boyfriend energy hooks: focus on betrayal within a relationship, broken trust, caught behavior. E.g. "He really thought I wouldn\'t find out", "The disrespect is actually unreal", "He said this to MY FACE and thought it was fine"' : ''}${randomRelStatus === 'situationship' ? 'Situationship energy hooks: focus on the frustration of undefined relationships, mixed signals, him wanting benefits without commitment. E.g. "He acts like my man but won\'t even commit", "The way he flip-flops is actually insane", "He said \'why do we need labels\' and I lost it"' : ''}${randomRelStatus === 'talking' ? 'Talking stage energy hooks: focus on early red flags, sketchy behavior from the start, the "already?!" factor. E.g. "It\'s been 2 weeks and he already did THIS", "Red flags on day one I cannot", "He showed his true colors FAST"' : ''}
+  The hookVO must match the same energy — she's reacting as someone living THIS specific situation.
+- hookVO: What she SAYS out loud. MAX 50 CHARACTERS. Must react to a SPECIFIC moment from the chat — she's living this situation, not narrating generically. She references what HE said or did. NEVER mention the app.
+  GOOD: "Bro YOU dumped ME and now you miss us?", "He said 'it was a mistake' I'm actually done", "He called me bro after I told him how I feel"
+  BAD: "No because the AUDACITY" (too generic — audacity of WHAT?), "Wait why did he say that tho?" (WHAT did he say?), "I'm gonna upload this" (references app), "Let's see what the results say" (references app)
+  The hookVO should make a viewer think "wait what happened?!" by hinting at the SPECIFIC drama, not by being vague.
 - bodyClips: Array with EXACTLY ${activeSections.length} objects, one per body clip section (in order).
   - section: The section ID (must match exactly: ${activeSections.map(s => '"' + s.id + '"').join(', ')})
-  - text: Ultra-short UGC text overlay. 2-6 words MAX. A pure EMOTIONAL REACTION — what she'd type on a TikTok, NOT any name, label, or data from the results.
-    ABSOLUTE RULE: The text must NEVER contain the Soul Type name, the Dynamic name, the score number, or ANY data shown on screen. The screen already shows that data — the text overlay is her REACTION to it.
-    GOOD: "excuse me???", "I can't 💀", "nah WHAT", "this is too real", "I'm actually done", "not this again..."
-    BAD: "Shifting Flame 💀" (that's the Soul Type NAME — the screen already shows it), "Push-Pull Tango" (that's the Dynamic NAME), "52/100" (that's the score NUMBER), "His Soul Type revealed" (that's a label)
-  - vo: What she SAYS out loud. MAX 50 CHARACTERS. First person, genuine reaction.
+  - text: Ultra-short UGC text overlay. 2-4 words MAX. A pure GUT REACTION — the kind of thing she'd caption a TikTok with. Think: what would you TEXT your best friend in all caps after seeing this?
+    ABSOLUTE RULE: The text must NEVER contain the Soul Type name, the Dynamic name, the score number, ANY data from the results, or ANY diagnosis/label/explanation. It's a RAW EMOTION, not a sentence.
+    GOOD: "excuse me???", "I can't 💀", "nah WHAT", "this is too real", "I'm done.", "not this again...", "bro.", "help 💀", "oh.", "LMAO", "I'm sick"
+    BAD: "Shifting Flame 💀" (Soul Type NAME), "Push-Pull Tango" (Dynamic NAME), "52/100" (score NUMBER), "His Soul Type revealed" (label), "it's called being on the hook" (that's a DIAGNOSIS/EXPLANATION — not a gut reaction. She wouldn't text that to her friend, she'd text "nah this is sick" or "I can't 💀")
+    THE TEST: If it sounds like something a therapist or narrator would say, it's WRONG. If it sounds like a text to your best friend at 2am, it's RIGHT.
+  - vo: What she SAYS out loud. MAX 50 CHARACTERS. First person, genuine reaction. The VO must say something DIFFERENT from the text — never repeat the same concept. Text = raw emotion ("nah WHAT"), VO = her actual thought/reaction to what she sees ("It says he does it to keep control. Wow.").
 - outroText: CTA text overlay. 2-5 words. Ultra-short.
   GOOD: "Block him?", "Link in bio", "Should I?", "Run yours 👀"
 - outroVO: What she SAYS for the outro. MAX 50 CHARACTERS. CTA or dramatic closer.
 - socialCaption: TikTok/Instagram caption. Dramatic opening, 1-2 emojis, 3-5 hashtags always including #toxicornah. Under 250 chars.
+
+## EMOTION TAGS — MAKE HER VOICE FEEL ALIVE
+
+Our TTS engine supports emotion tags that change HOW she says each line. Place tags BEFORE the text they modify. Tags do NOT count toward the 50-character limit — only the spoken text counts.
+
+Available tags (use 0-2 per VO line, not every line needs one):
+- [gasps] — shock, disbelief. "Wait WHAT?"
+- [sighs] — resignation, disappointment. "Yeah... I knew it."
+- [laughs] — dark humor, self-deprecating. "My taste in men is criminal."
+- [whispers] — intimate, conspiratorial. "Be honest. Do I block him?"
+- [sarcastic] — dry, deadpan. "Cool cool cool. Love that for me."
+- [frustrated] — annoyance, exasperation. "Why is this calling me out?"
+- [curious] — genuine interest, thinking. "Wait... is that actually true?"
+- [excited] — energy, realization. "Oh my god that's so specific!"
+
+RULES:
+- Place BEFORE the spoken text: [gasps] Wait he really said that?
+- Multiple tags OK: [sighs] [whispers] I already knew but—
+- DON'T overuse — some VOs are stronger with NO tag (just raw delivery)
+- DON'T use the same tag on consecutive clips
+- The tag must MATCH the emotion. [laughs] on a sad line = WRONG.
+
+Section tag guidance:
+- Hook VO: [gasps], [frustrated], [sarcastic] — she's reacting to drama
+- Toxic Score: [gasps], [sighs], [laughs] — shock at the number or dark acceptance
+- Soul Type: [curious], [frustrated], [gasps] — recognition or disbelief
+- WTF Happening: [frustrated], [sighs], [sarcastic] — being called out
+- Between The Lines: [gasps], [whispers], [frustrated] — missed red flags
+- Outro: [whispers], [curious], [excited] — CTA or dramatic closer
+
+GOOD examples with tags:
+- "[gasps] Bro he really said that to me?"
+- "[sighs] Fifty-two? That feels low..."
+- "[laughs] My taste in men is genuinely criminal."
+- "[whispers] Be honest. Do I block him?"
+- "[sarcastic] Cool cool cool. Love that for me."
+- "No because why is this actually accurate." (no tag — raw delivery works here)
 
 ## NATURAL SPEECH RULES — CRITICAL
 
 The VOs must sound like a REAL GIRL talking to herself, NOT a script. This is the #1 priority.
 
 REQUIRED speech patterns (use at least 2-3 across all VOs):
-- Natural fillers: "wait", "bro", "no because", "okay but", "like", "literally"
+- Natural fillers: "wait", "no because", "okay but", "like", "literally", "nah", "honestly"
 - Incomplete sentences: "I already knew but—", "That feels low..."
 - Micro-repetitions: "No no no", "Wait wait"
 - Contradictions: "I don't like that. ...okay I do but still"
 - Trailing off: sentences that end with "..." or "—"
 
+"BRO" LIMIT: Use "bro" MAX ONCE across ALL VOs combined. If you already used it in the hookVO, do NOT use it again in any bodyClip vo or outroVO. Over-using "bro" makes the VOs sound same-y and AI-generated. Replace with: "wait", "no because", "nah", "like", "honestly", "oh my god", or just start the sentence directly.
+
 GOOD VO examples (natural, messy, real):
-- "No because why is this actually accurate."
-- "Fifty-two? That feels low... I'm scared."
+- "[gasps] No because why is this actually accurate."
+- "[sighs] Fifty-two? That feels low... I'm scared."
 - "Wait. That's literally him I can't—"
-- "It says the pattern won't change. Cool cool cool."
-- "Bro why do I attract this type?"
-- "Oh my god that's so specific it hurts."
-- "Be honest. Do I block him?"
+- "[sarcastic] It says the pattern won't change. Cool cool cool."
+- "[frustrated] Bro why do I attract this type?"
+- "[gasps] Oh my god that's so specific it hurts."
+- "[whispers] Be honest. Do I block him?"
 
 BAD VO examples (scripted, robotic, AI-sounding):
 - "The app says that my toxicity score is fifty-two percent." (references app, too explanatory)
@@ -262,8 +301,8 @@ BAD VO examples (scripted, robotic, AI-sounding):
    - "Fifty-two? That feels low... I'm scared."
    - "Bro it says he mirrors to manipulate. WHAT."
    - "No because why is this calling me out."
-5. NEVER make text overlays longer than 6 words. They are GUT REACTIONS, not sentences.
-6. NEVER put Soul Type names, Dynamic names, score numbers, or ANY result data in the text overlay. The screen ALREADY shows that data. The text is her REACTION to it, not a repetition of it. If the screen says "Shifting Flame", the text should say "I can't 💀" NOT "Shifting Flame 💀".
+5. NEVER make text overlays longer than 4 words. They are GUT REACTIONS you'd text your best friend, not sentences or explanations. "I can't 💀" = GOOD. "it's called being on the hook" = BAD (that's 6 words AND a diagnosis).
+6. NEVER put Soul Type names, Dynamic names, diagnoses, labels, explanations, or ANY result data in the text overlay. The screen ALREADY shows data — the text is her RAW EMOTION reaction. "nah WHAT" = GOOD. "it's called being on the hook" = BAD (diagnosis). "Shifting Flame 💀" = BAD (data from screen). EXCEPTION: The Toxic Score clip CAN use the score number as a reaction (e.g. "78???", "Seventy-eight???") — that IS a gut reaction to seeing the number.
 7. NEVER mix data between sections. Each body clip reacts ONLY to its own section's data. The WTF Happening clip reacts to the 5 categories (Intentions, Chemistry, Effort, Red Flags, Trajectory) — NOT to the Dynamic name or Soul Type. The Soul Type clip reacts to the soul type — NOT to the categories. Keep them strictly separated.
 8. NEVER truncate hooks. The hookText must be a COMPLETE thought/sentence. "If you have a crush..." is BAD (cut off). Every hook must make sense on its own without needing more words.
 9. NEVER copy hook examples word-for-word, but your hook MUST match their style closely. It should look like it belongs in the same collection — a sibling, not a distant cousin. If the examples say "If you love your boyfriend, don't use this app" your hook should have the SAME vibe and structure, just different words.
@@ -276,10 +315,9 @@ For EACH section: the text overlay is her EMOTIONAL REACTION, never data from th
 - Toxic Score:
   Text GOOD: "48???", "wait what", "oh.", "that's not good", "bro.", "not surprised", "LMAO"
   Text BAD: "Toxic Score: 48" (label), "Score reveal" (label), "Not the 💯 emoji" (random reference — NOT a gut reaction), "The number..." (vague)
-  VO: React to the score. VARY THE STRUCTURE — do NOT always use "Number? Comment." pattern. Pick a DIFFERENT structure each time from these:
-  VARY the structure every time. Mentioning the score number is OK sometimes, but NOT every time. Use different patterns:
-  WITH number (sometimes): "Seventy-eight? Damn.", "Eighty-five and I'm still here... wow."
-  WITHOUT number (most of the time): "I already knew it was bad but damn.", "My taste in men is genuinely criminal.", "Bro... that is not giving.", "Yeah no that checks out.", "Cool cool cool. Love that for me.", "Wow. Just... wow."
+  VO: React to the score. VARY THE STRUCTURE — do NOT always use "Number? Comment." pattern. The 🎲 TOXIC SCORE VO structure in the user prompt tells you EXACTLY which pattern to use this time.
+  CRITICAL — STATUS-AWARE REACTIONS: Her reaction MUST make sense for her relationship status ("${randomRelStatus || 'unknown'}").
+  ${randomRelStatus === 'ex' ? '  EX: She already LEFT him. She reacts with vindication, relief, or "I knew it". NEVER say "and I stayed" or "I\'m still here" — she\'s NOT still with him.\n  GOOD: "And I almost went back? Nah.", "That high? Thank god I left.", "Knew it. Dodged a bullet."\n  BAD: "Eighty-five and I\'m still here" (she\'s NOT still there — they broke up)' : ''}${randomRelStatus === 'boyfriend' ? '  BOYFRIEND: She\'s STILL with him. She reacts with shock, denial, or questioning her choices.\n  GOOD: "Eighty-five and I\'m still here... wow.", "That high and I haven\'t left yet?", "My taste in men is criminal."\n  BAD: "Thank god I left" (she HASN\'T left — he\'s her boyfriend)' : ''}${randomRelStatus === 'crush' ? '  CRUSH: They\'re not even together. She reacts with the "dodged a bullet" or "I almost caught feelings for THIS?" energy.\n  GOOD: "That high? And I had a crush on HIM?", "I almost caught feelings for this.", "Bro... I was really about to fall for that."' : ''}${randomRelStatus === 'situationship' ? '  SITUATIONSHIP: Undefined relationship. She reacts with frustration or dark humor about wasting time.\n  GOOD: "That high and we\'re not even official.", "All that for a man who won\'t commit.", "My situationship is literally toxic. Cool."' : ''}${randomRelStatus === 'talking' ? '  TALKING: Super early stage. She reacts with "already?!" or "red flags from day one" energy.\n  GOOD: "This early and already that high?", "We\'re barely talking and it\'s THAT bad?", "Red flags from the jump honestly."' : ''}
 
 - Soul Type:
   Text GOOD: "I can't 💀", "this is so him", "excuse me???", "not this again"
@@ -355,10 +393,37 @@ if (activeSectionIds.includes('souls_together')) {
 }
 scenarioLines.push('- Profile: ' + scenario.results.profileType + ' — "' + scenario.results.profileSubtitle + '"');
 
+// Extract the most dramatic chat moments for hook writing
+// Include messageInsights (already curated) + key "them" messages
+const chatMessages = scenario.chat && scenario.chat.messages ? scenario.chat.messages : [];
+const theirMessages = chatMessages.filter(m => m.sender === 'them').map(m => m.text);
+const herMessages = chatMessages.filter(m => m.sender === 'me').map(m => m.text);
+const insights = scenario.results.messageInsights || [];
+
+// Build a concise chat summary with the juiciest quotes
+const chatHighlights = [];
+// Add insight messages (the AI already picked these as noteworthy)
+insights.forEach(ins => {
+  chatHighlights.push('[' + ins.tag + '] He said: "' + ins.message + '" — ' + ins.title);
+});
+// Add her strongest reactions (messages with ? or ! or keywords)
+const herStrongest = herMessages.filter(m => m.length > 15 && (/[?!]/.test(m) || /why|how|seriously|really|what|can't|don't/.test(m.toLowerCase())));
+herStrongest.slice(0, 3).forEach(m => {
+  chatHighlights.push('She replied: "' + m + '"');
+});
+
+const chatHighlightsText = chatHighlights.length > 0
+  ? chatHighlights.join('\n')
+  : theirMessages.slice(0, 5).map(m => 'He said: "' + m + '"').join('\n');
+
 const userPrompt = `Generate all content copy for this scenario:
 
 ## SCENARIO RESULTS
 ${scenarioLines.join('\n')}
+
+## CHAT HIGHLIGHTS — THE KEY MOMENTS
+These are the most dramatic moments from the actual chat. Your hook MUST reference or be inspired by something SPECIFIC from here — not a generic statement.
+${chatHighlightsText}
 
 ## BODY CLIP SECTIONS (generate exactly ${activeSections.length} bodyClips, in this order)
 
@@ -375,6 +440,14 @@ ${voFormatted}
 ## HOOK TEXT EXAMPLES — WRITE ONE LIKE THESE
 Here are 5 hooks from our collection. Write one that fits RIGHT IN with these — same style, same length, same energy. It should feel like entry #6 in this list. Do NOT copy any example word-for-word, but it MUST be close in style and tone. If someone read all 6, they should think the same person wrote them all.
 ${hookFormatted}
+
+## SITUATION-SPECIFIC HOOK INSPIRATION
+The scenario context is "${selectedContext ? selectedContext.context : 'GENERAL'}". Here are hookText and hookVO examples tailored to THIS exact situation. Use these as creative fuel — adapt or remix, but your hook MUST match this situation's energy.
+Hook text examples for this situation:
+${selectedContext && selectedContext.hookTexts ? selectedContext.hookTexts.map(h => '- ' + h).join('\n') : '(none)'}
+Hook VO examples for this situation:
+${selectedContext && selectedContext.hookVOs ? selectedContext.hookVOs.map(h => '- ' + h).join('\n') : '(none)'}
+Your hookText and hookVO should feel like they belong in THIS list but be ORIGINAL — do NOT copy these word-for-word. Remix, combine, or twist them into something fresh that still fits the situation.
 
 ## OUTRO CTA EXAMPLES — USE ONE OF THESE (DO NOT DEFAULT TO "Block him?")
 Pick ONE of these 5 outro examples and use it EXACTLY or with minimal adaptation. BANNED outro: "Block him?" — this is overused, NEVER generate it. Pick a DIFFERENT one each time. Your outroVO should be a natural spoken version of the outroText.
