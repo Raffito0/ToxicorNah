@@ -138,7 +138,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
           />
           {/* Avatar container */}
           <div
-            className="w-24 h-24 rounded-full overflow-hidden relative"
+            className="w-32 h-32 rounded-full overflow-hidden relative"
             style={{
               boxShadow: `0 0 25px ${accentColor}40`,
               border: `2px solid ${accentColor}60`,
@@ -148,7 +148,7 @@ function HeroSection({ data }: { data: PersonProfileData }) {
               <img src={avatarUrl} alt={person.name} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${archetype.gradientFrom}, ${archetype.gradientTo})` }}>
-                <span className="text-white text-3xl font-semibold">{person.name.charAt(0).toUpperCase()}</span>
+                <span className="text-white text-4xl font-semibold">{person.name.charAt(0).toUpperCase()}</span>
               </div>
             )}
           </div>

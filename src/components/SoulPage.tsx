@@ -210,7 +210,7 @@ function HeroSection({ data, sigilsState, onSigilClick, onAvatarClick }: HeroSec
           />
           {/* Avatar container */}
           <div
-            className="w-24 h-24 rounded-full overflow-hidden relative"
+            className="w-32 h-32 rounded-full overflow-hidden relative"
             style={{
               border: `2px solid ${accentColor}60`,
             }}

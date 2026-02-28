@@ -517,7 +517,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             transition={{ delay: 0.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
           >
             <div
-              className="w-24 h-24 rounded-full overflow-hidden relative"
+              className="w-32 h-32 rounded-full overflow-hidden relative"
             >
               {personAvatarUrl ? (
                 <img src={personAvatarUrl} alt={analysis.personName} className="w-full h-full object-cover" />
@@ -526,7 +526,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
                   className="w-full h-full flex items-center justify-center"
                   style={{ background: `linear-gradient(135deg, ${analysis.personArchetype.gradientFrom}, ${analysis.personArchetype.gradientTo})` }}
                 >
-                  <span className="text-white text-3xl font-semibold">
+                  <span className="text-white text-4xl font-semibold">
                     {analysis.personName.charAt(0).toUpperCase()}
                   </span>
                 </div>
