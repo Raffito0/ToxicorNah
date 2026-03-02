@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Toxic or Nah</string>
+    <string name="title_activity_main">Toxic or Nah</string>
+    <string name="package_name">com.toxicornah.app</string>
+    <string name="custom_url_scheme">com.toxicornah.app</string>
+</resources>

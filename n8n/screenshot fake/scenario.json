@@ -1,0 +1,11 @@
+{
+    "chat": {
+      "contactName": "John",
+      "appStyle": "imessage",
+      "messages": [
+        { "sender": "them", "text": "Hey! Are you coming tonight? waht the fuck is all of this shit", "time": "7:30 PM" },
+        { "sender": "me", "text": "Yes! Be there in 10 minutes 🙌", "time": "7:30 PM" },
+        { "sender": "them", "text": "Perfect, see you soon!" }
+      ]
+    }
+  }

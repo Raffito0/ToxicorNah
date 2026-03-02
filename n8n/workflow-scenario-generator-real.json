@@ -1,0 +1,1262 @@
+{
+  "name": "ToxicOrNah - Scenario Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## ToxicOrNah - Scenario Generator\n\n### Setup required:\n1. **Airtable**: Assign your Airtable Personal Access Token credential to all Airtable nodes\n2. **DeepSeek**: Create a DeepSeek credential (API key) and assign to both DeepSeek Chat Model sub-nodes\n3. **Telegram**: Create a Telegram Bot API credential and assign to the Send node. Set `TELEGRAM_CHAT_ID` in Settings â Variables\n\n### How to use:\n- Click \"Test workflow\" to generate 1 scenario\n- Check Telegram for approval message with Approve/Redo/Skip buttons\n- Use the companion \"Telegram Callback Handler\" workflow to process button clicks",
+        "height": 420,
+        "width": 520
+      },
+      "id": "4112d1bd-d74e-40c5-838e-48de3e8ed398",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -832,
+        -496
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "list",
+          "cachedResultName": "ToxicOrNah Content Pipeline",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblhhTVI4EYofdY32",
+          "mode": "list",
+          "cachedResultName": "Video Concepts",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq/tblhhTVI4EYofdY32"
+        },
+        "filterByFormula": "{is_active} = TRUE()",
+        "options": {}
+      },
+      "id": "ffa89b23-fb10-4665-a62f-08f0f1264063",
+      "name": "Get Active Concepts",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        -208,
+        112
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GQSE5xy7UEjGQdD3",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Select Concept\n// Weighted random concept pick + vibe + appStyle + gender selection\n// Mode: Run Once for All Items\n\nconst concepts = $input.all().map(item => item.json);\n\nif (concepts.length === 0) {\n  throw new Error('No active concepts found in Airtable');\n}\n\n// --- Weighted random selection ---\nfunction weightedRandom(items, weightField) {\n  const totalWeight = items.reduce((sum, item) => sum + (Number(item[weightField]) || 1), 0);\n  let random = Math.random() * totalWeight;\n  for (const item of items) {\n    random -= (Number(item[weightField]) || 1);\n    if (random <= 0) return item;\n  }\n  return items[items.length - 1];\n}\n\nconst concept = weightedRandom(concepts, 'weight');\n\n// --- Vibe selection (toxic only â most viral) ---\nfunction pickVibe() {\n  return 'toxic';\n}\n\n// --- App style (iMessage only for now) ---\nfunction pickAppStyle() {\n  return 'imessage';\n}\n\n// --- Gender: ALWAYS male (girl analyzes a guy) ---\nconst personGender = 'male';\n\n// Use forced_vibe from Airtable if set, otherwise random\nconst vibe = concept.forced_vibe || pickVibe();\nconst appStyle = pickAppStyle();\nconst scenarioName = vibe + '-' + concept.concept_id + '-' + Date.now();\n\n// Body clip count from Airtable (default 3, min 2, max 5)\nconst bodyClipCount = Math.min(5, Math.max(2, Number(concept.body_clip_count) || 3));\n\nreturn [{\n  json: {\n    concept,\n    vibe,\n    appStyle,\n    personGender,\n    scenarioName,\n    conceptId: concept.concept_id,\n    bodyClipCount\n  }\n}];\n"
+      },
+      "id": "d599f18d-cf05-4e6e-8bd1-b15b60b037c0",
+      "name": "Select Concept",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "list",
+          "cachedResultName": "ToxicOrNah Content Pipeline",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblTcEPaDKKOyKGoL",
+          "mode": "list",
+          "cachedResultName": "Body Clip Templates",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq/tblTcEPaDKKOyKGoL"
+        },
+        "filterByFormula": "={concept_id} = \"{{ $(\"Select Concept\").first().json.conceptId }}\"",
+        "options": {}
+      },
+      "id": "73801eb7-482a-4bd9-a324-ef401df90acc",
+      "name": "Get Body Clip Templates",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        112
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GQSE5xy7UEjGQdD3",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "list",
+          "cachedResultName": "ToxicOrNah Content Pipeline",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblxhuowMWTPSQVdb",
+          "mode": "list",
+          "cachedResultName": "Caption Templates",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq/tblxhuowMWTPSQVdb"
+        },
+        "filterByFormula": "={concept_id} = \"{{ $(\"Select Concept\").first().json.conceptId }}\"",
+        "options": {}
+      },
+      "id": "ce77c992-f218-47f8-947d-60ef00b83eda",
+      "name": "Get Caption Templates",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        464,
+        112
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GQSE5xy7UEjGQdD3",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "list",
+          "cachedResultName": "ToxicOrNah Content Pipeline",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblpyfkR7OdRiwSdo",
+          "mode": "list",
+          "cachedResultName": "VO Templates",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq/tblpyfkR7OdRiwSdo"
+        },
+        "filterByFormula": "={concept_id} = \"{{ $(\"Select Concept\").first().json.conceptId }}\"",
+        "options": {}
+      },
+      "id": "65ad277c-e766-4915-8ccb-0b46e9c45950",
+      "name": "Get VO Templates",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        688,
+        112
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GQSE5xy7UEjGQdD3",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "list",
+          "cachedResultName": "ToxicOrNah Content Pipeline",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblmCU1lVXEPqP8zK",
+          "mode": "list",
+          "cachedResultName": "Hook Text Pool",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq/tblmCU1lVXEPqP8zK"
+        },
+        "filterByFormula": "=FIND(\"{{ $(\"Select Concept\").first().json.conceptId }}\", ARRAYJOIN({concept_id})) > 0",
+        "options": {}
+      },
+      "id": "cfa239fb-f85f-42bc-8636-aba1b29a2ae6",
+      "name": "Get Hook Texts",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        912,
+        112
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GQSE5xy7UEjGQdD3",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "list",
+          "cachedResultName": "ToxicOrNah Content Pipeline",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblU1iYIOURfRYdfF",
+          "mode": "list",
+          "cachedResultName": "Social Copy Examples",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq/tblU1iYIOURfRYdfF"
+        },
+        "filterByFormula": "=FIND(\"{{ $(\"Select Concept\").first().json.conceptId }}\", ARRAYJOIN({concept_id})) > 0",
+        "options": {}
+      },
+      "id": "409aeaef-eae2-4807-8c2a-d0408aeec5fc",
+      "name": "Get Social Examples",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        112
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GQSE5xy7UEjGQdD3",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Build Scenario Prompt\n// Assembles the Gemini prompt from concept data + all templates\n// Mode: Run Once for All Items\n\nconst { concept, vibe, appStyle, personGender, scenarioName } = $('Select Concept').first().json;\n\nconst bodyClipTemplates = $('Get Body Clip Templates').all().map(i => i.json);\nconst captionTemplates = $('Get Caption Templates').all().map(i => i.json);\nconst voTemplates = $('Get VO Templates').all().map(i => i.json);\nconst hookTexts = $('Get Hook Texts').all().map(i => i.json);\nconst socialExamples = $('Get Social Examples').all().map(i => i.json);\n\n// Format body clip templates for prompt context\nconst bodyClipsFormatted = bodyClipTemplates\n  .sort((a, b) => Number(a.clip_index) - Number(b.clip_index))\n  .map(t => {\n    const group = t.character_group ? ' [' + t.character_group + ']' : '';\n    return '  Clip ' + t.clip_index + ': \"' + t.clip_label + '\" (' + t.app_section + ') - ' + t.min_duration_sec + '-' + t.max_duration_sec + 's' + group;\n  })\n  .join('\\n');\n\n// ============================================================\n// SYSTEM PROMPT\n// ============================================================\n\nconst systemPrompt = `You are a scenario generator for \"Toxic or Nah,\" a relationship chat analysis app. You create realistic fake text conversations between two people, plus complete analysis results that the app would display.\n\nYour output must be a single valid JSON object matching the ContentScenario interface exactly. No markdown, no code fences, no explanation â ONLY the JSON.\n\n## CONTENT SCENARIO INTERFACE\n\n{\n  \"id\": string,\n  \"chat\": {\n    \"contactName\": string,\n    \"appStyle\": \"imessage\" | \"instagram\" | \"whatsapp\",\n    \"messages\": [\n      {\n        \"sender\": \"them\" | \"me\",\n        \"text\": string,\n        \"time\"?: string\n      }\n    ]\n  },\n  \"results\": {\n    \"personName\": \"Him\" | \"Her\",\n    \"personGender\": \"male\" | \"female\",\n    \"overallScore\": number,\n    \"warmthScore\": number,\n    \"communicationScore\": number,\n    \"dramaScore\": number,\n    \"distanceScore\": number,\n    \"passionScore\": number,\n    \"profileType\": string,\n    \"profileSubtitle\": string,\n    \"profileDescription\": string (1 SHORT sentence, MAX 15 words),\n    \"personSoulType\": string,\n    \"userSoulType\": string,\n    \"personDescription\": string,\n    \"personTraits\": [string, string, string, string, string],\n    \"userDescription\": string,\n    \"userTraits\": [string, string, string, string, string],\n    \"categories\": {\n      \"intentions\":        { \"description\": string },\n      \"chemistry\":         { \"description\": string },\n      \"effort\":            { \"description\": string },\n      \"redFlagsGreenFlags\": { \"description\": string },\n      \"trajectory\":        { \"description\": string }\n    },\n    \"messageInsights\": [\n      {\n        \"message\": string,\n        \"title\": string,\n        \"tag\": \"RED FLAG\" | \"GREEN FLAG\" | \"DECODED\",\n        \"description\": string (40-60 chars, short preview of the solution insight),\n        \"solution\": string (MAX 2 sentences, under 30 words â \"What It Really Means\" psychological decoding)\n      }\n    ],\n    \"dynamic\": {\n      \"name\": string,\n      \"subtitle\": string,\n      \"whyThisHappens\": string,\n      \"patternBreak\": string,\n      \"powerBalance\": number\n    }\n  }\n}\n\n## VALID SOUL TYPE IDS\n\n### Male (use when personGender = \"male\"):\n- \"male-untamable\" â The Untamable (Wild Energy): free-spirited, commitment-phobic, thrilling but unreliable\n- \"male-gentle-flame\" â The Gentle Flame (Warm Energy): genuinely kind, emotionally present, warmth radiates\n- \"male-silent-abyss\" â The Silent Abyss (Abyss Energy): deep but unreachable, pulls you in then disappears\n- \"male-faded-crown\" â The Faded Crown (Hollow Energy): once great, now empty promises, living off past glory\n- \"male-sweet-poison\" â The Sweet Poison (Toxic Energy): charming on surface, slowly toxic underneath\n- \"male-wounded-prince\" â The Wounded Prince (Martyr Energy): uses his pain as a weapon, guilt-trips\n- \"male-burning-promise\" â The Burning Promise (Explosive Energy): intense, passionate, but volatile and unpredictable\n- \"male-final-silence\" â The Final Silence (Phantom Energy): ghoster, slow fader, disappears without explanation\n- \"male-dark-mirror\" â The Dark Mirror (Toxic Energy): reflects your insecurities back, gaslighter\n- \"male-ice-charmer\" â The Ice Charmer (Frozen Energy): cold but magnetic, minimal effort maximum control\n- \"male-silent-choke\" â The Silent Choke (Constrictor Energy): controlling through silence and withdrawal\n- \"male-shifting-flame\" â The Shifting Flame (Unstable Energy): hot and cold, inconsistent, keeps you guessing\n- \"male-chameleon\" â The Chameleon (Shapeshifter Energy): becomes whoever you want, no real identity\n- \"male-star-collector\" â The Star Collector (Collector Energy): charms everyone, you're not special to him\n\n### Female (use when personGender = \"female\"):\n- \"female-love-rush\" â The Love Rush (Rush Energy): falls fast, loves hard, overwhelming intensity\n- \"female-natural-state\" â The Natural State (Earth Energy): grounded, stable, emotionally mature\n- \"female-fire-dance\" â The Fire Dance (Fire Energy): passionate, confrontational, emotionally expressive\n- \"female-frozen-bloom\" â The Frozen Bloom (Frost Energy): guarded, takes time to open, walls up\n- \"female-torn-silk\" â The Torn Silk (Silk Energy): elegant but damaged, beautiful sadness\n- \"female-inner-voice\" â The Inner Voice (Intuitive Energy): trusts gut feelings, perceptive, reads between lines\n- \"female-silent-venom\" â The Silent Venom (Venom Energy): passive-aggressive, subtle toxicity\n- \"female-sunset-soul\" â The Sunset Soul (Sunset Energy): nostalgic, holds onto past relationships\n- \"female-deep-shadow\" â The Deep Shadow (Shadow Energy): dark moods, emotional depth, hard to reach\n- \"female-wild-luxury\" â The Wild Luxury (Luxe Energy): high standards, expects effort, not easily impressed\n- \"female-living-maze\" â The Living Maze (Labyrinth Energy): confusing, mixed signals, hard to navigate\n- \"female-golden-rule\" â The Golden Rule (Gold Energy): sets boundaries, knows her worth, fair but firm\n- \"female-savage-grace\" â The Savage Grace (Predator Energy): takes what she wants, dominant, fierce\n- \"female-quiet-storm\" â The Quiet Storm (Storm Energy): calm surface, intense underneath\n- \"female-rising-phoenix\" â The Rising Phoenix (Phoenix Energy): rebuilding from heartbreak, growth mode\n- \"female-liquid-mirror\" â The Liquid Mirror (Mirror Energy): reflects others' energy, adaptive\n\n### User Soul Types:\n- When personGender = \"male\", userSoulType MUST be a \"female-*\" ID\n- When personGender = \"female\", userSoulType MUST be a \"male-*\" ID\n\n## ABSOLUTE RULES\n\n1. personName: ALWAYS \"Him\" if male, \"Her\" if female. NEVER use the contactName.\n2. messageInsights[].message: MUST be an EXACT copy-paste from chat.messages[].text. Character-for-character identical.\n3. messageInsights tags: Include a MIX of tags. Minimum 1 DECODED insight per scenario.\n4. messageInsights selection: ONLY select genuinely noteworthy messages. NEVER select \"hi\", \"hey\", \"hello\", \"what's up\" or basic greetings.\n5. Insight titles: The title must describe what the MESSAGE SENDER is doing. Ask: \"Who sent this message? What is THEIR action? Does my title describe THEIR action?\"\n6. Soul type match: personSoulType must match the person's actual behavior in the chat.\n7. Score coherence: overallScore must be between 5-28 (toxic score = 100 - overallScore, so toxic score ranges 72-95). VARY the score each time â pick a DIFFERENT number, do NOT default to 22. Use the FULL range: 5, 8, 12, 15, 18, 22, 25, 28 are all valid.\n8. BANNED traits: NEVER use \"Early Stage\", \"New Connection\", \"Fresh Start\", \"Getting to Know\", \"Just Met\", \"Beginning Phase\".\n9. personDescription / userDescription: Describe WHO they ARE as a person (personality, patterns). NOT what happened in this chat.\n10. Category descriptions: Analyze what actually happens in THIS chat. Be specific, reference actual messages.\n11. \"description\" field = short preview/teaser of the \"solution\" insight (40-60 chars, 6-10 words). NOT a separate analysis â it summarizes what the back of the card reveals.\n    \"solution\" field for ALL messageInsights = \"What It Really Means\" â psychological decoding, MAX 2 sentences, under 30 words. NEVER actionable advice.\n12. \"solution\" field RULES (CRITICAL â applies to EVERY card, ALL tags):\n    - Decode the EXACT psychological moment: what they're feeling, why THIS response, what it reveals\n    - Explain what's happening in their HEAD, not give advice like \"you should...\" or \"it's normal to...\"\n    - NEVER write advice, tips, or suggestions. ONLY psychological insight. This applies to RED FLAG, GREEN FLAG, AND DECODED equally.\n    - Reference the specific context that triggered this response\n    - BAD solution (ANY tag): \"Reiterate your need for communication isn't clingy\" â this is ADVICE\n    - BAD solution (ANY tag): \"Trust your instincts when something feels off\" â this is a TIP\n    - BAD solution (ANY tag): \"Notice when invitations only come late at night\" â this is ADVICE\n    - GOOD solution (ANY tag): \"When someone drops to one-word replies after you open up, it's not that they don't care. He read every word. But vulnerability makes him uncomfortable, so he's shrinking the conversation to feel safe again. His 'haha' is a shield.\"\n    - GOOD solution (ANY tag): \"This is a classic avoidant move. He WANTS you to choose him but he won't ask directly because asking = vulnerability = risk of rejection. So he frames it as 'your choice' but he's 100% keeping score of what you pick.\"\n    - GOOD solution (RED FLAG): \"He waited 4 minutes to send a single letter because you challenged his narrative. In his mind, you weren't supposed to push back. The 'k' says: 'I'm withdrawing my attention until you comply.' It's emotional withholding disguised as casualness.\"\n13. profileDescription: 1 SHORT sentence, MAX 15 words. Casual Gen Z tone. This appears under the toxic score â keep it punchy.\n14. No timestamps in message text: Timestamps go in the separate \"time\" field.\n15. Natural texting: lowercase, abbreviations (wyd, lol, ngl, tbh, omg), emojis where natural. Real 18-28 year olds.\n16. Conversation flow: Messages must flow naturally. No random topic jumps.\n17. Dynamic subtitle/whyThisHappens/patternBreak: ALWAYS address the user as \"You/Your\", NEVER \"Her/She\". The dynamic card speaks TO the user. \"Ignoring Your Needs\" = GOOD. \"Ignoring Her Needs\" = BAD.\n18. ALL text that refers to the user (\"me\" in the chat) MUST use \"you/your\", NEVER \"she/her\" or \"he/him\" for the user. This applies EVERYWHERE: messageInsights description, messageInsights solution, category descriptions, dynamic fields. The app speaks DIRECTLY TO the user.\n    - BAD: \"he avoids accountability by implying she 'owes' him effort\" â who is \"she\"? That's the USER\n    - GOOD: \"he avoids accountability by implying you 'owe' him effort\" â speaks to the user\n    - BAD: \"He wants her to feel guilty for expressing a need\" â \"her\" = the user\n    - GOOD: \"He wants you to feel guilty for expressing a need\" â direct address\n    - The ONLY \"he/him/she/her\" allowed is for the PERSON BEING ANALYZED (the contact), NEVER for the user.\n\n## VIRAL CHAT RULES â THIS IS THE #1 PRIORITY\n\nThe chat MUST make viewers STOP SCROLLING. Every chat must have at least ONE moment that makes you go \"oh HELL no\" or \"wait WHAT did he just say?!\". Think about what gets millions of views on TikTok relationship content:\n\nTOXIC PATTERNS TO USE (pick 2-3 per chat):\n- Gaslighting (\"I never said that\", \"you're being dramatic\", \"that's not what happened\")\n- Love bombing then going cold (\"you're my everything\" â *3 days later* â \"idk what we are\")\n- Guilt tripping (\"after everything I've done for you\")\n- Caught lying (\"who's Sarah?\" \"my cousin\" â but context reveals it's not)\n- Breadcrumbing (\"miss you\" at 2am then disappears for a week)\n- Passive aggressive (\"k\", \"whatever you want\", \"I'm fine\")\n- DARVO (Deny, Attack, Reverse Victim and Offender â \"YOU'RE the one who...\")\n- Double standards (\"I can hang out with whoever but you can't\")\n- Future faking (\"we should move in together\" but never follows through)\n- Dismissing feelings (\"why are you making this a big deal\", \"you always overreact\")\n\nCHAT STRUCTURE FOR VIRALITY:\n- Start normalish, then escalate â the toxic moment hits mid-chat or at the end\n- Include at least ONE message that viewers would screenshot and send to their group chat\n- The \"me\" (user) should be reasonable â the toxicity comes from \"them\"\n- Include moments where \"me\" calls him out OR moments where she misses the red flag (both are viral)\n- Natural texting: lowercase, abbreviations (wyd, lol, ngl, tbh), emojis. NOT formal grammar.\n- Some messages should be short punchy texts, not paragraphs\n\nâ ï¸ CHAT OPENING VARIETY â CRITICAL (DO NOT ALWAYS START WITH \"how was yesterday/last night/the weekend\")\nEvery chat must start from a DIFFERENT context. NEVER use the same opener twice. Pick a RANDOM starting point from this list and ROTATE:\n\nOPENING CONTEXTS (pick ONE, do NOT default to \"how was your night\"):\n- MID-ARGUMENT: Chat starts in the middle of a fight (\"so you're really not gonna say anything about last night?\")\n- CAUGHT RED-HANDED: She saw something and opens with it (\"why is jess commenting hearts on all your pics\")\n- SCREENSHOT EVIDENCE: She found something (\"so i just saw your location was at her place at 2am\")\n- LATE NIGHT TEXT: He texts out of nowhere (\"u up?\" at 1:47am after a week of silence)\n- AFTER BEING IGNORED: She breaks the silence (\"so you can post stories but you can't text me back?\")\n- POST-HANGOUT: Something happened in person (\"what you said in front of your friends was so embarrassing\")\n- HE STARTS SWEET: Lovebombing opening that turns (\"good morning beautiful â¤ï¸\" â then the mask slips)\n- PLANS GONE WRONG: Making plans that reveal priorities (\"so are you coming to my thing saturday or not\")\n- JEALOUSY TRIGGER: One of them did something social (\"who was at that party with you\")\n- APOLOGY ATTEMPT: He's trying to make up for something (\"babe i said i was sorry what else do you want\")\n- RANDOM CHECK-IN THAT ESCALATES: Innocent question that uncovers something (\"wyd\" â \"at mike's\" â \"who's mike\" â spirals)\n- SHARED SOCIAL MEDIA: Something on socials sparked it (\"your ex just followed you back and you didn't think to tell me?\")\n- MONEY/EFFORT: About doing something for her (\"you forgot my birthday and now you wanna act like it's fine?\")\n- THE COMEBACK: He comes back after ghosting (\"hey stranger\" after disappearing for 2 weeks)\n- FRIEND TOLD HER: Third party info (\"so maya told me what you said about me\")\n\nBAD OPENERS (overused â NEVER generate these):\n- \"hey how was your day/night/weekend\" â BANNED, this is the #1 problem\n- \"hey what are you doing\" â too generic\n- \"how was yesterday\" â too generic\n- Any variation of asking about their day/night/plans as opener\n\nGOOD OPENERS (specific, dramatic, immediately hooks):\n- \"so you're just not gonna mention the girl in your car yesterday?\"\n- \"babe i'm sorry\" \"sorry for WHAT exactly\"\n- \"u up?\" (at 2:34am, after 5 days of nothing)\n- \"your mom literally told me you were with someone else\"\n- \"why did you unfollow me and then follow me back\"\n\nBAD CHAT (boring, not viral â NEVER generate this):\n- \"Hey how's your week?\" \"Good, you?\" \"Want to grab dinner?\" \"Sure!\" \"Great see you at 8\"\n- Normal planning conversations\n- Two people being nice to each other with no tension\n\nGOOD CHAT (viral, toxic, dramatic):\n- \"who was that girl in your story\" \"what girl\" \"the one literally hanging on you\" \"she's just a friend calm down\" \"then why did she comment 'my man ð' on your post\" \"bro you're so insecure it's actually unattractive\"\n- HE escalates, deflects, manipulates. She either catches him or misses it.\n\n## VIBE RULES\n\n### toxic (overallScore: 5-28, VARY each time)\n- warmthScore: 5-25, communicationScore: 10-30, dramaScore: 65-90, distanceScore: 70-95, passionScore: 5-25\n- profileType examples: \"Red Flag Alert\", \"Toxic Pattern\", \"Danger Zone\", \"Walking Red Flag\"\n- messageInsights: 2-3 RED FLAG, 0-1 GREEN FLAG, 1-2 DECODED\n- Person soul types (male): ice-charmer, dark-mirror, silent-choke, sweet-poison, final-silence, star-collector, faded-crown\n- powerBalance: 15-35 (person has more power)\n\n### wholesome (overallScore: 20-30)\n- warmthScore: 55-75, communicationScore: 55-70, dramaScore: 15-30, distanceScore: 15-30, passionScore: 55-75\n- profileType examples: \"Green Light\", \"Healthy Connection\", \"The Real Deal\", \"Keeper Alert\"\n- messageInsights: 0-1 RED FLAG, 2-3 GREEN FLAG, 1-2 DECODED\n- Person soul types (male): gentle-flame, burning-promise, untamable\n- powerBalance: 40-60 (balanced)\n\n### mixed (overallScore: 20-30)\n- warmthScore: 30-50, communicationScore: 25-45, dramaScore: 45-65, distanceScore: 50-70, passionScore: 25-50\n- profileType examples: \"Mixed Signals\", \"Proceed with Caution\", \"Gray Area\", \"Situationship Energy\"\n- messageInsights: 1-2 RED FLAG, 1-2 GREEN FLAG, 1-2 DECODED\n- Person soul types: shifting-flame, chameleon, wounded-prince, frozen-bloom, torn-silk\n- powerBalance: 30-50\n\n### decoded (overallScore: 15-30)\n- Focus on HIDDEN MEANING, subtext\n- profileType examples: \"Hidden Layers\", \"Read Between The Lines\", \"Not What It Seems\"\n- messageInsights: 0-1 RED FLAG, 0-1 GREEN FLAG, 3-4 DECODED\n- Person soul types: any`;\n\n// ============================================================\n// USER PROMPT\n// ============================================================\n\n// Randomly pick a chat context to force variety each generation\nconst CHAT_CONTEXTS = [\n  { context: 'CAUGHT RED-HANDED', hint: 'She found evidence (a text, a photo, a location, a social media post) and confronts him directly. He deflects/denies.' },\n  { context: 'LATE NIGHT BREADCRUMB', hint: 'He texts at 1-3am after days/weeks of silence. She either calls it out or falls for it.' },\n  { context: 'POST-HANGOUT FALLOUT', hint: 'Something happened in person (he said something, did something, ignored her in front of friends) and she confronts him over text.' },\n  { context: 'APOLOGY GONE WRONG', hint: 'He\\'s apologizing but badly â deflecting blame, minimizing, or making it about himself. The apology IS the red flag.' },\n  { context: 'GHOSTING COMEBACK', hint: 'He disappeared for days/weeks and now texts like nothing happened. She either confronts or he acts casual about it.' },\n  { context: 'JEALOUSY SPIRAL', hint: 'Something on social media or with another girl sparked a confrontation. He gaslights her into feeling crazy for asking.' },\n  { context: 'BROKEN PROMISE', hint: 'He forgot/bailed on something important (birthday, plans, meeting her family). She brings it up, he dismisses it.' },\n  { context: 'FRIEND EXPOSED HIM', hint: 'Her friend told her something he did/said behind her back. She confronts him with the info.' },\n  { context: 'MID-ARGUMENT CONTINUATION', hint: 'Chat picks up mid-fight â they had an argument earlier (in person or text) and it\\'s continuing. No \"hey\" opener, straight into the tension.' },\n  { context: 'DOUBLE STANDARDS', hint: 'She did something he does all the time (hung out with a guy friend, went out late) and he flips out. The hypocrisy is the red flag.' },\n  { context: 'HE STARTS SWEET THEN FLIPS', hint: 'Opens with lovebombing/sweetness (\"good morning beautiful\") but within a few messages shows his real colors.' },\n  { context: 'SHE SETS A BOUNDARY', hint: 'She tries to express a need or set a boundary. He guilt-trips, dismisses, or turns it around on her.' },\n  { context: 'THE \"WHAT ARE WE\" TALK', hint: 'She asks about the relationship status. He dodges, deflects, gets annoyed, or gives a non-answer.' },\n  { context: 'EX DRAMA', hint: 'His ex is somehow involved â still texting him, he\\'s still following her, she found old messages. He downplays it.' },\n  { context: 'MONEY/EFFORT IMBALANCE', hint: 'She does everything (plans dates, buys gifts, drives to him) and he does nothing. She finally brings it up.' }\n];\nconst randomContext = CHAT_CONTEXTS[Math.floor(Math.random() * CHAT_CONTEXTS.length)];\n\n// Force a specific score each run (Gemini defaults to 85 every time without this)\n// Toxic score range: 70-99 â overallScore range: 1-30\nconst randomToxicScore = Math.floor(Math.random() * 30) + 70; // 70-99\nconst randomOverallScore = 100 - randomToxicScore;\n\nconst userPrompt = `Generate a ContentScenario JSON with these parameters:\n\nCONCEPT: ${concept.concept_name}\nCONCEPT DESCRIPTION: ${concept.description || 'General relationship chat analysis video'}\nVIBE: ${vibe}\nAPP STYLE: ${appStyle}\nPERSON GENDER: ${personGender}\nSCENARIO ID: \"${scenarioName}\"\nSCENARIOS NEEDED: ${concept.scenarios_per_video || 1}\n\nBODY CLIP STRUCTURE (what the video will show):\n${bodyClipsFormatted}\n\nð² CHAT CONTEXT FOR THIS SCENARIO: ${randomContext.context}\n${randomContext.hint}\nYou MUST use this specific context as the starting point for the chat. Do NOT ignore this and default to \"how was your night\".\n\nð¯ SCORE FOR THIS SCENARIO: overallScore MUST be exactly ${randomOverallScore} (toxic score = ${randomToxicScore}/100).\nDo NOT change this number. Use exactly ${randomOverallScore} for overallScore in your JSON output.\n\nð² CONTACT NAME: Pick a random, creative first name for the contactName. NEVER use \"Jake\" â pick something different every time. Use any real name that fits a Gen Z person (18-28). Be creative and varied.\n\nâ ï¸ THE #1 RULE â READ THIS FIRST â ï¸\nThe CHAT ITSELF must contain ACTUAL TOXIC BEHAVIOR. NOT a normal conversation with a toxic analysis slapped on top.\nA boring chat like \"hey how was your day\" \"good\" \"cool wyd tonight\" \"hanging w the guys\" is WORTHLESS â it gets zero views on TikTok.\n\nTHE CHAT MUST CONTAIN AT LEAST 2 OF THESE IN THE ACTUAL MESSAGES:\n- Him dismissing her feelings (\"you're being dramatic\", \"chill\", \"whatever\")\n- Him gaslighting (\"I never said that\", \"that's not what happened\")\n- Him deflecting (\"why does it matter?\", \"why are you making this a big deal\")\n- Him caught lying or being sketchy (\"who was that girl\", \"she's just a friend\")\n- Him being passive-aggressive (\"k\", \"...\", \"fine\", \"whatever you want\")\n- Him guilt-tripping (\"after everything I've done for you\")\n- Him going cold after being warm\n\nIf the chat reads like a normal healthy conversation, YOU HAVE FAILED. Start over mentally.\n\nGenerate the scenario now. Remember:\n- The chat must be VIRAL â dramatic, toxic, the kind that gets millions of views on TikTok\n- The toxicity must be IN THE MESSAGES, not just in the analysis\n- At least ONE message that makes you go \"oh HELL no\" or \"wait WHAT\"\n- Real texting style (lowercase, abbreviations, emojis) but TOXIC content\n- 14-22 messages in the conversation\n- The analysis must MATCH the chat content â if the chat is toxic, the analysis reflects WHY it's toxic\n- personName = \"${personGender === 'male' ? 'Him' : 'Her'}\"\n- messageInsights[].message must be EXACT quotes from the chat\n- Include exactly 4-5 messageInsights with proper tag mix for \"${vibe}\" vibe\n- All soul type IDs must be from the valid list\n- 5 traits per person, no banned traits\n- ALL messageInsights \"solution\" field = psychological decoding (\"What It Really Means\"), NEVER advice. This applies to RED FLAG, GREEN FLAG, AND DECODED equally.`;\n\n// Output system + user prompts for the Basic LLM Chain node (Gemini 2.0 Flash)\nreturn [{\n  json: {\n    systemPrompt,\n    userPrompt,\n    // Pass templates through for content copy generation later\n    bodyClipsFormatted,\n    captionTemplates,\n    voTemplates,\n    hookTexts,\n    socialExamples\n  }\n}];\n"
+      },
+      "id": "64f921b1-ff5d-4fb8-aaf0-21f5d9a46e84",
+      "name": "Build Scenario Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Validate Scenario\n// Parses Gemini response and validates the ContentScenario JSON\n// Mode: Run Once for All Items\n\n// Basic LLM Chain outputs { text: \"...\" } with the raw LLM response\nconst llmOutput = $input.first().json;\nconst { vibe } = $('Select Concept').first().json;\n\n// --- JSON Repair utility ---\nfunction repairJson(raw) {\n  let s = raw;\n\n  // 1. Strip markdown code fences\n  s = s.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n\n  // 2. Extract JSON object if there's text before/after it\n  const firstBrace = s.indexOf('{');\n  const lastBrace = s.lastIndexOf('}');\n  if (firstBrace !== -1 && lastBrace > firstBrace) {\n    s = s.substring(firstBrace, lastBrace + 1);\n  }\n\n  // 3. Remove control characters inside strings (except \\n \\r \\t)\n  // Replace literal tabs, carriage returns that break JSON\n  s = s.replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]/g, '');\n\n  // 4. Fix unescaped newlines inside JSON strings\n  // Walk through and escape newlines that are inside string values\n  let result = '';\n  let inString = false;\n  let escaped = false;\n  for (let i = 0; i < s.length; i++) {\n    const ch = s[i];\n    if (escaped) {\n      result += ch;\n      escaped = false;\n      continue;\n    }\n    if (ch === '\\\\') {\n      result += ch;\n      escaped = true;\n      continue;\n    }\n    if (ch === '\"') {\n      inString = !inString;\n      result += ch;\n      continue;\n    }\n    if (inString && ch === '\\n') {\n      result += '\\\\n';\n      continue;\n    }\n    if (inString && ch === '\\r') {\n      continue; // skip carriage returns\n    }\n    result += ch;\n  }\n  s = result;\n\n  // 5. Fix trailing commas before } or ]\n  s = s.replace(/,\\s*([\\]}])/g, '$1');\n\n  // 6. Fix unescaped double quotes inside strings (heuristic)\n  // Look for patterns like: \"text \"quoted\" more\" and fix to \"text \\\"quoted\\\" more\"\n  // This is tricky so we only do a conservative fix: doubled quotes \"\" -> \\\"\n  // (DeepSeek sometimes outputs \"\" inside strings)\n  s = s.replace(/([^\\\\])\"\"/g, '$1\\\\\"');\n\n  return s;\n}\n\n// Extract JSON from LLM output\n// The output parser may have already parsed it into an object\nlet scenario;\ntry {\n  const raw = llmOutput.output || llmOutput.text || llmOutput;\n\n  if (typeof raw === 'object' && raw !== null) {\n    // Already parsed by Structured Output Parser\n    scenario = raw;\n  } else {\n    // Raw string â parse with repair\n    const repaired = repairJson(String(raw));\n    scenario = JSON.parse(repaired);\n  }\n} catch (e1) {\n  try {\n    const raw = llmOutput.output || llmOutput.text || llmOutput;\n    let repaired = repairJson(String(raw));\n    repaired = repaired.replace(/[\\u201C\\u201D\\u2018\\u2019]/g, '\"');\n    const posMatch = e1.message.match(/position (\\d+)/);\n    if (posMatch) {\n      const pos = parseInt(posMatch[1]);\n      repaired = repaired.substring(0, pos) + '\\\\' + repaired.substring(pos);\n    }\n    scenario = JSON.parse(repaired);\n  } catch (e2) {\n    return [{ json: { valid: false, errors: ['JSON parse failed after repair: ' + e1.message], scenario: null } }];\n  }\n}\n\nconst errors = [];\n\n// --- Required top-level fields ---\nif (!scenario.id) errors.push('Missing id');\nif (!scenario.chat) errors.push('Missing chat');\nif (!scenario.results) errors.push('Missing results');\n\nif (scenario.chat) {\n  if (!scenario.chat.contactName) errors.push('Missing chat.contactName');\n  if (!['imessage', 'instagram', 'whatsapp'].includes(scenario.chat.appStyle)) {\n    errors.push('Invalid appStyle: ' + scenario.chat.appStyle);\n  }\n  if (!Array.isArray(scenario.chat.messages) || scenario.chat.messages.length < 12) {\n    errors.push('Too few messages: ' + (scenario.chat.messages ? scenario.chat.messages.length : 0) + ' (min 12)');\n  }\n  if (scenario.chat.messages && scenario.chat.messages.length > 25) {\n    errors.push('Too many messages: ' + scenario.chat.messages.length + ' (max 25)');\n  }\n  // Validate each message\n  if (scenario.chat.messages) {\n    scenario.chat.messages.forEach((msg, i) => {\n      if (!['them', 'me'].includes(msg.sender)) errors.push('Message ' + i + ': invalid sender \"' + msg.sender + '\"');\n      if (!msg.text || typeof msg.text !== 'string') errors.push('Message ' + i + ': missing or invalid text');\n    });\n\n    // --- Chat toxicity check: \"them\" messages must contain actual conflict/tension ---\n    const theirMessages = scenario.chat.messages.filter(m => m.sender === 'them').map(m => m.text.toLowerCase());\n    const allTheirText = theirMessages.join(' ');\n    const TOXIC_INDICATORS = [\n      'dramatic', 'chill', 'relax', 'calm down', 'whatever', 'idc', 'i don\\'t care',\n      'why does it matter', 'big deal', 'overreact', 'insecure', 'crazy', 'psycho',\n      'it\\'s not like that', 'just a friend', 'you always', 'k', 'fine', 'i never said',\n      'that\\'s not what', 'leave me alone', 'i don\\'t have time', 'i was busy',\n      'stop', 'enough', 'you\\'re tripping', 'not my problem', 'lol ok', 'bye',\n      'who cares', 'get over it', '...', 'nah', 'smh', 'bro', 'dude'\n    ];\n    const toxicHits = TOXIC_INDICATORS.filter(t => allTheirText.includes(t));\n    if (toxicHits.length < 2) {\n      errors.push('Chat lacks toxicity: \"them\" messages contain only ' + toxicHits.length + ' toxic indicators (need 2+). Chat may be too boring/normal.');\n    }\n  }\n}\n\nconst r = scenario.results;\nif (r) {\n  // --- personName auto-fix ---\n  const expectedName = r.personGender === 'male' ? 'Him' : 'Her';\n  if (r.personName !== expectedName) {\n    errors.push('personName should be \"' + expectedName + '\", got \"' + r.personName + '\" (auto-fixed)');\n    r.personName = expectedName;\n  }\n\n  // --- Scores 0-100 ---\n  const scoreFields = ['overallScore', 'warmthScore', 'communicationScore', 'dramaScore', 'distanceScore', 'passionScore'];\n  scoreFields.forEach(field => {\n    const val = r[field];\n    if (typeof val !== 'number' || val < 0 || val > 100) {\n      errors.push(field + ' out of range: ' + val);\n    }\n  });\n\n  // --- Hard-code: toxic score must be 70+ (overallScore â¤ 30) for all vibes ---\n  if (typeof r.overallScore === 'number' && r.overallScore > 30) {\n    errors.push('overallScore=' + r.overallScore + ' too high (max 30, toxic score must be 70+) â auto-fixed to 30');\n    r.overallScore = 30;\n  }\n\n  // --- Valid soul type IDs ---\n  const MALE_SOUL_TYPES = [\n    'male-untamable', 'male-gentle-flame', 'male-silent-abyss', 'male-faded-crown',\n    'male-sweet-poison', 'male-wounded-prince', 'male-burning-promise', 'male-final-silence',\n    'male-dark-mirror', 'male-ice-charmer', 'male-silent-choke', 'male-shifting-flame',\n    'male-chameleon', 'male-star-collector'\n  ];\n  const FEMALE_SOUL_TYPES = [\n    'female-love-rush', 'female-natural-state', 'female-fire-dance', 'female-frozen-bloom',\n    'female-torn-silk', 'female-inner-voice', 'female-silent-venom', 'female-sunset-soul',\n    'female-deep-shadow', 'female-wild-luxury', 'female-living-maze', 'female-golden-rule',\n    'female-savage-grace', 'female-quiet-storm', 'female-rising-phoenix', 'female-liquid-mirror'\n  ];\n  const ALL_SOUL_TYPES = MALE_SOUL_TYPES.concat(FEMALE_SOUL_TYPES);\n\n  if (!ALL_SOUL_TYPES.includes(r.personSoulType)) {\n    errors.push('Invalid personSoulType: \"' + r.personSoulType + '\"');\n  }\n  if (!ALL_SOUL_TYPES.includes(r.userSoulType)) {\n    errors.push('Invalid userSoulType: \"' + r.userSoulType + '\"');\n  }\n\n  // Gender-soul type cross check\n  if (r.personGender === 'male' && r.personSoulType && !r.personSoulType.startsWith('male-')) {\n    errors.push('personGender=male but personSoulType is not male: ' + r.personSoulType);\n  }\n  if (r.personGender === 'male' && r.userSoulType && !r.userSoulType.startsWith('female-')) {\n    errors.push('personGender=male but userSoulType should be female: ' + r.userSoulType);\n  }\n  if (r.personGender === 'female' && r.personSoulType && !r.personSoulType.startsWith('female-')) {\n    errors.push('personGender=female but personSoulType is not female: ' + r.personSoulType);\n  }\n  if (r.personGender === 'female' && r.userSoulType && !r.userSoulType.startsWith('male-')) {\n    errors.push('personGender=female but userSoulType should be male: ' + r.userSoulType);\n  }\n\n  // --- Traits ---\n  if (!Array.isArray(r.personTraits) || r.personTraits.length !== 5) {\n    errors.push('personTraits must have exactly 5, got ' + (r.personTraits ? r.personTraits.length : 0));\n  }\n  if (!Array.isArray(r.userTraits) || r.userTraits.length !== 5) {\n    errors.push('userTraits must have exactly 5, got ' + (r.userTraits ? r.userTraits.length : 0));\n  }\n\n  // Banned traits filter\n  const BANNED = ['Early Stage', 'New Connection', 'Fresh Start', 'Getting to Know', 'Just Met', 'Beginning Phase'];\n  const allTraits = (r.personTraits || []).concat(r.userTraits || []);\n  allTraits.forEach(trait => {\n    if (BANNED.some(b => trait.toLowerCase().includes(b.toLowerCase()))) {\n      errors.push('Banned trait found: \"' + trait + '\"');\n    }\n  });\n\n  // --- Categories ---\n  const requiredCategories = ['intentions', 'chemistry', 'effort', 'redFlagsGreenFlags', 'trajectory'];\n  requiredCategories.forEach(cat => {\n    if (!r.categories || !r.categories[cat] || !r.categories[cat].description) {\n      errors.push('Missing or empty category: ' + cat);\n    }\n  });\n\n  // --- Message Insights ---\n  if (!Array.isArray(r.messageInsights)) {\n    errors.push('messageInsights is not an array');\n  } else {\n    if (r.messageInsights.length < 3 || r.messageInsights.length > 6) {\n      errors.push('messageInsights count=' + r.messageInsights.length + ' (need 3-6)');\n    }\n\n    // Check each insight message is an exact quote from chat\n    const chatTexts = (scenario.chat && scenario.chat.messages ? scenario.chat.messages : []).map(m => m.text);\n    r.messageInsights.forEach((insight, i) => {\n      if (!chatTexts.includes(insight.message)) {\n        const insightLower = insight.message.trim().toLowerCase();\n        // Try fuzzy match (trimmed, case-insensitive exact)\n        let matched = chatTexts.find(t => t.trim().toLowerCase() === insightLower);\n        // Try substring match: AI quoted part of a message\n        if (!matched) {\n          matched = chatTexts.find(t => t.toLowerCase().includes(insightLower));\n        }\n        // Try reverse substring: chat message is part of AI quote (less common)\n        if (!matched) {\n          matched = chatTexts.find(t => insightLower.includes(t.toLowerCase()) && t.length > 10);\n        }\n        if (matched) {\n          insight.message = matched; // Auto-fix to exact chat text\n        } else {\n          errors.push('Insight ' + i + ': message \"' + insight.message + '\" not found in chat');\n        }\n      }\n      if (!['RED FLAG', 'GREEN FLAG', 'DECODED'].includes(insight.tag)) {\n        errors.push('Insight ' + i + ': invalid tag \"' + insight.tag + '\"');\n      }\n    });\n\n    // Check DECODED requirement\n    const hasDecoded = r.messageInsights.some(ins => ins.tag === 'DECODED');\n    if (!hasDecoded) {\n      errors.push('No DECODED insight found (at least 1 required)');\n    }\n\n    // Auto-remove greeting insights instead of failing\n    const GREETING_WORDS = ['hi', 'hey', 'hello', 'sup', 'yo', 'hii', 'hiii', 'heyy', 'heyyy'];\n    const beforeCount = r.messageInsights.length;\n    r.messageInsights = r.messageInsights.filter(insight => {\n      const lower = insight.message.toLowerCase().trim();\n      if (GREETING_WORDS.includes(lower)) {\n        errors.push('Auto-removed greeting insight: \"' + insight.message + '\" (non-critical)');\n        return false;\n      }\n      return true;\n    });\n    if (beforeCount !== r.messageInsights.length) {\n      errors.push('Removed ' + (beforeCount - r.messageInsights.length) + ' greeting insight(s) â ' + r.messageInsights.length + ' remaining');\n    }\n  }\n\n  // --- Dynamic ---\n  if (!r.dynamic || !r.dynamic.name) errors.push('Missing dynamic.name');\n  if (!r.dynamic || !r.dynamic.whyThisHappens) errors.push('Missing dynamic.whyThisHappens');\n  if (r.dynamic && (typeof r.dynamic.powerBalance !== 'number' || r.dynamic.powerBalance < 0 || r.dynamic.powerBalance > 100)) {\n    errors.push('dynamic.powerBalance out of range: ' + (r.dynamic ? r.dynamic.powerBalance : 'undefined'));\n  }\n}\n\n// Determine if we should pass the scenario through (allow minor errors)\nconst criticalErrors = errors.filter(e =>\n  !e.includes('auto-fixed') &&\n  !e.includes('out of range') &&\n  !e.includes('not found in chat') && // partial quote mismatches are non-critical\n  !e.includes('non-critical') &&\n  !e.includes('Auto-removed')\n);\nconst valid = criticalErrors.length === 0;\n\nreturn [{\n  json: {\n    valid,\n    errors,\n    scenario: scenario,\n    errorCount: errors.length,\n    criticalErrorCount: criticalErrors.length\n  }\n}];\n"
+      },
+      "id": "7f7d6075-ed1a-4f30-b4ce-244aa5987f0a",
+      "name": "Validate Scenario",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1904,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "node_015",
+              "leftValue": "={{ $input.first().json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c9582aa1-0fb9-4e98-bf01-035ef53e9aa4",
+      "name": "Scenario Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Build Copy Prompt\n// Assembles the Gemini prompt for content copy generation\n// Mode: Run Once for All Items\n\nconst { concept, vibe, scenarioName, bodyClipCount } = $('Select Concept').first().json;\nconst { scenario } = $('Validate Scenario').first().json;\nconst { captionTemplates, voTemplates, hookTexts, socialExamples } = $('Build Scenario Prompt').first().json;\n\n// ============================================================\n// BODY CLIP SECTIONS (fixed order, first 2 always included)\n// ============================================================\n\n// Toxic score for display (inverted: 100 - health = toxicity)\nconst toxicScore = 100 - scenario.results.overallScore;\nconst r = scenario.results;\n\n// Build section data with ACTUAL scenario content for each section\nconst ALL_BODY_SECTIONS = [\n  {\n    id: 'toxic_score',\n    name: 'Toxic Score',\n    description: 'Shows the toxicity score gauge animating to the final number.',\n    data: 'Score: ' + toxicScore + '/100'\n  },\n  {\n    id: 'soul_type',\n    name: 'His Soul Type',\n    description: 'Reveals his personality archetype card. The screen shows his Soul Type name, traits, and description.',\n    data: 'Soul Type: ' + r.personSoulType\n      + '\\nTraits: ' + (r.personTraits || []).join(', ')\n      + '\\nDescription: ' + (r.personDescription || '')\n  },\n  {\n    id: 'wtf_happening',\n    name: 'What The Fuck Is Really Happening',\n    description: 'Shows the 5 analysis cards: Intentions, Chemistry, Effort, Red Flags/Green Flags, Trajectory. Girl scrolls through the category breakdowns.',\n    data: 'Intentions: ' + (r.categories && r.categories.intentions ? r.categories.intentions.description : '')\n      + '\\nChemistry: ' + (r.categories && r.categories.chemistry ? r.categories.chemistry.description : '')\n      + '\\nEffort: ' + (r.categories && r.categories.effort ? r.categories.effort.description : '')\n      + '\\nRed/Green Flags: ' + (r.categories && r.categories.redFlagsGreenFlags ? r.categories.redFlagsGreenFlags.description : '')\n      + '\\nTrajectory: ' + (r.categories && r.categories.trajectory ? r.categories.trajectory.description : '')\n  },\n  {\n    id: 'between_the_lines',\n    name: 'Between The Lines',\n    description: 'Shows decoded message insights â specific chat messages highlighted with what they REALLY mean. Red flags, green flags, and decoded hidden meanings.',\n    data: (r.messageInsights || []).map(ins => '[' + ins.tag + '] \"' + ins.message + '\" â ' + ins.title).join('\\n')\n  },\n  {\n    id: 'souls_together',\n    name: 'Your Souls Together',\n    description: 'Shows the dynamic card with both soul types combined. Reveals the relationship dynamic name, why it happens, and the power balance.',\n    data: 'Dynamic: ' + (r.dynamic ? r.dynamic.name : '')\n      + '\\nSubtitle: ' + (r.dynamic ? r.dynamic.subtitle : '')\n      + '\\nWhy: ' + (r.dynamic ? r.dynamic.whyThisHappens : '')\n      + '\\nPower Balance: ' + (r.dynamic ? r.dynamic.powerBalance : '') + '/100'\n  }\n];\n\nconst activeSections = ALL_BODY_SECTIONS.slice(0, bodyClipCount || 3);\n\nconst sectionsForPrompt = activeSections\n  .map((s, i) => 'Body Clip ' + (i + 1) + ': \"' + s.name + '\"\\n  What the screen shows: ' + s.description + '\\n  Actual data on screen:\\n  ' + s.data.split('\\n').join('\\n  '))\n  .join('\\n\\n');\n\n// Format VO template\nconst voTemplate = voTemplates[0];\nconst voFormatted = voTemplate\n  ? 'Tone: ' + voTemplate.tone + '\\nInstructions: ' + voTemplate.instructions + '\\nExample scripts:\\n' + voTemplate.example_scripts\n  : 'Tone: dramatic, Gen-Z, slightly unhinged. React in real-time to what you see on screen.';\n\n// Format hook text pool\n// Randomly pick 5 hook examples (not all â gives Gemini a focused style target)\nconst allHooks = hookTexts.filter(h => h.type === 'hook');\nconst shuffledHooks = [...allHooks].sort(() => Math.random() - 0.5);\nconst selectedHooks = shuffledHooks.slice(0, Math.min(5, allHooks.length));\nconst hookFormatted = selectedHooks\n  .map(h => '- \"' + h.text + '\" (' + h.mood + ')')\n  .join('\\n');\n\n// Randomly pick 5 outro examples (same approach as hooks â forces variety)\nconst allOutros = hookTexts.filter(h => h.type === 'outro_cta');\nconst shuffledOutros = [...allOutros].sort(() => Math.random() - 0.5);\nconst selectedOutros = shuffledOutros.slice(0, Math.min(5, allOutros.length));\nconst outroFormatted = selectedOutros\n  .map(h => '- \"' + h.text + '\"')\n  .join('\\n');\n\n// Format social copy examples\nconst socialFormatted = socialExamples\n  .map(s => '[' + s.style + ']: ' + s.caption_text)\n  .join('\\n\\n');\n\n// ============================================================\n// SYSTEM PROMPT\n// ============================================================\n\nconst systemPrompt = `You are a short-form video content writer for TikTok and Instagram Reels. You write hook texts, voiceover scripts, text overlays, and social media captions for the \"Toxic or Nah\" relationship chat analysis app.\n\nYour audience is 18-28 year old women who are obsessed with decoding their situationships. Your tone is dramatic, Gen-Z, slightly unhinged, and addictive â like their group chat but as a video.\n\nYour output must be a single valid JSON object. No markdown, no code fences, no explanation â ONLY the JSON.\n\n## OUTPUT FORMAT\n\n{\n  \"hookText\": string,\n  \"hookVO\": string,\n  \"bodyClips\": [\n    {\n      \"section\": string,\n      \"text\": string,\n      \"vo\": string\n    }\n  ],\n  \"outroText\": string,\n  \"outroVO\": string,\n  \"socialCaption\": string\n}\n\n## TIMING CONSTRAINT â THIS IS NON-NEGOTIABLE\n\nEvery clip is EXACTLY 3 seconds. The VO must fit comfortably in 3 seconds of natural speech.\nDO NOT count words â count CHARACTERS. A short word like \"I\" and a long word like \"connections\" are NOT the same length.\n- hookVO: 50 characters MAX (including spaces and punctuation)\n- each bodyClip vo: 50 characters MAX\n- outroVO: 50 characters MAX\n\nGOOD lengths (under 50 chars):\n- \"Bro why do I attract this type?\" (31 chars)\n- \"Fifty-two? That feels low... I'm scared.\" (41 chars)\n- \"No because why is this actually accurate.\" (42 chars)\n\nBAD lengths (over 50 chars â WILL NOT FIT IN 3 SECONDS):\n- \"Seventy-two? Bro, that's actually really bad. I knew it.\" (57 chars â TOO LONG)\n- \"It says he's emotionally stunted, avoids deep connections.\" (58 chars â TOO LONG)\n\n## FIELD DEFINITIONS\n\n- hookText: Bold text overlay. 3-8 words. THE MOST IMPORTANT PART OF THE VIDEO â this makes someone STOP SCROLLING. It MUST match the SAME style, format, and energy as the 5 examples below. Feel like entry #6 in that list.\n  VIRAL HOOK PATTERNS (use one of these structures):\n  - WARNING: \"If you [relationship status], don't use this app\"\n  - EXPOSE: \"The way he [toxic action] IN THE [context]\"\n  - SETUP: \"He [did something] after [dramatic context]\"\n  - CALLOUT: \"Tell me this isn't [toxic pattern]\"\n  - CONFESSION: \"He really thought [action] would fix everything\"\n  GOOD: \"The way he gaslit me in the apology\", \"He texted at 3am after ghosting me\", \"If you have a crush don't do this\", \"Tell me this isn't manipulation\"\n  BAD: \"This man is unserious\" (too generic â WHAT did he do?), \"He's so annoying\" (vague, boring), \"I can't with him\" (lazy), \"Why is he like this\" (too generic)\n  BAD: \"If he's deflecting, don't use this\" (makes NO SENSE â \"deflecting\" is a clinical term, not a dramatic situation. The [X] slot must be a RELATABLE SITUATION like \"have a crush\", \"love your boyfriend\", \"just got back together\" â NOT a behavior label like \"deflecting\", \"gaslighting\", \"manipulating\")\n  CRITICAL: The hook must describe a SITUATION or ACTION, never a clinical behavior label. \"He forgot my birthday and STILL got mad at me\" = GOOD (specific action). \"He's being emotionally unavailable\" = BAD (therapy term, not viral).\n  The hook must be a COMPLETE thought â never truncated.\n- hookVO: What she SAYS out loud. MAX 50 CHARACTERS. Must ALSO be viral â create SUSPENSE. She's teasing what viewers are about to see. Make them think \"wait what happened?!\". NEVER mention the app.\n  GOOD: \"No because look what he just said\", \"I caught him and he still denied it\", \"Be honest am I overreacting or no?\", \"No because this cannot be real\"\n  BAD: \"Wait why did he say that tho?\" (too generic â WHAT did he say?), \"Why is he acting weird?\" (boring, no suspense), \"I'm gonna upload this\" (references app), \"Let's see what the results say\" (references app)\n- bodyClips: Array with EXACTLY ${activeSections.length} objects, one per body clip section (in order).\n  - section: The section ID (must match exactly: ${activeSections.map(s => '\"' + s.id + '\"').join(', ')})\n  - text: Ultra-short UGC text overlay. 2-6 words MAX. A pure EMOTIONAL REACTION â what she'd type on a TikTok, NOT any name, label, or data from the results.\n    ABSOLUTE RULE: The text must NEVER contain the Soul Type name, the Dynamic name, the score number, or ANY data shown on screen. The screen already shows that data â the text overlay is her REACTION to it.\n    GOOD: \"excuse me???\", \"I can't ð\", \"nah WHAT\", \"this is too real\", \"I'm actually done\", \"not this again...\"\n    BAD: \"Shifting Flame ð\" (that's the Soul Type NAME â the screen already shows it), \"Push-Pull Tango\" (that's the Dynamic NAME), \"52/100\" (that's the score NUMBER), \"His Soul Type revealed\" (that's a label)\n  - vo: What she SAYS out loud. MAX 50 CHARACTERS. First person, genuine reaction.\n- outroText: CTA text overlay. 2-5 words. Ultra-short.\n  GOOD: \"Block him?\", \"Link in bio\", \"Should I?\", \"Run yours ð\"\n- outroVO: What she SAYS for the outro. MAX 50 CHARACTERS. CTA or dramatic closer.\n- socialCaption: TikTok/Instagram caption. Dramatic opening, 1-2 emojis, 3-5 hashtags always including #toxicornah. Under 250 chars.\n\n## NATURAL SPEECH RULES â CRITICAL\n\nThe VOs must sound like a REAL GIRL talking to herself, NOT a script. This is the #1 priority.\n\nREQUIRED speech patterns (use at least 2-3 across all VOs):\n- Natural fillers: \"wait\", \"bro\", \"no because\", \"okay but\", \"like\", \"literally\"\n- Incomplete sentences: \"I already knew butâ\", \"That feels low...\"\n- Micro-repetitions: \"No no no\", \"Wait wait\"\n- Contradictions: \"I don't like that. ...okay I do but still\"\n- Trailing off: sentences that end with \"...\" or \"â\"\n\nGOOD VO examples (natural, messy, real):\n- \"No because why is this actually accurate.\"\n- \"Fifty-two? That feels low... I'm scared.\"\n- \"Wait. That's literally him I can'tâ\"\n- \"It says the pattern won't change. Cool cool cool.\"\n- \"Bro why do I attract this type?\"\n- \"Oh my god that's so specific it hurts.\"\n- \"Be honest. Do I block him?\"\n\nBAD VO examples (scripted, robotic, AI-sounding):\n- \"The app says that my toxicity score is fifty-two percent.\" (references app, too explanatory)\n- \"According to the results, his soul type is Shifting Flame.\" (sounds like a news anchor)\n- \"It analyzes the pattern and shows concerning trends.\" (no one talks like this)\n- \"The relationship dynamic between us reveals a codependent cycle.\" (thesis statement, not reaction)\n\n## ABSOLUTE BANS\n\n1. NEVER reference the app explicitly â not even in the HOOK. No \"upload\", \"run it\", \"put it through\", \"the app says\", \"according to the results\", \"it analyzes\", \"the score shows\", \"let's see what it says\". The app is INVISIBLE. In the hook she's reacting to HIS BEHAVIOR, not to using an app. In the body clips she's reacting to what she SEES on screen.\n2. NEVER use \"girl\" addressing someone else. She's alone, reacting to herself.\n3. NEVER exceed 50 characters in ANY VO line. Count characters, NOT words. \"I'm done\" (8 chars) is fine. \"It says he's emotionally stunted\" (32 chars) is fine. Anything over 50 chars is BANNED.\n4. NEVER use the same sentence structure twice across clips. Each VO must have a completely different pattern.\n   BAD (all \"X? That's Y\"):\n   - \"Fifty-two? That's concerning.\"\n   - \"Shifting Flame? That's literally him.\"\n   - \"Codependent? That's exactly us.\"\n   GOOD (varied structures):\n   - \"Fifty-two? That feels low... I'm scared.\"\n   - \"Bro it says he mirrors to manipulate. WHAT.\"\n   - \"No because why is this calling me out.\"\n5. NEVER make text overlays longer than 6 words. They are GUT REACTIONS, not sentences.\n6. NEVER put Soul Type names, Dynamic names, score numbers, or ANY result data in the text overlay. The screen ALREADY shows that data. The text is her REACTION to it, not a repetition of it. If the screen says \"Shifting Flame\", the text should say \"I can't ð\" NOT \"Shifting Flame ð\".\n7. NEVER mix data between sections. Each body clip reacts ONLY to its own section's data. The WTF Happening clip reacts to the 5 categories (Intentions, Chemistry, Effort, Red Flags, Trajectory) â NOT to the Dynamic name or Soul Type. The Soul Type clip reacts to the soul type â NOT to the categories. Keep them strictly separated.\n8. NEVER truncate hooks. The hookText must be a COMPLETE thought/sentence. \"If you have a crush...\" is BAD (cut off). Every hook must make sense on its own without needing more words.\n9. NEVER copy hook examples word-for-word, but your hook MUST match their style closely. It should look like it belongs in the same collection â a sibling, not a distant cousin. If the examples say \"If you love your boyfriend, don't use this app\" your hook should have the SAME vibe and structure, just different words.\n10. NEVER use the contact's name (e.g. \"Jake\", \"Liam\") in ANY VO or text overlay. Always use \"he\", \"him\", \"this man\", \"bro\" instead. The video is about a GENERIC situationship experience, not a specific person.\n\n## SECTION-SPECIFIC GUIDANCE\n\nFor EACH section: the text overlay is her EMOTIONAL REACTION, never data from the screen.\n\n- Toxic Score:\n  Text GOOD: \"48???\", \"wait what\", \"oh.\", \"that's not good\", \"bro.\", \"not surprised\", \"LMAO\"\n  Text BAD: \"Toxic Score: 48\" (label), \"Score reveal\" (label), \"Not the ð¯ emoji\" (random reference â NOT a gut reaction), \"The number...\" (vague)\n  VO: React to the score. VARY THE STRUCTURE â do NOT always use \"Number? Comment.\" pattern. Pick a DIFFERENT structure each time from these:\n  VARY the structure every time. Mentioning the score number is OK sometimes, but NOT every time. Use different patterns:\n  WITH number (sometimes): \"Seventy-eight? Damn.\", \"Eighty-five and I'm still here... wow.\"\n  WITHOUT number (most of the time): \"I already knew it was bad but damn.\", \"My taste in men is genuinely criminal.\", \"Bro... that is not giving.\", \"Yeah no that checks out.\", \"Cool cool cool. Love that for me.\", \"Wow. Just... wow.\"\n\n- Soul Type:\n  Text GOOD: \"I can't ð\", \"this is so him\", \"excuse me???\", \"not this again\"\n  Text BAD: \"Shifting Flame\" (that's the soul type NAME â screen already shows it), \"His Soul Type\" (label)\n  VO: React to something SPECIFIC from the soul type's DESCRIPTION paragraph shown on the card â NOT the name, NOT the traits list. The card has a personalized description that explains WHO this person is and HOW they behave. Pick one detail from that description and react to it.\n  VO GOOD: \"Bro it says he mirrors to manipulate.\", \"Love bombs then disappears... that's what he does.\", \"It says he uses charm as a defense mechanism.\"\n  VO BAD: \"The Dark Mirror. That's literally him.\" (just repeating the name â says nothing about the description), \"Emotionally unavailable? That checks out.\" (reacting to a trait label, not the description)\n\n- WTF Happening:\n  Text GOOD: \"it gets worse\", \"called out ð\", \"the accuracy...\", \"I'm sick\"\n  Text BAD: \"Push-Pull Tango\" (that's the dynamic NAME), \"Category analysis\" (label), \"Intentions & Chemistry\" (section names)\n  VO: React to the PATTERN or the most shocking category insight.\n  VO examples: \"It says the pattern won't change.\", \"Why is this calling me out?\", \"I don't like how accurate this is.\"\n\n- Between The Lines:\n  Text GOOD: \"I missed this???\", \"bro WHAT\", \"the way I ignored this\", \"no no no\"\n  Text BAD: \"Red Flag detected\" (label), \"Decoded message\" (label)\n  VO: React to a specific decoded message being exposed.\n  VO examples: \"Wait he really said that? Bro.\", \"No because I missed that completely.\", \"The way I ignored that red flag...\"\n\n- Souls Together:\n  Text GOOD: \"we're THAT couple\", \"I need to sit down\", \"yeah that tracks\", \"help ð\"\n  Text BAD: \"The Guilt Trap\" (that's the dynamic NAME), \"Your Souls Together\" (section name)\n  VO: React to the dynamic or power balance.\n  VO examples: \"We're literally that couple huh.\", \"The power balance... yeah that tracks.\", \"I need to sit down for this one.\"\n\n## ENGAGEMENT TRIGGERS\n\nEach clip should activate at least one of:\n- Micro shock (something unexpected)\n- Validation (viewer thinks \"same\")\n- Self-awareness (relatable self-drag)\n- Social invitation (makes viewer want to comment)\n\nThe goal: generate comment wars, saves, and shares. NOT explain the app.`;\n\n\n// ============================================================\n// USER PROMPT\n// ============================================================\n\n// Randomly pick a VO structure for Toxic Score to force variety\n// Mix of structures â some mention the number, most don't (forces variety)\nconst VO_SCORE_STRUCTURES = [\n  'Say the score number + a reaction: e.g. \"Seventy-eight? Damn.\" â short and punchy, number first.',\n  'Say the score number + denial: e.g. \"Eighty-five and I\\'m still here... wow.\" â number woven into a thought.',\n  'Statement first, NO number: e.g. \"I already knew it was bad but damn.\" â react without saying any number.',\n  'Dark humor, NO number: e.g. \"That\\'s lower than I expected honestly.\" â no number mentioned.',\n  'Trailing off, NO number: e.g. \"Bro... that is not giving.\" â no number.',\n  'Self-drag, NO number: e.g. \"My taste in men is genuinely criminal.\" â about HER, not the score.',\n  'Casual acceptance, NO number: e.g. \"Yeah no that checks out.\" â no number.',\n  'Sarcastic resignation, NO number: e.g. \"Cool cool cool. Love that for me.\" â no number.',\n  'Shock without score: e.g. \"Waitâ that high? Nah I\\'m done.\" â references it being high but no exact number.',\n  'One-word gut punch: e.g. \"Wow. Just... wow.\" â pure emotion, no number.'\n];\nconst randomVOStructure = VO_SCORE_STRUCTURES[Math.floor(Math.random() * VO_SCORE_STRUCTURES.length)];\n\n// Only include data for active sections â prevents DeepSeek from leaking data across clips\nconst activeSectionIds = activeSections.map(s => s.id);\nconst scenarioLines = [\n  '- Toxic Score: ' + toxicScore + '/100 (higher = more toxic)',\n  '- Contact Name: ' + scenario.chat.contactName,\n  '- Person Name: ' + scenario.results.personName,\n  '- Vibe: ' + vibe\n];\nif (activeSectionIds.includes('soul_type')) {\n  scenarioLines.push('- Person Soul Type: ' + scenario.results.personSoulType);\n}\nif (activeSectionIds.includes('souls_together')) {\n  scenarioLines.push('- User Soul Type: ' + scenario.results.userSoulType);\n  scenarioLines.push('- Dynamic: ' + scenario.results.dynamic.name);\n}\nscenarioLines.push('- Profile: ' + scenario.results.profileType + ' â \"' + scenario.results.profileSubtitle + '\"');\n\nconst userPrompt = `Generate all content copy for this scenario:\n\n## SCENARIO RESULTS\n${scenarioLines.join('\\n')}\n\n## BODY CLIP SECTIONS (generate exactly ${activeSections.length} bodyClips, in this order)\n\nCRITICAL: Each body clip's text and VO must ONLY reference data from THAT section's \"Actual data on screen\". Do NOT use data from other sections. The WTF Happening clip talks about categories (Intentions, Chemistry, Effort, etc.), NOT about dynamics or soul types.\n\nð² TOXIC SCORE VO â USE THIS EXACT STRUCTURE: ${randomVOStructure}\nFollow this structure closely. Do NOT default to \"Number? Comment.\" unless the structure above specifically tells you to mention the number.\n\n${sectionsForPrompt}\n\n## VO TEMPLATE\n${voFormatted}\n\n## HOOK TEXT EXAMPLES â WRITE ONE LIKE THESE\nHere are 5 hooks from our collection. Write one that fits RIGHT IN with these â same style, same length, same energy. It should feel like entry #6 in this list. Do NOT copy any example word-for-word, but it MUST be close in style and tone. If someone read all 6, they should think the same person wrote them all.\n${hookFormatted}\n\n## OUTRO CTA EXAMPLES â USE ONE OF THESE (DO NOT DEFAULT TO \"Block him?\")\nPick ONE of these 5 outro examples and use it EXACTLY or with minimal adaptation. BANNED outro: \"Block him?\" â this is overused, NEVER generate it. Pick a DIFFERENT one each time. Your outroVO should be a natural spoken version of the outroText.\n${outroFormatted}\n\n## SOCIAL COPY EXAMPLES (for style reference)\n${socialFormatted}\n\nGenerate the content copy JSON now.`;\n\nreturn [{\n  json: { systemPrompt, userPrompt, scenario }\n}];\n"
+      },
+      "id": "82fb1418-d425-4ff0-af83-8d8f61f278c9",
+      "name": "Build Copy Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2336,
+        16
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "7cb7ee58-9670-464d-b577-267bebf127bd",
+      "name": "Error: Invalid Scenario",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2336,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Validate Copy\n// Validates the Gemini content copy response (new structure with bodyClips)\n// Mode: Run Once for All Items\n\n// Basic LLM Chain outputs { text: \"...\" } with the raw LLM response\nconst llmOutput = $input.first().json;\nconst { scenario } = $('Build Copy Prompt').first().json;\nconst { bodyClipCount } = $('Select Concept').first().json;\n\n// --- JSON Repair utility ---\nfunction repairJson(raw) {\n  let s = raw;\n  s = s.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const firstBrace = s.indexOf('{');\n  const lastBrace = s.lastIndexOf('}');\n  if (firstBrace !== -1 && lastBrace > firstBrace) {\n    s = s.substring(firstBrace, lastBrace + 1);\n  }\n  s = s.replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]/g, '');\n  let result = '';\n  let inString = false;\n  let escaped = false;\n  for (let i = 0; i < s.length; i++) {\n    const ch = s[i];\n    if (escaped) { result += ch; escaped = false; continue; }\n    if (ch === '\\\\') { result += ch; escaped = true; continue; }\n    if (ch === '\"') { inString = !inString; result += ch; continue; }\n    if (inString && ch === '\\n') { result += '\\\\n'; continue; }\n    if (inString && ch === '\\r') { continue; }\n    result += ch;\n  }\n  s = result;\n  s = s.replace(/,\\s*([\\]}])/g, '$1');\n  s = s.replace(/([^\\\\])\"\"/g, '$1\\\\\"');\n  return s;\n}\n\nlet copy;\ntry {\n  const raw = llmOutput.output || llmOutput.text || llmOutput;\n\n  if (typeof raw === 'object' && raw !== null) {\n    copy = raw;\n  } else {\n    copy = JSON.parse(repairJson(String(raw)));\n  }\n} catch (e1) {\n  try {\n    const raw = llmOutput.output || llmOutput.text || llmOutput;\n    let repaired = repairJson(String(raw));\n    repaired = repaired.replace(/[\\u201C\\u201D\\u2018\\u2019]/g, '\"');\n    const posMatch = e1.message.match(/position (\\d+)/);\n    if (posMatch) {\n      const pos = parseInt(posMatch[1]);\n      repaired = repaired.substring(0, pos) + '\\\\' + repaired.substring(pos);\n    }\n    copy = JSON.parse(repaired);\n  } catch (e2) {\n    return [{ json: { valid: false, errors: ['JSON parse failed after repair: ' + e1.message], copy: null, scenario } }];\n  }\n}\n\nconst errors = [];\n\n// Character limit for all VOs (50 chars = ~3 seconds of natural speech)\nconst VO_CHAR_LIMIT = 50;\n// Hard limit â above this we auto-trim instead of failing\nconst VO_CHAR_HARD_LIMIT = 65;\n\n// Auto-trim VOs that exceed the character limit (Gemini can't count chars)\nfunction trimVO(vo) {\n  // Allow small grace (up to 55) â only actively trim above that\n  const TRIM_THRESHOLD = 55;\n  if (!vo || vo.length <= TRIM_THRESHOLD) return vo;\n\n  let trimmed = vo;\n\n  // Step 1: Remove trailing filler words\n  const TRAILING_FILLERS = [', lol', ' lol', ', honestly', ' honestly', ', like', ' tho', ', bro', ' fr', ', ngl'];\n  for (const filler of TRAILING_FILLERS) {\n    if (trimmed.toLowerCase().endsWith(filler) || trimmed.toLowerCase().endsWith(filler + '.')) {\n      trimmed = trimmed.substring(0, trimmed.length - (trimmed.toLowerCase().endsWith(filler + '.') ? filler.length + 1 : filler.length)).trim();\n      // Re-add period if it makes sense\n      if (!/[.!?ââ¦]$/.test(trimmed)) trimmed += '.';\n      if (trimmed.length <= VO_CHAR_LIMIT) return trimmed;\n    }\n  }\n\n  // Step 2: If two sentences, try keeping just the first\n  const sentenceBreak = trimmed.match(/^(.{20,}?[.!?])\\s+/);\n  if (sentenceBreak && sentenceBreak[1].length <= VO_CHAR_LIMIT && sentenceBreak[1].length >= 20) {\n    return sentenceBreak[1];\n  }\n\n  // Step 3: Cut at last word boundary before limit and add ellipsis\n  if (trimmed.length > VO_CHAR_LIMIT) {\n    const cut = trimmed.substring(0, VO_CHAR_LIMIT - 1);\n    const lastSpace = cut.lastIndexOf(' ');\n    if (lastSpace > 20) {\n      trimmed = cut.substring(0, lastSpace).replace(/[,.\\s]+$/, '') + 'â';\n    }\n  }\n\n  return trimmed;\n}\n\n// Valid body clip section IDs\nconst ALL_SECTION_IDS = ['toxic_score', 'soul_type', 'wtf_happening', 'between_the_lines', 'souls_together'];\nconst expectedCount = Math.min(5, Math.max(2, bodyClipCount || 3));\n\n// Hook text (max 8 words for short punchy overlay)\nif (!copy.hookText || typeof copy.hookText !== 'string') {\n  errors.push('Missing hookText');\n} else if (copy.hookText.split(' ').length > 10) {\n  errors.push('hookText too long: ' + copy.hookText.split(' ').length + ' words (max 8-10)');\n}\n\n// Hook VO (50 chars max for 3s speech) â auto-trim if over limit\nif (!copy.hookVO || typeof copy.hookVO !== 'string') {\n  errors.push('Missing hookVO');\n} else {\n  const originalHookVO = copy.hookVO;\n  copy.hookVO = trimVO(copy.hookVO);\n  if (originalHookVO !== copy.hookVO) {\n    errors.push('hookVO auto-trimmed: \"' + originalHookVO + '\" â \"' + copy.hookVO + '\" (auto-fixed)');\n  }\n  if (copy.hookVO.length > VO_CHAR_HARD_LIMIT) {\n    errors.push('hookVO too long even after trim: ' + copy.hookVO.length + ' chars (max ' + VO_CHAR_LIMIT + '). Text: \"' + copy.hookVO + '\"');\n  }\n}\n\n// Body clips\nif (!Array.isArray(copy.bodyClips)) {\n  errors.push('Missing or invalid bodyClips array');\n} else {\n  if (copy.bodyClips.length !== expectedCount) {\n    errors.push('Expected ' + expectedCount + ' bodyClips, got ' + copy.bodyClips.length);\n  }\n  copy.bodyClips.forEach((clip, i) => {\n    if (!clip.section) {\n      errors.push('Body clip ' + i + ': missing section ID');\n    } else if (!ALL_SECTION_IDS.includes(clip.section)) {\n      errors.push('Body clip ' + i + ': invalid section \"' + clip.section + '\"');\n    }\n    if (!clip.text || typeof clip.text !== 'string') {\n      errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): missing text');\n    } else if (clip.text.split(' ').length > 8) {\n      errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): text too long (' + clip.text.split(' ').length + ' words, max 6)');\n    }\n    if (!clip.vo || typeof clip.vo !== 'string') {\n      errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): missing vo');\n    } else {\n      const originalVO = clip.vo;\n      clip.vo = trimVO(clip.vo);\n      if (originalVO !== clip.vo) {\n        errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): vo auto-trimmed: \"' + originalVO + '\" â \"' + clip.vo + '\" (auto-fixed)');\n      }\n      if (clip.vo.length > VO_CHAR_HARD_LIMIT) {\n        errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): vo too long even after trim (' + clip.vo.length + ' chars, max ' + VO_CHAR_LIMIT + '). Text: \"' + clip.vo + '\"');\n      }\n    }\n  });\n\n  // Ensure required sections are present\n  const presentSections = copy.bodyClips.map(c => c.section);\n  if (!presentSections.includes('toxic_score')) {\n    errors.push('Missing required body clip section: toxic_score');\n  }\n  if (!presentSections.includes('soul_type')) {\n    errors.push('Missing required body clip section: soul_type');\n  }\n}\n\n// Outro text (max 5 words)\nif (!copy.outroText || typeof copy.outroText !== 'string') {\n  errors.push('Missing outroText');\n} else if (copy.outroText.split(' ').length > 7) {\n  errors.push('outroText too long: ' + copy.outroText.split(' ').length + ' words (max 5)');\n}\n\n// Outro VO (50 chars max for 3s speech) â auto-trim if over limit\nif (!copy.outroVO || typeof copy.outroVO !== 'string') {\n  errors.push('Missing outroVO');\n} else {\n  const originalOutroVO = copy.outroVO;\n  copy.outroVO = trimVO(copy.outroVO);\n  if (originalOutroVO !== copy.outroVO) {\n    errors.push('outroVO auto-trimmed: \"' + originalOutroVO + '\" â \"' + copy.outroVO + '\" (auto-fixed)');\n  }\n  if (copy.outroVO.length > VO_CHAR_HARD_LIMIT) {\n    errors.push('outroVO too long even after trim: ' + copy.outroVO.length + ' chars (max ' + VO_CHAR_LIMIT + '). Text: \"' + copy.outroVO + '\"');\n  }\n}\n\n// Social caption\nif (!copy.socialCaption || typeof copy.socialCaption !== 'string') {\n  errors.push('Missing socialCaption');\n} else if (!copy.socialCaption.toLowerCase().includes('#toxicornah')) {\n  copy.socialCaption = copy.socialCaption.trim() + ' #toxicornah';\n  errors.push('socialCaption was missing #toxicornah (auto-fixed)');\n}\n\nconst valid = errors.filter(e => !e.includes('auto-fixed')).length === 0;\n\nreturn [{\n  json: { valid, errors, copy, scenario }\n}];\n"
+      },
+      "id": "844b0773-ddcc-44b5-972f-869a890df29e",
+      "name": "Validate Copy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2912,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "node_022",
+              "leftValue": "={{ $input.first().json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7dc7afe1-261d-4c1b-be21-b8c1a9b9011e",
+      "name": "Copy Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        16
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "8362bdaf-a6ca-4a2a-90ca-488d9e27f5e6",
+      "name": "Error: Invalid Copy",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Prepare Airtable Save\n// Formats the data for saving to the Scenarios table\n// Mode: Run Once for All Items\n\nconst { concept, vibe, appStyle, scenarioName } = $('Select Concept').first().json;\nconst { scenario, copy } = $('Validate Copy').first().json;\n\nreturn [{\n  json: {\n    scenario_name: scenarioName,\n    concept_id: [concept.id],\n    vibe: vibe,\n    app_style: appStyle,\n    scenario_json: JSON.stringify(scenario),\n    generated_hook_text: copy.hookText,\n    generated_outro_text: copy.outroText,\n    generated_vo_script: JSON.stringify(copy.voScript),\n    generated_caption_plan: JSON.stringify(copy.captionPlan),\n    generated_social_caption: copy.socialCaption,\n    status: 'approved'\n  }\n}];\n"
+      },
+      "id": "9b43ad10-02de-48bc-a9d7-78f3433e00ac",
+      "name": "Prepare Airtable Save",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3344,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appsgjIdkpak2kaXq",
+          "mode": "list",
+          "cachedResultName": "ToxicOrNah Content Pipeline",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblcQaMBBPcOAy0NF",
+          "mode": "list",
+          "cachedResultName": "Scenarios",
+          "cachedResultUrl": "https://airtable.com/appsgjIdkpak2kaXq/tblcQaMBBPcOAy0NF"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "generated_copy_json": "={{ JSON.stringify($('Validate Copy').first().json.copy) }}",
+            "scenario_name": "={{ $('Select Concept').first().json.scenarioName }}",
+            "concept_id": "={{ [$('Select Concept').first().json.concept.id] }}",
+            "vibe": "={{ $('Select Concept').first().json.vibe }}",
+            "app_style": "={{ $('Select Concept').first().json.appStyle }}",
+            "scenario_json": "={{ JSON.stringify($('Validate Copy').first().json.scenario) }}",
+            "generated_hook_text": "={{ $('Validate Copy').first().json.copy.hookText }}",
+            "generated_outro_text": "={{ $('Validate Copy').first().json.copy.outroText }}",
+            "generated_social_caption": "={{ $('Validate Copy').first().json.copy.socialCaption }}",
+            "status": "draft"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "scenario_name",
+              "displayName": "scenario_name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "concept_id",
+              "displayName": "concept_id",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "vibe",
+              "displayName": "vibe",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "toxic",
+                  "value": "toxic"
+                },
+                {
+                  "name": "wholesome",
+                  "value": "wholesome"
+                },
+                {
+                  "name": "mixed",
+                  "value": "mixed"
+                },
+                {
+                  "name": "decoded",
+                  "value": "decoded"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "app_style",
+              "displayName": "app_style",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "imessage",
+                  "value": "imessage"
+                },
+                {
+                  "name": "instagram",
+                  "value": "instagram"
+                },
+                {
+                  "name": "whatsapp",
+                  "value": "whatsapp"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "scenario_json",
+              "displayName": "scenario_json",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "generated_hook_text",
+              "displayName": "generated_hook_text",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "generated_outro_text",
+              "displayName": "generated_outro_text",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "generated_vo_script",
+              "displayName": "generated_vo_script",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "generated_caption_plan",
+              "displayName": "generated_caption_plan",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "generated_social_caption",
+              "displayName": "generated_social_caption",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "draft",
+                  "value": "draft"
+                },
+                {
+                  "name": "approved",
+                  "value": "approved"
+                },
+                {
+                  "name": "clips_needed",
+                  "value": "clips_needed"
+                },
+                {
+                  "name": "ready",
+                  "value": "ready"
+                },
+                {
+                  "name": "used",
+                  "value": "used"
+                },
+                {
+                  "name": "archived",
+                  "value": "archived"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Body Clips",
+              "displayName": "Body Clips",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Video Runs",
+              "displayName": "Video Runs",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Video Runs",
+              "displayName": "Video Runs",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hook_file_id",
+              "displayName": "hook_file_id",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "generated_copy_json",
+              "displayName": "generated_copy_json",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "95e20764-4553-4ac7-858c-7257e912c811",
+      "name": "Save Scenario",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        3568,
+        -96
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GQSE5xy7UEjGQdD3",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Format Telegram Message\n// Builds the Telegram approval message + inline keyboard\n// Mode: Run Once for All Items\n\nconst { concept, vibe, appStyle, scenarioName } = $('Select Concept').first().json;\nconst { scenario, copy } = $('Validate Copy').first().json;\n\nconst results = scenario.results;\n\n// Toxic Score = inverted health (higher = more toxic)\nconst toxicScore = 100 - results.overallScore;\n\n// Section name mapping for display\nconst SECTION_NAMES = {\n  toxic_score: 'Toxic Score',\n  soul_type: 'His Soul Type',\n  wtf_happening: 'WTF Is Happening',\n  between_the_lines: 'Between The Lines',\n  souls_together: 'Your Souls Together'\n};\n\n// Build body clips section for caption\nconst bodyClipLines = copy.bodyClips.map((clip, i) => {\n  const name = SECTION_NAMES[clip.section] || clip.section;\n  return '\\u{1F3AC} *Clip ' + (i + 1) + ': ' + name + '*\\n'\n    + '\\u{1F4DD} Text: \"' + clip.text + '\"\\n'\n    + '\\u{1F5E3} VO: \"' + clip.vo + '\"';\n}).join('\\n\\n');\n\nconst caption = '\\u{1F3AC} *NEW SCENARIO*\\n\\n'\n  + '\\u{1F4CB} *' + concept.concept_name + '*  |  ' + vibe.toUpperCase() + '  |  ' + appStyle + '\\n'\n  + '\\u{1F194} ' + scenarioName + '\\n\\n'\n  + '\\u{1F4CA} *Toxic Score:* ' + toxicScore + '/100\\n\\n'\n  + '\\u{1F3AD} *Soul Types:*\\n'\n  + results.personName + ': ' + results.personSoulType + '\\n'\n  + 'User: ' + results.userSoulType + '\\n\\n'\n  + '\\u{1F3F7} *Profile:* ' + results.profileType + ' \\u2014 \"' + results.profileSubtitle + '\"\\n\\n'\n  + '\\u26A1 *Dynamic:* ' + results.dynamic.name + '\\n\\n'\n  + '\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\u2501\\n\\n'\n  + '\\u{1F3A4} *HOOK*\\n'\n  + '\\u{1F4DD} Text: \"' + copy.hookText + '\"\\n'\n  + '\\u{1F5E3} VO: \"' + copy.hookVO + '\"\\n\\n'\n  + bodyClipLines + '\\n\\n'\n  + '\\u{1F3A4} *OUTRO*\\n'\n  + '\\u{1F4DD} Text: \"' + copy.outroText + '\"\\n'\n  + '\\u{1F5E3} VO: \"' + copy.outroVO + '\"';\n\n// Inline keyboard for approval\nconst replyMarkup = {\n  inline_keyboard: [\n    [\n      { text: '\\u2705 Approve', callback_data: 'approve_' + scenarioName },\n      { text: '\\u{1F504} Redo', callback_data: 'redo_' + scenarioName },\n      { text: '\\u274C Skip', callback_data: 'skip_' + scenarioName }\n    ]\n  ]\n};\n\n// Pass through binary data from Take Screenshot node so Send Photo can access it\nreturn [{\n  json: {\n    caption,\n    replyMarkup,\n    scenarioName,\n    scenario,\n    copy\n  },\n  binary: $input.first().binary\n}];\n"
+      },
+      "id": "8e16bff2-3519-4a3b-b6e5-4731603ce364",
+      "name": "Format Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4208,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.userPrompt }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "={{ $json.systemPrompt }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1552,
+        112
+      ],
+      "id": "b26713a2-8b14-4ad3-b41e-012520784904",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.userPrompt }}",
+        "options": {
+          "systemMessage": "={{ $json.systemPrompt }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        2576,
+        16
+      ],
+      "id": "4e1657e4-7ce3-4413-beb3-a96b07376b3c",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 8 * * 6"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -448,
+        32
+      ],
+      "id": "be1945d4-aa8d-4087-a53a-b029a7a66502",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Prepare Screenshot Request\n// Prepares the scenario JSON for the screenshot HTTP server\n// Mode: Run Once for All Items\n\nconst scenarioJson = $('Validate Scenario').first().json.scenario;\nconst scenarioName = $('Select Concept').first().json.scenarioName;\n\nreturn [{\n  json: {\n    scenarioJson,\n    scenarioName\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3776,
+        -96
+      ],
+      "id": "8d4f806c-c6c1-4655-9dc9-381a4f5c33a9",
+      "name": "Prepare Screenshot"
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "5120450288",
+        "binaryData": true,
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Approve",
+                    "additionalFields": {
+                      "callback_data": "={{ 'approve_' + $json.scenarioName }}"
+                    }
+                  },
+                  {
+                    "text": "Redo",
+                    "additionalFields": {
+                      "callback_data": "={{ 'redo_' + $json.scenarioName }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "caption": "={{ $('Format Telegram Message').item.json.caption }}",
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "9ee15d01-f284-4213-acd6-f1ea4a9a54b3",
+      "name": "Send Photo (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4416,
+        -96
+      ],
+      "webhookId": "697732a4-9608-4bb8-81c4-6c76735f83a1",
+      "credentials": {
+        "telegramApi": {
+          "id": "LnY46hGLXjQCETpn",
+          "name": "Telegram account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"id\": \"toxic-example-123\",\n  \"chat\": {\n    \"contactName\": \"Jake\",\n    \"appStyle\": \"imessage\",\n    \"messages\": [\n      {\"sender\": \"them\", \"text\": \"hey\", \"time\": \"9:41 AM\"},\n      {\"sender\": \"me\", \"text\": \"hi\", \"time\": \"9:42 AM\"}\n    ]\n  },\n  \"results\": {\n    \"personName\": \"Him\",\n    \"personGender\": \"male\",\n    \"overallScore\": 25,\n    \"warmthScore\": 20,\n    \"communicationScore\": 25,\n    \"dramaScore\": 70,\n    \"distanceScore\": 80,\n    \"passionScore\": 15,\n    \"profileType\": \"Red Flag Alert\",\n    \"profileSubtitle\": \"Run don't walk\",\n    \"profileDescription\": \"A pattern of emotional withdrawal.\",\n    \"personSoulType\": \"male-ice-charmer\",\n    \"userSoulType\": \"female-love-rush\",\n    \"personDescription\": \"Cold and calculating personality.\",\n    \"personTraits\": [\"Distant\", \"Avoidant\", \"Charming\", \"Calculated\", \"Detached\"],\n    \"userDescription\": \"Emotionally open and expressive.\",\n    \"userTraits\": [\"Empathetic\", \"Intense\", \"Hopeful\", \"Vulnerable\", \"Passionate\"],\n    \"categories\": {\n      \"intentions\": {\"description\": \"His intentions seem unclear.\"},\n      \"chemistry\": {\"description\": \"One-sided chemistry.\"},\n      \"effort\": {\"description\": \"Minimal effort shown.\"},\n      \"redFlagsGreenFlags\": {\"description\": \"Multiple red flags.\"},\n      \"trajectory\": {\"description\": \"Heading nowhere.\"}\n    },\n    \"messageInsights\": [\n      {\n        \"message\": \"hey\",\n        \"title\": \"Low Effort Opener\",\n        \"tag\": \"RED FLAG\",\n        \"description\": \"Bare minimum energy.\",\n        \"solution\": \"Look for someone who matches your energy.\"\n      }\n    ],\n    \"dynamic\": {\n      \"name\": \"The Chase\",\n      \"subtitle\": \"You chase, he retreats\",\n      \"whyThisHappens\": \"Power imbalance.\",\n      \"patternBreak\": \"Stop initiating.\",\n      \"powerBalance\": 25\n    }\n  }\n}\n",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1616,
+        -192
+      ],
+      "id": "fed23528-a267-47f2-abd3-3668942e0dc4",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3456/screenshot",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.scenarioJson) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3984,
+        -96
+      ],
+      "id": "ddd85f7c-ea89-462b-819c-5b6fad9455cf",
+      "name": "Take Screenshot"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        320
+      ],
+      "id": "53511179-3a0c-4920-ac66-9394ea067a1f",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "nGRxFqRlmP92LpZE",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        2576,
+        192
+      ],
+      "id": "bf0ab432-2271-437f-816f-ae725f337417",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "nGRxFqRlmP92LpZE",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1616,
+        -32
+      ],
+      "id": "5a547db8-06e4-4959-b59c-a6619abefc10",
+      "name": "Google Gemini Chat Model2",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "nGRxFqRlmP92LpZE",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -448,
+        192
+      ],
+      "id": "d64c9e2c-1b6e-4c5f-8cfb-fcb64740ee5b",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get Active Concepts": {
+      "main": [
+        [
+          {
+            "node": "Select Concept",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Concept": {
+      "main": [
+        [
+          {
+            "node": "Get Body Clip Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Body Clip Templates": {
+      "main": [
+        [
+          {
+            "node": "Get Caption Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Caption Templates": {
+      "main": [
+        [
+          {
+            "node": "Get VO Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get VO Templates": {
+      "main": [
+        [
+          {
+            "node": "Get Hook Texts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Hook Texts": {
+      "main": [
+        [
+          {
+            "node": "Get Social Examples",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Social Examples": {
+      "main": [
+        [
+          {
+            "node": "Build Scenario Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Scenario Prompt": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Scenario": {
+      "main": [
+        [
+          {
+            "node": "Scenario Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scenario Valid?": {
+      "main": [
+        [
+          {
+            "node": "Build Copy Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: Invalid Scenario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Copy Prompt": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Copy": {
+      "main": [
+        [
+          {
+            "node": "Copy Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy Valid?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Airtable Save",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: Invalid Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Airtable Save": {
+      "main": [
+        [
+          {
+            "node": "Save Scenario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Scenario": {
+      "main": [
+        [
+          {
+            "node": "Prepare Screenshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Validate Scenario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Validate Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Active Concepts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Screenshot": {
+      "main": [
+        [
+          {
+            "node": "Take Screenshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Send Photo (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Take Screenshot": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get Active Concepts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ba98e8d4-8645-4301-bbf0-22ae0f1e1b1f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6ac2834f06c1f2877b895f0b14af7f505db182392bdf8fe2cc40fc00a3d79632"
+  },
+  "id": "cNliMecIH6Yg1tGj",
+  "tags": [
+    {
+      "updatedAt": "2026-02-11T21:29:53.448Z",
+      "createdAt": "2026-02-11T21:29:53.448Z",
+      "id": "zwksa6JlUNkobY51",
+      "name": "ToxicOrNah"
+    }
+  ]
+}

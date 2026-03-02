@@ -1,0 +1,32 @@
+[
+  {
+    "url": "https://example.com/image1.jpg",
+    "tags": ["happy", "energetic", "warm"],
+    "category": "EMOTIONAL TONE",
+    "style": "portrait"
+  },
+  {
+    "url": "https://example.com/image2.jpg",
+    "tags": ["deep", "thoughtful", "emotional"],
+    "category": "POWER BALANCE",
+    "style": "abstract"
+  },
+  {
+    "url": "/public/local-image.png",
+    "tags": ["joyful", "positive", "bright"],
+    "category": "TRUST & VULNERABILITY",
+    "style": "nature"
+  },
+  {
+    "url": "https://example.com/image4.jpg",
+    "tags": ["intuitive", "wise", "calm"],
+    "category": "COMPATIBILITY FLOW",
+    "style": "abstract"
+  },
+  {
+    "url": "https://example.com/image5.jpg",
+    "tags": ["protective", "balanced", "gentle"],
+    "category": "FUTURE VIBE",
+    "style": "portrait"
+  }
+]

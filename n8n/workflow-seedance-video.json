@@ -1,0 +1,115 @@
+{
+  "name": "Seedance Video Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "seed-001",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "webhookId": "seedance-trigger",
+      "credentials": {
+        "telegramApi": {
+          "id": "pyWK5SqqdZeXs1WU",
+          "name": "Telegram Bot API account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// NODE: Parse message + get image URL via Telegram Bot API\n// Accepts: photo OR document (file) with caption as prompt\n// Output: imageUrl, prompt, chatId\n\nconst _https = require('https');\nconst { URL } = require('url');\n\nfunction fetch(url, opts = {}, _redirectCount = 0) {\n  return new Promise((resolve, reject) => {\n    if (_redirectCount > 5) return reject(new Error('Too many redirects'));\n    const u = new URL(url);\n    const body = opts.body || null;\n    const ro = {\n      hostname: u.hostname,\n      port: u.port || undefined,\n      path: u.pathname + u.search,\n      method: opts.method || 'GET',\n      headers: { ...(opts.headers || {}) },\n    };\n    if (body) ro.headers['Content-Length'] = Buffer.byteLength(body);\n    const req = _https.request(ro, res => {\n      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {\n        res.resume();\n        return fetch(res.headers.location, opts, _redirectCount + 1).then(resolve).catch(reject);\n      }\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        const buf = Buffer.concat(chunks);\n        resolve({\n          ok: res.statusCode >= 200 && res.statusCode < 300,\n          status: res.statusCode,\n          json: () => Promise.resolve(JSON.parse(buf.toString())),\n          text: () => Promise.resolve(buf.toString()),\n        });\n      });\n    });\n    req.on('error', reject);\n    if (body) req.write(body);\n    req.end();\n  });\n}\n\nconst botToken = $env.TELEGRAM_BOT_TOKEN || '';\nif (!botToken) throw new Error('TELEGRAM_BOT_TOKEN env variable not set');\n\nconst msg = $input.first().json.message || $input.first().json;\n\n// Extract file_id from photo OR document\nlet fileId = null;\nconst photos = msg.photo || [];\nif (photos.length > 0) {\n  // Sent as photo — pick largest resolution\n  fileId = photos[photos.length - 1].file_id;\n} else if (msg.document && msg.document.mime_type && msg.document.mime_type.startsWith('image/')) {\n  // Sent as file/document (image)\n  fileId = msg.document.file_id;\n}\n\nif (!fileId) {\n  throw new Error('No image found. Send a photo or image file with a caption as prompt.');\n}\n\n// Extract prompt from caption\nconst prompt = (msg.caption || '').trim();\nif (!prompt) {\n  throw new Error('No prompt found. Add a caption to the photo.');\n}\n\nconst chatId = msg.chat.id;\n\n// Call Telegram getFile API to get file_path\nconst fileRes = await fetch('https://api.telegram.org/bot' + botToken + '/getFile', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({ file_id: fileId }),\n});\n\nif (!fileRes.ok) {\n  const errText = await fileRes.text();\n  throw new Error('Telegram getFile failed: ' + fileRes.status + ' ' + errText);\n}\n\nconst fileData = await fileRes.json();\nif (!fileData.ok || !fileData.result || !fileData.result.file_path) {\n  throw new Error('Telegram getFile returned no file_path');\n}\n\nconst imageUrl = 'https://api.telegram.org/file/bot' + botToken + '/' + fileData.result.file_path;\n\nreturn [{\n  json: {\n    imageUrl,\n    prompt,\n    chatId\n  }\n}];"
+      },
+      "id": "seed-002",
+      "name": "Parse & Get Image URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// NODE: Send \"processing\" message via Telegram Bot API\n\nconst _https = require('https');\nconst { URL } = require('url');\n\nfunction fetch(url, opts = {}, _redirectCount = 0) {\n  return new Promise((resolve, reject) => {\n    if (_redirectCount > 5) return reject(new Error('Too many redirects'));\n    const u = new URL(url);\n    const body = opts.body || null;\n    const ro = {\n      hostname: u.hostname,\n      port: u.port || undefined,\n      path: u.pathname + u.search,\n      method: opts.method || 'GET',\n      headers: { ...(opts.headers || {}) },\n    };\n    if (body) ro.headers['Content-Length'] = Buffer.byteLength(body);\n    const req = _https.request(ro, res => {\n      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {\n        res.resume();\n        return fetch(res.headers.location, opts, _redirectCount + 1).then(resolve).catch(reject);\n      }\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        const buf = Buffer.concat(chunks);\n        resolve({\n          ok: res.statusCode >= 200 && res.statusCode < 300,\n          status: res.statusCode,\n          json: () => Promise.resolve(JSON.parse(buf.toString())),\n          text: () => Promise.resolve(buf.toString()),\n        });\n      });\n    });\n    req.on('error', reject);\n    if (body) req.write(body);\n    req.end();\n  });\n}\n\nconst botToken = $env.TELEGRAM_BOT_TOKEN || '';\nif (!botToken) throw new Error('TELEGRAM_BOT_TOKEN env variable not set');\n\nconst { chatId, prompt } = $input.first().json;\n\nconst text = '⏳ Generating video with Seedance v1.5 Pro...\\n\\nPrompt: ' + prompt + '\\n\\nThis may take 2-5 minutes.';\n\nawait fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    chat_id: chatId,\n    text: text,\n  }),\n});\n\n// Pass through the input data unchanged\nreturn [{ json: $input.first().json }];"
+      },
+      "id": "seed-003",
+      "name": "Send Processing Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// NODE: Call fal.ai Seedance v1.5 Pro — Image to Video\n// Settings: 9:16, 720p, 10s, camera fixed, no safety checker, no audio\n\nconst _https = require('https');\nconst _http = require('http');\nconst { URL } = require('url');\n\nfunction fetch(url, opts = {}, _redirectCount = 0) {\n  return new Promise((resolve, reject) => {\n    if (_redirectCount > 5) return reject(new Error('Too many redirects'));\n    const u = new URL(url);\n    const lib = u.protocol === 'https:' ? _https : _http;\n    const body = opts.body || null;\n    const ro = {\n      hostname: u.hostname,\n      port: u.port || undefined,\n      path: u.pathname + u.search,\n      method: opts.method || 'GET',\n      headers: { ...(opts.headers || {}) },\n    };\n    if (body) ro.headers['Content-Length'] = Buffer.byteLength(body);\n    const req = lib.request(ro, res => {\n      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {\n        res.resume();\n        const redirectUrl = res.headers.location.startsWith('http')\n          ? res.headers.location\n          : u.protocol + '//' + u.host + res.headers.location;\n        return fetch(redirectUrl, opts, _redirectCount + 1).then(resolve).catch(reject);\n      }\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        const buf = Buffer.concat(chunks);\n        resolve({\n          ok: res.statusCode >= 200 && res.statusCode < 300,\n          status: res.statusCode,\n          text: () => Promise.resolve(buf.toString()),\n          json: () => Promise.resolve(JSON.parse(buf.toString())),\n        });\n      });\n    });\n    req.on('error', reject);\n    if (body) req.write(body);\n    req.end();\n  });\n}\n\nconst FAL_KEY = $env.FAL_KEY || '';\nif (!FAL_KEY) throw new Error('FAL_KEY env variable not set');\n\nconst ENDPOINT = 'fal-ai/bytedance/seedance/v1.5/pro/image-to-video';\nconst BASE_URL = 'https://queue.fal.run';\nconst POLL_INTERVAL = 8000;\nconst TIMEOUT = 600000;\n\nconst { imageUrl, prompt, chatId } = $input.first().json;\n\n// Submit job\nconst submitRes = await fetch(BASE_URL + '/' + ENDPOINT, {\n  method: 'POST',\n  headers: {\n    'Authorization': 'Key ' + FAL_KEY,\n    'Content-Type': 'application/json',\n  },\n  body: JSON.stringify({\n    image_url: imageUrl,\n    prompt: prompt,\n    aspect_ratio: '9:16',\n    resolution: '720p',\n    duration: '10',\n    camera_fixed: true,\n    enable_safety_checker: false,\n    generate_audio: false,\n    seed: -1\n  }),\n});\n\nif (!submitRes.ok) {\n  const errText = await submitRes.text();\n  throw new Error('fal.ai submit failed: ' + submitRes.status + ' ' + errText);\n}\n\nconst submitData = await submitRes.json();\nconst requestId = submitData.request_id;\n\n// Poll for completion\nconst startTime = Date.now();\nlet result = null;\n\nwhile (Date.now() - startTime < TIMEOUT) {\n  await new Promise(r => setTimeout(r, POLL_INTERVAL));\n\n  const statusRes = await fetch(\n    BASE_URL + '/' + ENDPOINT + '/requests/' + requestId + '/status',\n    { headers: { 'Authorization': 'Key ' + FAL_KEY } }\n  );\n\n  if (!statusRes.ok) continue;\n  const statusData = await statusRes.json();\n\n  if (statusData.status === 'COMPLETED') {\n    const resultRes = await fetch(\n      BASE_URL + '/' + ENDPOINT + '/requests/' + requestId,\n      { headers: { 'Authorization': 'Key ' + FAL_KEY } }\n    );\n    if (!resultRes.ok) throw new Error('fal.ai result fetch failed: ' + resultRes.status);\n    result = await resultRes.json();\n    break;\n  }\n\n  if (statusData.status === 'FAILED') {\n    throw new Error('fal.ai job failed: ' + JSON.stringify(statusData));\n  }\n}\n\nif (!result) throw new Error('fal.ai timeout after ' + (TIMEOUT / 1000) + 's');\nif (!result.video || !result.video.url) throw new Error('No video URL in result');\n\nreturn [{\n  json: {\n    videoUrl: result.video.url,\n    seed: result.seed,\n    chatId,\n    prompt\n  }\n}];"
+      },
+      "id": "seed-004",
+      "name": "Generate Video (fal.ai)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// NODE: Send video to Telegram via Bot API\n// n8n Telegram node doesn't support sendVideo — call API directly\n\nconst _https = require('https');\nconst { URL } = require('url');\n\nfunction fetch(url, opts = {}, _redirectCount = 0) {\n  return new Promise((resolve, reject) => {\n    if (_redirectCount > 5) return reject(new Error('Too many redirects'));\n    const u = new URL(url);\n    const body = opts.body || null;\n    const ro = {\n      hostname: u.hostname,\n      port: u.port || undefined,\n      path: u.pathname + u.search,\n      method: opts.method || 'GET',\n      headers: { ...(opts.headers || {}) },\n    };\n    if (body) ro.headers['Content-Length'] = Buffer.byteLength(body);\n    const req = _https.request(ro, res => {\n      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {\n        res.resume();\n        return fetch(res.headers.location, opts, _redirectCount + 1).then(resolve).catch(reject);\n      }\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        const buf = Buffer.concat(chunks);\n        resolve({\n          ok: res.statusCode >= 200 && res.statusCode < 300,\n          status: res.statusCode,\n          json: () => Promise.resolve(JSON.parse(buf.toString())),\n          text: () => Promise.resolve(buf.toString()),\n        });\n      });\n    });\n    req.on('error', reject);\n    if (body) req.write(body);\n    req.end();\n  });\n}\n\nconst botToken = $env.TELEGRAM_BOT_TOKEN || '';\nif (!botToken) throw new Error('TELEGRAM_BOT_TOKEN env variable not set');\n\nconst { videoUrl, seed, chatId, prompt } = $input.first().json;\n\nconst caption = '✅ Video generated!\\n\\nPrompt: ' + prompt + '\\nSeed: ' + (seed || 'random');\n\nconst res = await fetch('https://api.telegram.org/bot' + botToken + '/sendVideo', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    chat_id: chatId,\n    video: videoUrl,\n    caption: caption,\n    supports_streaming: true\n  }),\n});\n\nif (!res.ok) {\n  const errText = await res.text();\n  throw new Error('Telegram sendVideo failed: ' + res.status + ' ' + errText);\n}\n\nconst result = await res.json();\nreturn [{ json: { success: true, messageId: result.result?.message_id } }];"
+      },
+      "id": "seed-005",
+      "name": "Send Video to Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// NODE: Send error message via Telegram Bot API\n// This node is connected to the Error output of Generate Video\n\nconst _https = require('https');\nconst { URL } = require('url');\n\nfunction fetch(url, opts = {}, _redirectCount = 0) {\n  return new Promise((resolve, reject) => {\n    if (_redirectCount > 5) return reject(new Error('Too many redirects'));\n    const u = new URL(url);\n    const body = opts.body || null;\n    const ro = {\n      hostname: u.hostname,\n      port: u.port || undefined,\n      path: u.pathname + u.search,\n      method: opts.method || 'GET',\n      headers: { ...(opts.headers || {}) },\n    };\n    if (body) ro.headers['Content-Length'] = Buffer.byteLength(body);\n    const req = _https.request(ro, res => {\n      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {\n        res.resume();\n        return fetch(res.headers.location, opts, _redirectCount + 1).then(resolve).catch(reject);\n      }\n      const chunks = [];\n      res.on('data', c => chunks.push(c));\n      res.on('end', () => {\n        const buf = Buffer.concat(chunks);\n        resolve({\n          ok: res.statusCode >= 200 && res.statusCode < 300,\n          status: res.statusCode,\n          json: () => Promise.resolve(JSON.parse(buf.toString())),\n          text: () => Promise.resolve(buf.toString()),\n        });\n      });\n    });\n    req.on('error', reject);\n    if (body) req.write(body);\n    req.end();\n  });\n}\n\nconst botToken = $env.TELEGRAM_BOT_TOKEN || '';\nif (!botToken) throw new Error('TELEGRAM_BOT_TOKEN env variable not set');\n\n// Try to get chatId from the error context or from earlier node\nlet chatId;\ntry {\n  chatId = $('Parse & Get Image URL').first().json.chatId;\n} catch (e) {\n  // Fallback: try input\n  chatId = $input.first().json.chatId;\n}\n\nconst errorMsg = $input.first().json.message || 'Unknown error';\nconst text = '❌ Video generation failed:\\n\\n' + errorMsg;\n\nawait fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    chat_id: chatId,\n    text: text,\n  }),\n});\n\nreturn [{ json: { success: false, error: errorMsg } }];"
+      },
+      "id": "seed-006",
+      "name": "Send Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 550]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Parse & Get Image URL", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse & Get Image URL": {
+      "main": [
+        [{ "node": "Send Processing Message", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Processing Message": {
+      "main": [
+        [{ "node": "Generate Video (fal.ai)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Video (fal.ai)": {
+      "main": [
+        [{ "node": "Send Video to Telegram", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [],
+  "pinData": {},
+  "versionId": "seedance-v2"
+}

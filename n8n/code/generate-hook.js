@@ -172,26 +172,92 @@ const HOOK_GIRLS = {
 
 // Select a pose mood category based on toxicity score + emotion override
 function selectPoseCategory(production) {
-  if (production.hookEmotionRule === 'always_sad') return 'vulnerable';
-  if (production.hookEmotionRule === 'always_shocked') return 'vulnerable';
+  if (production.hookEmotionRule === 'always_sad') return 'cold_calculated';
+  if (production.hookEmotionRule === 'always_shocked') return 'cold_calculated';
   const score = production.scenarioJson
-    ? (production.scenarioJson.overallScore || production.scenarioJson.toxicityScore || 50)
-    : 50;
-  if (score <= 20) return 'vulnerable';  // very toxic → sad/upset
-  if (score <= 35) return 'pensive';     // worried/hurt → thoughtful
-  if (score <= 50) return 'bored';       // frustrated → bored/unimpressed
-  if (score <= 65) return 'pouty';       // skeptical → pouty/sultry
-  if (score <= 80) return 'confident';   // neutral → confident/direct
-  return 'relaxed';                      // low toxicity → relaxed
+    ? (production.scenarioJson.overallScore || production.scenarioJson.toxicityScore || 15)
+    : 15;
+  // Tier B = displayed toxicity 85–99 (overallScore 0–15): glacial, cold, frozen
+  // Tier A = displayed toxicity 70–84 (overallScore 16–30): explosive, visible energy
+  return score <= 15 ? 'cold_calculated' : 'explosive_control';
 }
 
-// Pick a random pose reference URL from the given category
-function pickPoseRef(category) {
-  const pool = HOOK_GIRLS[category];
-  if (!pool || pool.length === 0) {
-    const all = Object.values(HOOK_GIRLS).flat();
-    return all[Math.floor(Math.random() * all.length)];
-  }
+// Get a text description of the expression — emotion only, no furniture/position.
+// TikTok viral formula: the girl doesn't look destroyed — she looks like she's about to say something.
+// V2.0: separate pools for selfie (speaking) vs candid (reaction) energy.
+// 80% pre-speech suffix, 20% micro-breath alternative to break pattern repetition.
+function getPoseDescription(category, hookType) {
+  // 80% pre-speech / 20% micro-breath variation — prevents "always lips parting" pattern
+  const microBreathAlts = [
+    'inhales slightly through nose',
+    'tongue briefly presses against inner lip',
+    'swallows once before reacting',
+  ];
+  const useMicroBreath = Math.random() < 0.20;
+  const breathSuffix = useMicroBreath
+    ? microBreathAlts[Math.floor(Math.random() * microBreathAlts.length)]
+    : 'lips slightly parting as if about to speak';
+
+  const isSelfie = hookType === 'speaking';
+
+  const pools = {
+    // Tier B — Glacial / Cold Calculated (displayed toxicity 85–99)
+    cold_calculated: {
+      selfie: [
+        // Core — frozen energy, direct eye contact into camera
+        'frozen stare, direct eye contact, completely still, eyes cold and intense, slight lean toward camera, ' + breathSuffix,
+        'slow controlled expression, slight deadpan smirk forming, direct gaze into camera, like she already knows exactly what to say, ' + breathSuffix,
+        'eyes locked directly at camera, micro head tilt, emotionless except for jaw slightly set, ' + breathSuffix,
+        'cold unreadable face looking straight into camera, one eyebrow barely raised, long pause before reaction, ' + breathSuffix,
+        // Secondary
+        'composed but visibly restraining herself, direct camera gaze, lips pressed tight, anticipation of speaking, ' + breathSuffix,
+        'blank stare into the camera, processing, ' + breathSuffix,
+        // Rare
+        'quiet, almost amused realization, eyes narrowing slightly while looking directly at camera, like she already knew',
+      ],
+      candid: [
+        // Core — internal energy, eyes slightly off-camera
+        'frozen expression, eyes slightly off-camera, completely still, reacting internally to what she just read, ' + breathSuffix,
+        'slow controlled expression, slight deadpan smirk, looking past the phone, like she already knows exactly what to say, ' + breathSuffix,
+        'eyes slightly past camera, micro head tilt, emotionless except for jaw slightly set, processing internally, ' + breathSuffix,
+        'cold unreadable face, eyes looking just past the lens, one eyebrow barely raised, processing what she read, ' + breathSuffix,
+        // Secondary
+        'composed but visibly restraining herself, gaze slightly off-camera, reacting internally before looking up, ' + breathSuffix,
+        'blank stare away from camera, reacting internally, ' + breathSuffix,
+        // Rare
+        'quiet, almost amused realization, eyes narrowing slightly, looking past the phone, like she already knew',
+      ],
+    },
+    // Tier A — Explosive Control (displayed toxicity 70–84)
+    explosive_control: {
+      selfie: [
+        // Core — visible energy, direct camera
+        'jaw tight, direct eye contact, short sharp exhale visible, barely containing it, ' + breathSuffix,
+        'eyebrow raised with a micro head tilt, looking directly at camera, "really?" sarcastic energy, ' + breathSuffix,
+        'quick disbelief blink, direct gaze into camera, lips pressed then parting, "I cannot believe this" expression, ' + breathSuffix,
+        'restrained fury in jaw and eyes, slight lean toward camera, controlled breath, on the verge of responding, ' + breathSuffix,
+        // Secondary
+        'composed disappointed look, direct camera gaze, quiet before the storm, ' + breathSuffix,
+        'done with it energy, eyes snapping up direct to camera, ' + breathSuffix,
+        // Rare
+        'confused hurt expression, brows furrowed, looking directly at camera, taken aback, not yet ready to react',
+      ],
+      candid: [
+        // Core — contained energy, eyes off-camera
+        'jaw tight, eyes slightly off-camera, short sharp exhale visible, barely containing it, ' + breathSuffix,
+        'eyebrow raised with a micro head tilt, looking past the phone, "really?" energy, ' + breathSuffix,
+        'quick disbelief blink, eyes looking away briefly then back, "I cannot believe this" expression, ' + breathSuffix,
+        'restrained fury in jaw and eyes, reacting internally, controlled breath, ' + breathSuffix,
+        // Secondary
+        'composed disappointed look, eyes slightly off-camera, quiet before the storm, ' + breathSuffix,
+        'done with it energy, eyes glancing to the side then refocusing, ' + breathSuffix,
+        // Rare
+        'confused hurt expression, brows furrowed, looking past the phone, processing internally',
+      ],
+    },
+  };
+  const categoryPool = pools[category] || pools.explosive_control;
+  const pool = isSelfie ? categoryPool.selfie : categoryPool.candid;
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
@@ -215,7 +281,27 @@ async function withRetry(fn, label = 'API call') {
 
 // ─── kie.ai helpers ───
 async function kieGenerate(prompt, imageRefs, options = {}) {
-  const { aspectRatio = '9:16', resolution = '2K' } = options;
+  const { aspectRatio = '9:16', resolution = '2K', timeOfDay = 'day', isSelfie = false } = options;
+  // Time-aware lighting + UGC style — always appended
+  const lighting = timeOfDay === 'night' ? 'nighttime' : 'daytime';
+  // UGC imperfection layer — 40% chance: organic asymmetry to avoid AI-polished look
+  // V2.0: structural imperfections (not meta-descriptive words like "phone tilt")
+  const imperfections = [
+    'natural uneven posture',
+    'one shoulder slightly higher than the other',
+    'subtle natural skin texture',
+    'slight under-eye shadow',
+    'pillow slightly creased beside her',
+  ];
+  const imperfectionSuffix = Math.random() < 0.40
+    ? ', ' + imperfections[Math.floor(Math.random() * imperfections.length)]
+    : '';
+  // Selfie = camera IS the phone, so no phone visible in frame (her hands are free)
+  // Candid = she may be holding a phone she's reading from → specify model
+  const phoneClause = isSelfie
+    ? 'no phone visible in frame, hands relaxed'
+    : 'if holding a phone it must be a black iPhone XS';
+  const finalPrompt = prompt + ', maintain exact facial features from reference, ' + phoneClause + ', ' + lighting + ', shot on iPhone 13 Pro, no background blur, no bokeh, sharp background throughout, no color grading, raw UGC phone footage style' + imperfectionSuffix;
   const res = await fetch(KIE_API_URL + '/createTask', {
     method: 'POST',
     headers: {
@@ -223,8 +309,8 @@ async function kieGenerate(prompt, imageRefs, options = {}) {
       'Authorization': 'Bearer ' + KIE_API_KEY,
     },
     body: JSON.stringify({
-      model: 'nano-banana-pro',
-      input: { prompt, image_input: imageRefs, aspect_ratio: aspectRatio, resolution, output_format: 'png' },
+      model: 'nano-banana-2',
+      input: { prompt: finalPrompt, image_input: imageRefs, aspect_ratio: aspectRatio, resolution, output_format: 'png' },
     }),
   });
   if (!res.ok) throw new Error('kie.ai createTask: ' + res.status + ' ' + (await res.text()));
@@ -307,7 +393,7 @@ async function extractEnvFrame(bodyClips) {
 }
 
 // ─── Fallback template prompt builder (used when AI Agent output is empty) ───
-function buildHookPromptFallback(production, hasEnvFrame, hasPoseRef) {
+function buildHookPromptFallback(production, hasEnvFrame, poseDesc, timeOfDay, hookTypeHint) {
   let emotion = 'concerned';
   const scenarioJson = production.scenarioJson;
   if (scenarioJson) {
@@ -322,36 +408,101 @@ function buildHookPromptFallback(production, hasEnvFrame, hasPoseRef) {
   if (production.hookEmotionRule === 'always_shocked') emotion = 'shocked and upset';
 
   const furniture = production.environmentFurniture || 'bed';
+  const defaultEnv = (timeOfDay === 'night') ? 'bedroom, nighttime, dim lamp light' : 'bedroom, natural daylight lighting';
   const envDesc = hasEnvFrame
     ? 'in the same room as the environment frame'
-    : (production.environmentDescription || 'cozy bedroom, warm lighting');
+    : (production.environmentDescription || defaultEnv);
 
-  // Multi-reference guidance: tell kie.ai which ref is face vs pose
-  const refGuide = hasPoseRef
-    ? 'IMPORTANT: Use the FIRST reference image for the girl\'s face and appearance ONLY. ' +
-      'Use the SECOND reference image for the body pose, camera angle, and setting/vibe ONLY. ' +
-      'Do NOT blend the faces — the girl must look exactly like the first reference. '
-    : '';
-
-  // Pick a random camera angle to avoid copying the reference photo
-  const angles = [
-    'Low angle shot from floor level, looking up at',
-    'Close-up shot from slightly above, looking down at',
-    'Side profile shot from 45 degrees, showing',
-    'Wide shot from across the room, showing',
-  ];
+  // Angle logic tied to hookType — never use wide shot (reduces hook intensity)
+  let angles;
+  if (hookTypeHint === 'speaking') {
+    // Selfie = close-up only
+    angles = [
+      'Close-up shot from slightly above, looking down at',
+      'Close-up shot, straight on, of',
+    ];
+  } else {
+    // Candid / other = side angles, no wide room shot
+    angles = [
+      'Side profile shot from 45 degrees, showing',
+      'Close-up shot from slightly above, looking down at',
+      'Medium shot from the side, showing',
+    ];
+  }
   const angle = angles[Math.floor(Math.random() * angles.length)];
 
-  return refGuide + angle + ' a girl sitting on ' + furniture + ', ' + envDesc +
-    '. She is hunched forward over her phone, ' + emotion +
-    ' expression. Realistic, candid, shot on iPhone, 9:16 vertical';
+  const poseText = poseDesc ? ' ' + poseDesc + ',' : '';
+
+  return angle + ' a girl sitting on ' + furniture + ', ' + envDesc +
+    '. She is hunched forward over her phone,' + poseText + ' ' + emotion +
+    ' expression. Realistic, candid, shot on iPhone 13 Pro, 9:16 vertical';
 }
+// ─── Hook Pool helpers (pre-generated Sora 2 hooks for instant /produce) ───
+const HOOK_POOL_TABLE = 'tbl3q91o3l0isSX9w';
+
+async function checkHookPool(scenarioRecordId) {
+  const ATOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
+  if (!ATOKEN || !scenarioRecordId) return null;
+
+  const ABASE = 'appsgjIdkpak2kaXq';
+  const formula = encodeURIComponent("AND({status}='ready',{scenario_id}='" + scenarioRecordId + "')");
+
+  try {
+    const res = await fetch(
+      'https://api.airtable.com/v0/' + ABASE + '/' + HOOK_POOL_TABLE + '?filterByFormula=' + formula + '&maxRecords=1',
+      { headers: { 'Authorization': 'Bearer ' + ATOKEN } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.records || data.records.length === 0) return null;
+
+    const record = data.records[0];
+    const fields = record.fields;
+    const videoFiles = fields.video_file;
+    if (!Array.isArray(videoFiles) || videoFiles.length === 0) return null;
+
+    return {
+      recordId: record.id,
+      videoUrl: videoFiles[0].url,
+      hookText: fields.hook_text || '',
+      sourceImageUrl: fields.source_image_url || '',
+      hookType: fields.hook_type || 'speaking', // 'speaking' or 'reaction'
+    };
+  } catch(e) {
+    console.log('[Hook Pool] Check error: ' + e.message);
+    return null;
+  }
+}
+
+async function markPoolUsed(recordId, usedByRunId) {
+  const ATOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
+  if (!ATOKEN) return;
+
+  const ABASE = 'appsgjIdkpak2kaXq';
+  try {
+    await fetch('https://api.airtable.com/v0/' + ABASE + '/' + HOOK_POOL_TABLE + '/' + recordId, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + ATOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: {
+          status: 'used',
+          used_by_run_id: usedByRunId || '',
+          used_at: new Date().toISOString(),
+        }
+      }),
+    });
+  } catch(e) {
+    console.log('[Hook Pool] Mark used error: ' + e.message);
+  }
+}
+
 // ─── End helpers ───
 
 const production = $('Prepare Production').first().json;
 const hookType = production.effectiveHookType || production.hookType;
 const chatId = production.chatId;
 const scenarioName = production.scenarioName;
+const timeOfDay = production.timeOfDay || 'day'; // 'night' | 'day' — from /produce command
 
 // ═══════════════════════════════════════
 // DEBUG MODE — skip AI generation, return dummy image instantly
@@ -441,26 +592,26 @@ if (hookType === 'ai_image' || hookType === 'ai_single_girl') {
     return [{ json: { error: true, chatId, message: 'No girl_ref_url configured on concept.' } }];
   }
 
-  // Pose/style reference from Hook Girls catalog
+  // Pose/style reference — text description (image refs cause kie.ai 422 from catbox.moe)
   const poseCategory = selectPoseCategory(production);
-  const poseRefUrl = pickPoseRef(poseCategory);
+  const poseDesc = getPoseDescription(poseCategory, hookType);
 
   // Use AI-generated prompt from upstream Agent, fallback to template
   let hookPrompt = (AI_GENERATED_PROMPT && AI_GENERATED_PROMPT.length > 20) ? AI_GENERATED_PROMPT : null;
   const promptSource = hookPrompt ? 'deepseek' : 'template';
   if (!hookPrompt) {
-    hookPrompt = buildHookPromptFallback(production, false, !!poseRefUrl);
-  } else if (poseRefUrl) {
-    // Prepend multi-ref guidance to the AI-generated prompt
-    hookPrompt = 'IMPORTANT: Use the FIRST reference for the girl\'s face ONLY. Use the SECOND reference for pose/vibe ONLY. Do NOT blend faces. ' + hookPrompt;
+    hookPrompt = buildHookPromptFallback(production, false, poseDesc, timeOfDay, hookType);
+  } else {
+    // Append pose description to AI-generated prompt
+    hookPrompt = hookPrompt + ', ' + poseDesc;
   }
 
-  // Image references: girl ref + pose ref
-  const imageRefs = poseRefUrl ? [girlRefUrl, poseRefUrl] : [girlRefUrl];
+  // Image references: girl face ref only (pose handled via text description)
+  const imageRefs = [girlRefUrl];
 
   try {
     const result = await withRetry(async () => {
-      const taskId = await kieGenerate(hookPrompt, imageRefs);
+      const taskId = await kieGenerate(hookPrompt, imageRefs, { timeOfDay });
       const imageUrl = await kiePoll(taskId);
       if (!imageUrl) throw new Error('kie.ai returned no image');
       return imageUrl;
@@ -477,7 +628,7 @@ if (hookType === 'ai_image' || hookType === 'ai_single_girl') {
         hookPromptUsed: hookPrompt,
         hookPromptSource: promptSource,
         hookPoseCategory: poseCategory,
-        hookPoseRef: poseRefUrl || null,
+        hookPoseDesc: poseDesc,
         envFrameUsed: false,
         chatId,
         scenarioName,
@@ -515,15 +666,15 @@ if (hookType === 'ai_multi_image') {
 
   const girlRefUrl = production.girlRefUrl || '';
 
-  // Pose/style reference (same for all 3 scenes for consistency)
+  // Pose/style reference — text description (same for all 3 scenes for consistency)
   const poseCategory = selectPoseCategory(production);
-  const poseRefUrl = pickPoseRef(poseCategory);
+  const poseDesc = getPoseDescription(poseCategory, hookType);
 
   let basePrompt = (AI_GENERATED_PROMPT && AI_GENERATED_PROMPT.length > 20) ? AI_GENERATED_PROMPT : null;
   if (!basePrompt) {
-    basePrompt = buildHookPromptFallback(production, false, !!poseRefUrl);
-  } else if (poseRefUrl) {
-    basePrompt = 'IMPORTANT: Use the FIRST reference for the girl\'s face ONLY. Use the SECOND reference for pose/vibe ONLY. Do NOT blend faces. ' + basePrompt;
+    basePrompt = buildHookPromptFallback(production, false, poseDesc, timeOfDay, hookType);
+  } else {
+    basePrompt = basePrompt + ', ' + poseDesc;
   }
 
   const scenes = [
@@ -532,13 +683,14 @@ if (hookType === 'ai_multi_image') {
     basePrompt + ', sad moment, looking away from each other',
   ];
 
-  const imageRefs = poseRefUrl ? [girlRefUrl, poseRefUrl] : [girlRefUrl];
+  // Image references: girl face ref only
+  const imageRefs = [girlRefUrl];
   const generatedImages = [];
 
   try {
     for (let i = 0; i < scenes.length; i++) {
       const imageUrl = await withRetry(async () => {
-        const taskId = await kieGenerate(scenes[i], imageRefs);
+        const taskId = await kieGenerate(scenes[i], imageRefs, { timeOfDay });
         const url = await kiePoll(taskId);
         if (!url) throw new Error('Image ' + (i + 1) + ' returned no URL');
         return url;
@@ -564,7 +716,7 @@ if (hookType === 'ai_multi_image') {
         hookSource: 'ai_multi_image',
         hookImageUrls: generatedImages.map(i => i.url),
         hookPoseCategory: poseCategory,
-        hookPoseRef: poseRefUrl || null,
+        hookPoseDesc: poseDesc,
         imageCount: generatedImages.length,
         chatId,
         scenarioName,
@@ -642,10 +794,90 @@ if (hookType === 'chat_screenshot') {
 }
 
 // ═══════════════════════════════════════
-// KLING LIPSYNC — Step 1: Generate original image with kie.ai
-// Image gets approved on Telegram, then Img2Vid node converts via Kling Avatar V2
+// HOOK POOL CHECK — instant hook from pre-generated pool (no AI calls needed)
+// V3: clips are pre-trimmed 3s with baked ElevenLabs VO audio. No FFmpeg needed.
+// Query by scenario_id (each clip is linked to a specific scenario's hookText).
 // ═══════════════════════════════════════
-if (hookType === 'kling_lipsync') {
+if (hookType === 'reaction' || hookType === 'speaking') {
+  const scenarioRecordId = production.scenarioRecordId || '';
+
+  if (scenarioRecordId) {
+    const poolResult = await checkHookPool(scenarioRecordId);
+    if (poolResult) {
+      console.log('[Hook Pool] Found pre-generated clip for scenario ' + scenarioRecordId + ': ' + poolResult.recordId);
+
+      try {
+        // Download 3s clip directly (already trimmed)
+        // Speaking clips have audio baked in; reaction clips are silent
+        const vidRes = await fetch(poolResult.videoUrl);
+        if (!vidRes.ok) throw new Error('Video download failed: ' + vidRes.status);
+        const videoBuffer = Buffer.from(await vidRes.arrayBuffer());
+
+        // Determine hookSource based on pool clip's hook_type
+        // 'pool' = speaking (has baked audio) → VO skipped, assemble uses embedded audio
+        // 'pool_reaction' = reaction (silent) → VO still needed, assemble overlays VO
+        const poolHookSource = poolResult.hookType === 'speaking' ? 'pool' : 'pool_reaction';
+
+        // Mark clip as used
+        const runRecordId = (() => { try { return $('Create Video Run').first().json.id; } catch(e) { return 'unknown'; } })();
+        await markPoolUsed(poolResult.recordId, runRecordId);
+
+        // Auto-approve hook in Video Run (skip Telegram approval flow)
+        const ATOKEN_POOL = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
+        if (ATOKEN_POOL && runRecordId !== 'unknown') {
+          try {
+            await fetch('https://api.airtable.com/v0/appsgjIdkpak2kaXq/tbltCYcVXrLYvyIJL/' + runRecordId, {
+              method: 'PATCH',
+              headers: { 'Authorization': 'Bearer ' + ATOKEN_POOL, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fields: { hook_approval: 'approved', hook_vid_approval: 'approved' } }),
+            });
+          } catch(e) { /* non-fatal */ }
+        }
+
+        // Notify user
+        const poolLabel = poolResult.hookType === 'speaking' ? '(speaking, audio baked)' : '(reaction, silent)';
+        if (TELEGRAM_BOT_TOKEN && chatId) {
+          try {
+            await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: chatId, text: '\u26A1 Hook from pool ' + poolLabel + ' \u2014 instant, no AI wait!' }),
+            });
+          } catch(e) { /* non-fatal */ }
+        }
+
+        return [{
+          json: {
+            hookReady: true,
+            hookSource: poolHookSource,
+            hookPoolRecordId: poolResult.recordId,
+            hookImageUrl: poolResult.sourceImageUrl,
+            chatId,
+            scenarioName,
+          },
+          binary: {
+            hookVideo: {
+              data: videoBuffer.toString('base64'),
+              mimeType: 'video/mp4',
+              fileName: 'hook_pool.mp4',
+            }
+          }
+        }];
+      } catch (poolErr) {
+        console.log('[Hook Pool] Error consuming pool hook: ' + poolErr.message + ' \u2014 falling through to normal generation');
+      }
+    } else {
+      console.log('[Hook Pool] No pool clip for scenario ' + scenarioRecordId + ' \u2014 generating on-demand');
+    }
+  }
+  // No pool available or pool error → fall through to normal on-demand generation below
+}
+
+// ═══════════════════════════════════════
+// SPEAKING HOOK — Step 1: Generate original image with kie.ai
+// Image gets approved on Telegram, then Img2Vid node converts via Sora 2 (speaking)
+// ═══════════════════════════════════════
+if (hookType === 'speaking') {
   if (!KIE_API_KEY) {
     return [{ json: { error: true, chatId, message: '❌ kie.ai API key not configured' } }];
   }
@@ -655,53 +887,56 @@ if (hookType === 'kling_lipsync') {
     return [{ json: { error: true, chatId, message: '❌ No girl_ref_url configured on concept.' } }];
   }
 
-  // Pose/style reference from Hook Girls catalog
+  // Pose/style reference — selfie energy (direct eye contact, slight lean toward camera)
   const poseCategory = selectPoseCategory(production);
-  const poseRefUrl = pickPoseRef(poseCategory);
+  const poseDesc = getPoseDescription(poseCategory, 'speaking');
 
   try {
     let imagePrompt = production.hookImagePrompt || '';
     if (!imagePrompt || imagePrompt.length < 10) {
-      // Lipsync hook = casual iPhone SELFIE taken by the girl herself, close-up face
-      const poseGuide = poseRefUrl ? ', in the same pose and vibe as the second reference image' : '';
+      // Lipsync hook = casual iPhone SELFIE, close-up face, direct camera gaze
       const selfieScenes = [
-        'Casual iPhone selfie of a girl lying in bed looking sad and upset, close-up face shot, messy hair, warm lamp lighting' + poseGuide,
-        'iPhone selfie of a girl on the couch at night looking hurt and teary-eyed, close-up, dim living room lighting' + poseGuide,
-        'Casual selfie of a girl sitting on the bathroom floor looking devastated, close-up face, harsh bathroom light' + poseGuide,
-        'iPhone selfie of a girl lying on pillows looking disappointed and tired, close-up face, soft warm lighting' + poseGuide,
-        'Selfie of a girl sitting at her desk at night looking upset, close-up face, screen glow on face, dark room' + poseGuide,
-        'Casual iPhone selfie of a girl in her car looking sad, close-up face shot, natural daylight through window' + poseGuide,
+        'iPhone 13 Pro selfie of a girl lying in bed, close-up face from slightly above, direct eye contact with camera, natural room lighting',
+        'iPhone 13 Pro selfie of a girl on the couch, close-up face, straight on, direct camera gaze, natural indoor lighting',
+        'iPhone 13 Pro selfie of a girl lying on pillows, close-up face from slightly above, slight lean toward camera, neutral lighting',
+        'iPhone 13 Pro selfie of a girl sitting at her desk, close-up face, subtle laptop glow, looking directly into camera',
       ];
       const scene = selfieScenes[Math.floor(Math.random() * selfieScenes.length)];
-      const refGuide = poseRefUrl
-        ? 'Use the FIRST reference for the girl\'s face ONLY. Use the SECOND reference for pose/vibe ONLY. Do NOT blend faces. '
-        : '';
-      imagePrompt = refGuide + scene + ', taken by herself, realistic candid photo, 9:16 vertical';
-    } else if (poseRefUrl) {
-      imagePrompt = 'Use the FIRST reference for the girl\'s face ONLY. Use the SECOND reference for pose/vibe ONLY. Do NOT blend faces. ' + imagePrompt;
+      imagePrompt = scene + ', ' + poseDesc + ', taken by herself, realistic candid photo, 9:16 vertical';
+    } else {
+      imagePrompt = imagePrompt + ', ' + poseDesc;
     }
 
-    const imageRefs = poseRefUrl ? [girlRefUrl, poseRefUrl] : [girlRefUrl];
+    // Context anchor phrase — always appended, anchors the scene narratively
+    const contextAnchors = [
+      'after reading a shocking message',
+      'right after seeing the text',
+      'in the moment she realizes what it says',
+    ];
+    imagePrompt = imagePrompt + ', ' + contextAnchors[Math.floor(Math.random() * contextAnchors.length)];
+
+    // Image references: girl face ref only
+    const imageRefs = [girlRefUrl];
 
     const generatedImageUrl = await withRetry(async () => {
-      const taskId = await kieGenerate(imagePrompt, imageRefs);
+      const taskId = await kieGenerate(imagePrompt, imageRefs, { timeOfDay, isSelfie: true });
       const url = await kiePoll(taskId);
       if (!url) throw new Error('kie.ai returned no image');
       return url;
-    }, 'kie.ai hook for kling_lipsync');
+    }, 'kie.ai hook for speaking');
 
     const imgRes = await fetch(generatedImageUrl);
     const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
 
     return [{
       json: {
-        hookReady: false, // needs Telegram approval → then Img2Vid (Kling Avatar)
-        hookSource: 'kling_lipsync',
+        hookReady: false, // needs Telegram approval → then Img2Vid (Sora 2)
+        hookSource: 'speaking',
         hookImageUrl: generatedImageUrl,
         hookPromptUsed: imagePrompt,
         hookPromptSource: 'kie_ai',
         hookPoseCategory: poseCategory,
-        hookPoseRef: poseRefUrl || null,
+        hookPoseDesc: poseDesc,
         envFrameUsed: false,
         chatId,
         scenarioName,
@@ -710,7 +945,7 @@ if (hookType === 'kling_lipsync') {
         hookImage: {
           data: imgBuffer.toString('base64'),
           mimeType: 'image/png',
-          fileName: 'hook_kling_lipsync.png',
+          fileName: 'hook_speaking.png',
         }
       }
     }];
@@ -723,17 +958,17 @@ if (hookType === 'kling_lipsync') {
         hookError: err.message,
         chatId,
         scenarioName,
-        warning: '⚠️ Kling lipsync hook image failed: ' + err.message + '. Skipping hook.',
+        warning: '⚠️ Speaking hook image failed: ' + err.message + '. Skipping hook.',
       }
     }];
   }
 }
 
 // ═══════════════════════════════════════
-// KLING MOTION — Step 1: Generate original image with kie.ai
-// Image gets approved on Telegram, then Img2Vid node converts via Seedance v1.5 Pro
+// REACTION HOOK — Step 1: Generate original image with kie.ai
+// Image gets approved on Telegram, then Img2Vid node converts via Sora 2 (reaction)
 // ═══════════════════════════════════════
-if (hookType === 'kling_motion') {
+if (hookType === 'reaction') {
   if (!KIE_API_KEY) {
     return [{ json: { error: true, chatId, message: '❌ kie.ai API key not configured' } }];
   }
@@ -743,40 +978,44 @@ if (hookType === 'kling_motion') {
     return [{ json: { error: true, chatId, message: '❌ No girl_ref_url configured on concept.' } }];
   }
 
-  // Pose/style reference from Hook Girls catalog
+  // Pose/style reference — candid energy (eyes slightly off-camera, internal reaction)
   const poseCategory = selectPoseCategory(production);
-  const poseRefUrl = pickPoseRef(poseCategory);
+  const poseDesc = getPoseDescription(poseCategory, 'reaction');
 
   try {
     let imagePrompt = production.hookImagePrompt || '';
     if (!imagePrompt || imagePrompt.length < 10) {
-      // Motion hook = candid photo taken by someone else, girl reading phone, NOT a selfie
-      const vibeGuide = poseRefUrl ? ', with similar intimate bedroom vibe as the second reference image' : '';
+      // Motion hook = candid photo, side/45-degree angle, NOT a selfie — no wide shots
       const candidScenes = [
-        'Candid iPhone photo of a girl sitting on bed reading her phone with a worried expression, phone screen not visible' + vibeGuide,
-        'Candid photo of a girl on the couch hunched over her phone looking upset, screen not visible, side angle' + vibeGuide,
-        'Candid iPhone photo of a girl sitting on the floor against the wall reading her phone, concerned face, screen not visible' + vibeGuide,
-        'Candid photo of a girl at a kitchen counter reading her phone looking hurt, screen not visible, natural light from window' + vibeGuide,
-        'Candid iPhone photo of a girl sitting cross-legged on bed looking at her phone with a sad expression, screen not visible' + vibeGuide,
-        'Candid photo of a girl lying sideways on couch reading her phone looking disappointed, screen not visible, dim room' + vibeGuide,
+        'Candid iPhone 13 Pro photo of a girl sitting on bed, side angle, phone held up after reading a message, screen not visible, mid shot',
+        'Candid photo of a girl on the couch, 45 degree angle, leaning slightly forward over her phone, screen not visible',
+        'Candid iPhone 13 Pro photo of a girl sitting on the floor against the wall, side profile angle, phone light on her face, screen not visible',
+        'Candid iPhone 13 Pro photo of a girl sitting cross-legged on bed, shot from the side, phone just lowered after reading, screen not visible',
+        'Candid photo of a girl lying sideways on couch, 45 degree shot from front, phone in hand, just finished reading, screen not visible, dim room',
       ];
       const scene = candidScenes[Math.floor(Math.random() * candidScenes.length)];
-      const refGuide = poseRefUrl
-        ? 'Use the FIRST reference for the girl\'s face ONLY. Use the SECOND reference for setting/vibe ONLY. Do NOT blend faces. '
-        : '';
-      imagePrompt = refGuide + scene + ', not a selfie, photo taken by someone else, realistic, warm indoor lighting, 9:16 vertical';
-    } else if (poseRefUrl) {
-      imagePrompt = 'Use the FIRST reference for the girl\'s face ONLY. Use the SECOND reference for setting/vibe ONLY. Do NOT blend faces. ' + imagePrompt;
+      imagePrompt = scene + ', ' + poseDesc + ', not a selfie, photo taken by someone else, realistic, natural indoor lighting, 9:16 vertical';
+    } else {
+      imagePrompt = imagePrompt + ', ' + poseDesc;
     }
 
-    const imageRefs = poseRefUrl ? [girlRefUrl, poseRefUrl] : [girlRefUrl];
+    // Context anchor phrase — always appended, anchors the scene narratively
+    const contextAnchors = [
+      'after reading a shocking message',
+      'right after seeing the text',
+      'in the moment she realizes what it says',
+    ];
+    imagePrompt = imagePrompt + ', ' + contextAnchors[Math.floor(Math.random() * contextAnchors.length)];
+
+    // Image references: girl face ref only
+    const imageRefs = [girlRefUrl];
 
     const generatedImageUrl = await withRetry(async () => {
-      const taskId = await kieGenerate(imagePrompt, imageRefs);
+      const taskId = await kieGenerate(imagePrompt, imageRefs, { timeOfDay });
       const url = await kiePoll(taskId);
       if (!url) throw new Error('kie.ai returned no image');
       return url;
-    }, 'kie.ai hook for kling_motion');
+    }, 'kie.ai hook for reaction');
 
     const imgRes = await fetch(generatedImageUrl);
     const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
@@ -784,12 +1023,12 @@ if (hookType === 'kling_motion') {
     return [{
       json: {
         hookReady: false, // needs Telegram approval → then Img2Vid (Seedance)
-        hookSource: 'kling_motion',
+        hookSource: 'reaction',
         hookImageUrl: generatedImageUrl,
         hookPromptUsed: imagePrompt,
         hookPromptSource: 'kie_ai',
         hookPoseCategory: poseCategory,
-        hookPoseRef: poseRefUrl || null,
+        hookPoseDesc: poseDesc,
         envFrameUsed: false,
         chatId,
         scenarioName,
@@ -798,7 +1037,7 @@ if (hookType === 'kling_motion') {
         hookImage: {
           data: imgBuffer.toString('base64'),
           mimeType: 'image/png',
-          fileName: 'hook_kling_motion.png',
+          fileName: 'hook_reaction.png',
         }
       }
     }];
@@ -811,7 +1050,7 @@ if (hookType === 'kling_motion') {
         hookError: err.message,
         chatId,
         scenarioName,
-        warning: '⚠️ Kling motion hook image failed: ' + err.message + '. Skipping hook.',
+        warning: '⚠️ Reaction hook image failed: ' + err.message + '. Skipping hook.',
       }
     }];
   }

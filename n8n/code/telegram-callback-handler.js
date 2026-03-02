@@ -126,24 +126,19 @@ function stripEmotionTags(text) {
   return text.replace(/\[(gasps|sighs|laughs|whispers|sarcastic|frustrated|curious|excited)\]\s*/gi, '').trim();
 }
 
-// ─── ElevenLabs v3 TTS with speed control ───
+// ─── ElevenLabs v3 TTS with native speed control ───
+// speed is passed at TOP LEVEL of request body (not in voice_settings)
+// ElevenLabs eleven_v3 natively adjusts voice cadence — sounds like real person speaking faster/slower
 async function elevenLabsTTS(text, speed) {
   text = stripEmojis(text);
   const url = 'https://api.elevenlabs.io/v1/text-to-speech/' + ELEVENLABS_VOICE_ID + '?output_format=' + ELEVENLABS_OUTPUT_FORMAT;
-  const body = {
-    text,
-    model_id: ELEVENLABS_MODEL,
-  };
-  if (speed && speed !== 1.0) {
-    body.voice_settings = { speed };
-  }
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'xi-api-key': ELEVENLABS_API_KEY,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ text, model_id: ELEVENLABS_MODEL, speed: speed || 1.0 }),
   });
   if (!response.ok) {
     const errorText = await response.text();
@@ -453,6 +448,9 @@ if (callbackData.startsWith('vpApprove_') || callbackData.startsWith('vpRedo_'))
   const stepLabels = {
     'hook_img': 'Hook image',
     'hook_vid': 'Hook video',
+    'hook_vid_0': 'Hook trim [0-3s]',
+    'hook_vid_1': 'Hook trim [1-4s]',
+    'hook_vid_2': 'Hook trim [2-5s]',
     'outro_img': 'Outro image',
     'outro_vid': 'Outro video',
     'vo': 'Voiceover',
@@ -462,12 +460,20 @@ if (callbackData.startsWith('vpApprove_') || callbackData.startsWith('vpRedo_'))
   const stepToField = {
     'hook_img': 'hook_approval',
     'hook_vid': 'hook_vid_approval',
+    'hook_vid_0': 'hook_vid_approval',
+    'hook_vid_1': 'hook_vid_approval',
+    'hook_vid_2': 'hook_vid_approval',
     'vo': 'vo_approval',
     'outro_img': 'outro_approval',
     'outro_vid': 'outro_vid_approval',
   };
   const approvalField = stepToField[step];
-  const approvalValue = isApprove ? 'approved' : 'redo';
+  // Trim-choice callbacks write 'approved_N' so img-to-video.js internal poll detects them.
+  // Standard approve writes 'approved' which Poll Hook Video Approval detects.
+  const trimChoiceMatch = step.match(/^hook_vid_(\d)$/);
+  const approvalValue = isApprove
+    ? (trimChoiceMatch ? 'approved_' + trimChoiceMatch[1] : 'approved')
+    : 'redo';
 
   if (callbackQueryId) {
     try {
@@ -485,7 +491,9 @@ if (callbackData.startsWith('vpApprove_') || callbackData.startsWith('vpRedo_'))
   if (TELEGRAM_BOT_TOKEN) {
     const emoji = isApprove ? '\u2705' : '\uD83D\uDD04';
     const msg = isApprove
-      ? emoji + ' ' + stepLabel + ' approved! Continuing pipeline...'
+      ? (trimChoiceMatch
+          ? emoji + ' ' + stepLabel + ' scelto! In attesa di conferma...'
+          : emoji + ' ' + stepLabel + ' approved! Continuing pipeline...')
       : emoji + ' Redoing ' + stepLabel + '...';
     try {
       await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
