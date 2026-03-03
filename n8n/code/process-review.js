@@ -134,9 +134,10 @@ async function deleteTelegramMessage(messageId) {
 function trimClip(videoPath, startSec, keepAudio) {
   // Step 1: re-encode full video to clean H.264 (proven to work — same as burnTimecode)
   const h264Path = videoPath.replace('.mp4', '_h264.mp4');
-  console.log('[review] Step 1: Re-encoding to H.264...');
+  const audioFlag = keepAudio ? '-c:a aac' : '-an';
+  console.log('[review] Step 1: Re-encoding to H.264 (audio: ' + (keepAudio ? 'keep' : 'strip') + ')...');
   execSync(
-    'ffmpeg -y -i "' + videoPath + '" -c:v libx264 -preset fast -crf 22 -pix_fmt yuv420p -an -movflags +faststart "' + h264Path + '"',
+    'ffmpeg -y -i "' + videoPath + '" -c:v libx264 -preset fast -crf 22 -pix_fmt yuv420p ' + audioFlag + ' -movflags +faststart "' + h264Path + '"',
     { timeout: 120000 }
   );
   const h264Size = fs.statSync(h264Path).size;
@@ -160,45 +161,26 @@ function trimClip(videoPath, startSec, keepAudio) {
   return outPath;
 }
 
-// ─── Upload via Telegram file hosting ───
-// Send file to Telegram as document → get direct download URL via getFile API
-// More reliable than third-party hosts: no expiry issues, direct binary URLs
+// ─── Upload to catbox.moe ───
 async function uploadFile(buffer, filename) {
-  const boundary = '----UploadBoundary' + Date.now();
-  const header =
-    '--' + boundary + '\r\n' +
-    'Content-Disposition: form-data; name="chat_id"\r\n\r\n' +
-    ADMIN_CHAT + '\r\n' +
-    '--' + boundary + '\r\n' +
-    'Content-Disposition: form-data; name="document"; filename="' + filename + '"\r\n' +
-    'Content-Type: video/mp4\r\n\r\n';
-  const prefix = Buffer.from(header);
+  const boundary = '----CatboxBoundary' + Date.now();
+  let parts = '';
+  parts += '--' + boundary + '\r\nContent-Disposition: form-data; name="reqtype"\r\n\r\nfileupload\r\n';
+  parts += '--' + boundary + '\r\nContent-Disposition: form-data; name="fileToUpload"; filename="' + filename + '"\r\nContent-Type: video/mp4\r\n\r\n';
+  const prefix = Buffer.from(parts);
   const suffix = Buffer.from('\r\n--' + boundary + '--\r\n');
   const body = Buffer.concat([prefix, buffer, suffix]);
 
-  console.log('[review] Uploading to Telegram (' + buffer.length + ' bytes)...');
-  const sendRes = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendDocument', {
+  console.log('[review] Uploading to catbox.moe (' + buffer.length + ' bytes)...');
+  const res = await fetch('https://catbox.moe/user/api.php', {
     method: 'POST',
     headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary },
     body: body,
   });
-  const sendData = await sendRes.json();
-  if (!sendData.ok) throw new Error('Telegram sendDocument failed: ' + JSON.stringify(sendData));
-
-  const fileId = sendData.result.document.file_id;
-  const msgId = sendData.result.message_id;
-
-  // Delete the temp message to keep chat clean
-  await deleteTelegramMessage(msgId);
-
-  // Get direct download URL via getFile API
-  const fileRes = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/getFile?file_id=' + fileId);
-  const fileData = await fileRes.json();
-  if (!fileData.ok) throw new Error('Telegram getFile failed: ' + JSON.stringify(fileData));
-
-  const directUrl = 'https://api.telegram.org/file/bot' + PREP01_BOT + '/' + fileData.result.file_path;
-  console.log('[review] Telegram file URL: ' + directUrl);
-  return directUrl;
+  const url = (await res.text()).trim();
+  if (!url.startsWith('http')) throw new Error('Catbox upload failed: ' + url.slice(0, 200));
+  console.log('[review] Catbox URL: ' + url);
+  return url;
 }
 
 // ─── Airtable helpers ───
@@ -225,6 +207,21 @@ async function poolCreate(fields) {
     method: 'POST',
     body: JSON.stringify({ records: [{ fields: fields }] }),
   });
+}
+
+async function uploadAttachment(recordId, fieldName, buffer, filename) {
+  const url = 'https://content.airtable.com/v0/' + ABASE + '/' + recordId + '/' + fieldName + '/uploadAttachment';
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + ATOKEN,
+      'Content-Type': 'video/mp4',
+      'Content-Disposition': 'attachment; filename="' + filename + '"',
+    },
+    body: buffer,
+  });
+  if (!res.ok) throw new Error('Airtable upload: ' + res.status + ' ' + (await res.text()).slice(0, 200));
+  return res.json();
 }
 
 // ─── Counter message helpers ───
@@ -439,6 +436,7 @@ if (callbackQuery) {
       fs.writeFileSync(rawPath, videoBuffer);
 
       const batchId = 'gen_' + new Date().toISOString().slice(0, 10) + '_' + queueRecordId.slice(-5);
+      let lastClipError = '';
 
       for (const idx of approvedIndices) {
         const ts = timestamps[idx];
@@ -447,17 +445,24 @@ if (callbackQuery) {
         try {
           const trimPath = trimClip(rawPath, ts, hookMode === 'speaking');
           const clipBuffer = fs.readFileSync(trimPath);
-          const clipUrl = await uploadFile(clipBuffer, 'hook_' + batchId + '_' + idx + '.mp4');
-          await poolCreate({
+
+          // Create pool record first (without video_file)
+          const poolResult = await poolCreate({
             batch_id: batchId, concept_id: conceptId, concept_name: conceptName,
             hook_type: hookMode, girl_ref_url: girlRefUrl, source_image_url: sourceImageUrl,
-            source_video_url: videoUrl, video_file: [{ url: clipUrl }],
+            source_video_url: videoUrl,
             clip_start_sec: ts, clip_duration_sec: CLIP_DURATION, hook_text: ht,
             scenario_id: scenarioId, status: 'ready', created_at: new Date().toISOString(),
           });
+          const poolRecordId = poolResult.records[0].id;
+
+          // Upload clip directly to Airtable attachment field
+          await uploadAttachment(poolRecordId, 'video_file', clipBuffer, 'hook_' + batchId + '_' + idx + '.mp4');
+
           clipsSaved++;
           try { fs.unlinkSync(trimPath); } catch (e) {}
         } catch (e) {
+          lastClipError = e.message;
           console.log('[review] clips_all save error clip ' + idx + ': ' + e.message);
         }
       }
@@ -471,7 +476,7 @@ if (callbackQuery) {
         for (const mid of allMsgIds) { await deleteTelegramMessage(mid); }
         await updateCounterMessage(clipsSaved);
       } else {
-        await sendTelegram('No clips saved (upload failed). Reply "all" to retry or "skip".');
+        await sendTelegram('Upload failed: ' + (lastClipError || 'unknown') + '\nReply "all" to retry or "skip".');
       }
     } catch (e) {
       console.log('[review] clips_all error: ' + e.message);

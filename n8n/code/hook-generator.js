@@ -78,8 +78,6 @@ const ADMIN_CHAT = '5120450288';
 const KIE_API_KEY = '7670ade582cc72601f388dbdc0525b9e';
 const KIE_API_URL = 'https://api.kie.ai/api/v1/jobs';
 
-const CLIP_DURATION = 3;
-
 // ─── Quota constants ───
 const VIDEOS_PER_DAY = 10;
 const BUFFER_DAYS = 2;
@@ -102,11 +100,11 @@ const PROVIDERS = [
     authPrefix: 'Bearer ',
     buildBody: function(prompt, imageUrl) {
       return {
-        model: 'sora-2',
+        model: 'sora-2-image-to-video',
         input: {
           prompt: prompt,
           image_urls: imageUrl ? [imageUrl] : [],
-          n_frames: 15,
+          n_frames: '15',
           aspect_ratio: 'portrait',
           remove_watermark: true,
         },
@@ -253,17 +251,49 @@ async function deleteTelegramMessage(messageId) {
 
 async function sendTelegramPhoto(photoUrl, caption, replyMarkup) {
   try {
-    const body = { chat_id: ADMIN_CHAT, photo: photoUrl };
-    if (caption) body.caption = caption;
-    if (replyMarkup) body.reply_markup = replyMarkup;
-    const res = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendPhoto', {
+    // First try URL-based send (fast, no download needed)
+    const urlBody = { chat_id: ADMIN_CHAT, photo: photoUrl };
+    if (caption) urlBody.caption = caption;
+    if (replyMarkup) urlBody.reply_markup = replyMarkup;
+    const urlRes = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendPhoto', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(urlBody),
     });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json.result ? json.result.message_id : null;
+    const urlJson = await urlRes.json();
+    if (urlJson.ok) return urlJson.result.message_id;
+
+    // URL failed — download image and upload as file
+    console.log('[hookgen] URL-based photo failed: ' + (urlJson.description || urlRes.status) + ' — downloading and uploading as file');
+    const imgRes = await fetch(photoUrl);
+    if (!imgRes.ok) {
+      console.log('[hookgen] Image download failed: ' + imgRes.status);
+      return null;
+    }
+    const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+
+    const boundary = '----HookGenPhotoBoundary' + Date.now();
+    let parts = '';
+    parts += '--' + boundary + '\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n' + ADMIN_CHAT + '\r\n';
+    if (caption) parts += '--' + boundary + '\r\nContent-Disposition: form-data; name="caption"\r\n\r\n' + caption + '\r\n';
+    if (replyMarkup) parts += '--' + boundary + '\r\nContent-Disposition: form-data; name="reply_markup"\r\n\r\n' + JSON.stringify(replyMarkup) + '\r\n';
+    parts += '--' + boundary + '\r\nContent-Disposition: form-data; name="photo"; filename="hook_image.png"\r\nContent-Type: image/png\r\n\r\n';
+
+    const prefix = Buffer.from(parts);
+    const suffix = Buffer.from('\r\n--' + boundary + '--\r\n');
+    const body = Buffer.concat([prefix, imgBuf, suffix]);
+
+    const uploadRes = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendPhoto', {
+      method: 'POST',
+      headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary },
+      body: body,
+    });
+    const uploadJson = await uploadRes.json();
+    if (!uploadJson.ok) {
+      console.log('[hookgen] Photo upload also failed: ' + JSON.stringify(uploadJson));
+      return null;
+    }
+    return uploadJson.result.message_id;
   } catch (e) {
     console.log('[hookgen] Telegram photo send error: ' + e.message);
     return null;
@@ -293,18 +323,29 @@ async function kiePoll(taskId) {
   const deadline = Date.now() + TIMEOUT;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, POLL_INTERVAL));
+    let data;
     try {
       const res = await fetch(KIE_API_URL + '/recordInfo?taskId=' + taskId, {
         headers: { 'Authorization': 'Bearer ' + KIE_API_KEY },
       });
       if (!res.ok) continue;
-      const data = await res.json();
-      const state = data.data && data.data.state;
-      if (state === 'success') return JSON.parse(data.data.resultJson).resultUrls[0];
-      if (state === 'fail') throw new Error(data.data.failMsg || 'kie.ai generation failed');
+      data = await res.json();
     } catch (err) {
-      if (err.message.includes('failed') || err.message.includes('kie.ai')) throw err;
+      // Network error — retry next poll
+      continue;
     }
+    const state = data.data && data.data.state;
+    if (state === 'success') {
+      try {
+        const resultJson = JSON.parse(data.data.resultJson);
+        const url = resultJson.resultUrls && resultJson.resultUrls[0];
+        if (!url) throw new Error('kie.ai success but no resultUrls in response: ' + JSON.stringify(resultJson).slice(0, 500));
+        return url;
+      } catch (parseErr) {
+        throw new Error('kie.ai success but failed to parse result: ' + parseErr.message + ' | raw resultJson: ' + String(data.data.resultJson).slice(0, 500));
+      }
+    }
+    if (state === 'fail') throw new Error(data.data.failMsg || 'kie.ai generation failed');
   }
   throw new Error('kie.ai poll timeout after 120s');
 }
@@ -325,122 +366,6 @@ function burnTimecode(videoPath) {
     console.log('[hookgen] burnTimecode failed (drawtext not available?): ' + e.message);
     return null; // caller will use raw video
   }
-}
-
-// ─── FFmpeg trim ───
-function trimClip(videoPath, startSec, keepAudio) {
-  const outPath = videoPath.replace('.mp4', '_trim_' + startSec + '.mp4');
-  const vf = 'trim=start=' + startSec + ':duration=' + CLIP_DURATION + ',setpts=PTS-STARTPTS';
-  let cmd = 'ffmpeg -y -i "' + videoPath + '" -vf "' + vf + '" -c:v libx264 -preset fast -crf 22 -pix_fmt yuv420p -an "' + outPath + '"';
-  console.log('[hookgen] FFmpeg cmd: ' + cmd);
-  try {
-    execSync(cmd, { timeout: 60000 });
-  } catch (e) {
-    console.log('[hookgen] FFmpeg stderr: ' + (e.stderr ? e.stderr.toString().slice(-500) : e.message));
-    throw e;
-  }
-  const size = fs.statSync(outPath).size;
-  console.log('[hookgen] Trimmed clip size: ' + size + ' bytes');
-  if (size < 5000) {
-    throw new Error('Trimmed clip too small (' + size + ' bytes) — likely corrupt');
-  }
-  return outPath;
-}
-
-// ─── Upload with multi-host fallback ───
-function uploadToHost(hostname, uploadPath, buffer, filename, mimeType, parseResponse) {
-  return new Promise((resolve, reject) => {
-    const boundary = '----UploadBoundary' + Date.now();
-    const bodyBuf = Buffer.concat([
-      Buffer.from('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="' + filename + '"\r\nContent-Type: ' + mimeType + '\r\n\r\n'),
-      buffer,
-      Buffer.from('\r\n--' + boundary + '--\r\n'),
-    ]);
-    const req = _https.request({
-      hostname, path: uploadPath, method: 'POST',
-      headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary, 'Content-Length': bodyBuf.length },
-    }, (res) => {
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end', () => {
-        try {
-          const raw = Buffer.concat(chunks).toString().trim();
-          const url = parseResponse ? parseResponse(raw, res.statusCode) : raw;
-          if (url && url.startsWith('http')) resolve(url);
-          else reject(new Error(hostname + ': unexpected response: ' + raw.slice(0, 100)));
-        } catch (e) { reject(e); }
-      });
-    });
-    req.on('error', reject);
-    req.write(bodyBuf);
-    req.end();
-  });
-}
-
-async function uploadFile(buffer, filename) {
-  const mimeType = 'video/mp4';
-  const hosts = [
-    {
-      name: 'tmpfiles.org',
-      fn: () => uploadToHost('tmpfiles.org', '/api/v1/upload', buffer, filename, mimeType, (raw) => {
-        const json = JSON.parse(raw);
-        if (json.status === 'success' && json.data && json.data.url) {
-          return json.data.url.replace('https://tmpfiles.org/', 'https://tmpfiles.org/dl/');
-        }
-        throw new Error('tmpfiles.org: ' + raw.slice(0, 100));
-      }),
-    },
-    {
-      name: '0x0.st',
-      fn: () => uploadToHost('0x0.st', '/', buffer, filename, mimeType, (raw, status) => {
-        if (status >= 400) throw new Error('0x0.st: HTTP ' + status);
-        return raw;
-      }),
-    },
-    {
-      name: 'catbox.moe',
-      fn: () => {
-        return new Promise((resolve, reject) => {
-          const boundary = '----UploadBoundary' + Date.now();
-          const bodyBuf = Buffer.concat([
-            Buffer.from('--' + boundary + '\r\nContent-Disposition: form-data; name="reqtype"\r\n\r\nfileupload\r\n'),
-            Buffer.from('--' + boundary + '\r\nContent-Disposition: form-data; name="fileToUpload"; filename="' + filename + '"\r\nContent-Type: ' + mimeType + '\r\n\r\n'),
-            buffer,
-            Buffer.from('\r\n--' + boundary + '--\r\n'),
-          ]);
-          const req = _https.request({
-            hostname: 'catbox.moe', path: '/user/api.php', method: 'POST',
-            headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary, 'Content-Length': bodyBuf.length },
-          }, (res) => {
-            const chunks = [];
-            res.on('data', c => chunks.push(c));
-            res.on('end', () => {
-              const url = Buffer.concat(chunks).toString().trim();
-              if (url.startsWith('https://')) resolve(url);
-              else reject(new Error('catbox.moe: ' + url.slice(0, 100)));
-            });
-          });
-          req.on('error', reject);
-          req.write(bodyBuf);
-          req.end();
-        });
-      },
-    },
-  ];
-
-  const errors = [];
-  for (const host of hosts) {
-    try {
-      console.log('[hookgen] Trying upload to ' + host.name + '...');
-      const url = await host.fn();
-      console.log('[hookgen] Uploaded to ' + host.name + ': ' + url);
-      return url;
-    } catch (e) {
-      console.log('[hookgen] ' + host.name + ' failed: ' + e.message);
-      errors.push(host.name + ': ' + e.message);
-    }
-  }
-  throw new Error('All upload hosts failed: ' + errors.join('; '));
 }
 
 // ─── Airtable helpers ───
@@ -481,13 +406,6 @@ async function queueDelete(recordIds) {
   }
 }
 
-async function poolCreate(fields) {
-  return airtableFetch(HOOK_POOL_TABLE, {
-    method: 'POST',
-    body: JSON.stringify({ records: [{ fields: fields }] }),
-  });
-}
-
 // ─── Generic provider submit ───
 async function providerSubmit(provider, prompt, imageUrl) {
   const body = provider.buildBody(prompt, imageUrl);
@@ -524,7 +442,8 @@ async function providerCheckStatus(provider, taskId) {
     return { status: 'completed', videoUrl: videoUrl, error: null };
   }
   if (provider.isFailed(status)) {
-    return { status: 'failed', videoUrl: null, error: provider.name + ' task failed' };
+    const failDetail = (data.data && data.data.failMsg) || (data.data && data.data.error) || (data.message) || '';
+    return { status: 'failed', videoUrl: null, error: provider.name + ' task failed' + (failDetail ? ': ' + failDetail : '') };
   }
   return { status: 'generating', videoUrl: null, error: null };
 }
@@ -638,7 +557,7 @@ try {
 // Count active queue entries (not yet done or failed)
 let pendingRecords = [];
 try {
-  const formula = encodeURIComponent("AND({status}!='clips_saved',{status}!='failed')");
+  const formula = encodeURIComponent("AND({status}!='clips_saved',{status}!='failed',{task_id}!='__counter__')");
   const data = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + formula);
   pendingRecords = data.records || [];
 } catch (e) {
@@ -650,7 +569,6 @@ const submittedOrGenerating = pendingRecords.filter(function(r) {
   return r.fields.status === 'submitted' || r.fields.status === 'generating';
 });
 const activeSubmissions = submittedOrGenerating.length;
-const availableSlots = MAX_CONCURRENT - activeSubmissions;
 
 console.log('[hookgen] Pool ready: ' + readyCount + '/' + TARGET_HOOKS + ', pending: ' + pendingCount + ', active subs: ' + activeSubmissions);
 
@@ -696,12 +614,19 @@ for (const record of submittedOrGenerating) {
     continue;
   }
 
-  // Check timeout
+  // Check timeout — reset to image_approved to retry, not regenerate image
   const submittedAt = f.submitted_at ? new Date(f.submitted_at).getTime() : 0;
   if (submittedAt > 0 && (Date.now() - submittedAt) > GENERATION_TIMEOUT_MS) {
-    await queueUpdate(record.id, { status: 'failed', error_message: 'Timeout after 20 min' });
+    const currentRetries = parseInt(f.error_message && f.error_message.match(/retries:(\d+)/) && f.error_message.match(/retries:(\d+)/)[1]) || 0;
+    const newRetries = currentRetries + 1;
+    if (newRetries >= 5) {
+      await queueUpdate(record.id, { status: 'failed', error_message: 'Timeout | retries:' + newRetries + ' (max reached)' });
+      console.log('[hookgen] Task ' + taskId + ' timed out permanently after ' + newRetries + ' retries');
+    } else {
+      await queueUpdate(record.id, { status: 'image_approved', task_id: '', provider: '', error_message: 'Timeout | retries:' + newRetries, submitted_at: '' });
+      console.log('[hookgen] Task ' + taskId + ' timed out, reset to image_approved (retry ' + newRetries + '/5)');
+    }
     newlyFailed++;
-    console.log('[hookgen] Task ' + taskId + ' timed out');
     continue;
   }
 
@@ -718,12 +643,29 @@ for (const record of submittedOrGenerating) {
       newlyCompleted++;
       console.log('[hookgen] Task ' + taskId + ' completed: ' + statusResult.videoUrl);
     } else if (statusResult.status === 'failed') {
-      await queueUpdate(record.id, {
-        status: 'failed',
-        error_message: statusResult.error || 'Provider reported failure',
-      });
-      newlyFailed++;
-      console.log('[hookgen] Task ' + taskId + ' failed: ' + statusResult.error);
+      // Retry: reset to image_approved so Phase 1.5 resubmits with SAME image
+      // Only truly fail after 5 retries
+      const currentRetries = parseInt(f.error_message && f.error_message.match(/retries:(\d+)/) && f.error_message.match(/retries:(\d+)/)[1]) || 0;
+      const newRetries = currentRetries + 1;
+      const failReason = statusResult.error || 'Provider reported failure';
+      if (newRetries >= 5) {
+        await queueUpdate(record.id, {
+          status: 'failed',
+          error_message: failReason + ' | retries:' + newRetries + ' (max reached)',
+        });
+        newlyFailed++;
+        console.log('[hookgen] Task ' + taskId + ' failed permanently after ' + newRetries + ' retries');
+      } else {
+        await queueUpdate(record.id, {
+          status: 'image_approved',
+          task_id: '',
+          provider: '',
+          error_message: failReason + ' | retries:' + newRetries,
+          submitted_at: '',
+        });
+        newlyFailed++;
+        console.log('[hookgen] Task ' + taskId + ' failed, reset to image_approved (retry ' + newRetries + '/5): ' + failReason);
+      }
     } else if (statusResult.status === 'generating' && f.status === 'submitted') {
       await queueUpdate(record.id, { status: 'generating' });
     }
@@ -756,10 +698,10 @@ if (currentActiveSlots < 0) currentActiveSlots = 0;
 try {
   const imgApprovedFormula = encodeURIComponent("{status}='image_approved'");
   const imgApprovedData = await airtableFetch(
-    QUEUE_TABLE + '?filterByFormula=' + imgApprovedFormula +
-    '&sort%5B0%5D%5Bfield%5D=created_at&sort%5B0%5D%5Bdirection%5D=asc'
+    QUEUE_TABLE + '?filterByFormula=' + imgApprovedFormula
   );
   const imgApprovedRecords = imgApprovedData.records || [];
+  console.log('[hookgen] Phase 1.5: Found ' + imgApprovedRecords.length + ' approved images, slots: ' + currentActiveSlots + '/' + MAX_CONCURRENT);
 
   for (const record of imgApprovedRecords) {
     if (currentActiveSlots >= MAX_CONCURRENT) {
@@ -775,6 +717,7 @@ try {
     const providerIndex = (staticData.lastProviderIndex || 0) % enabledProviders.length;
     const provider = enabledProviders[providerIndex];
     staticData.lastProviderIndex = providerIndex + 1;
+    console.log('[hookgen] Phase 1.5: Submitting to ' + provider.name + ' for record ' + record.id);
 
     try {
       const taskId = await providerSubmit(provider, motionPrompt, kieImageUrl);
@@ -789,11 +732,51 @@ try {
       console.log('[hookgen] Phase 1.5: Submitted approved image to ' + provider.name + ' task ' + taskId);
     } catch (e) {
       console.log('[hookgen] Phase 1.5: Submit error for ' + record.id + ': ' + e.message);
+      tickResult.phase1_5_error = e.message;
       // Don't fail the record — retry next tick
     }
   }
 } catch (e) {
   console.log('[hookgen] Phase 1.5: Approved query error: ' + e.message);
+  tickResult.phase1_5_error = 'query: ' + e.message;
+}
+
+// ─── Recovery: Re-send stuck image_approval records (no telegram_msg_id) ───
+try {
+  const stuckFormula = encodeURIComponent("AND({status}='image_approval',OR({telegram_msg_id}='',{telegram_msg_id}='[]'))");
+  const stuckData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + stuckFormula);
+  const stuckRecords = stuckData.records || [];
+
+  for (const record of stuckRecords) {
+    const f = record.fields;
+    const kieImageUrl = f.source_image_url;
+    const conceptName = f.concept_name || '';
+    const hookMode = f.hook_mode || 'speaking';
+    const modeLabel = hookMode === 'speaking' ? 'Speaking' : 'Reaction';
+
+    let hookTexts = [];
+    try { hookTexts = JSON.parse(f.hook_texts_json || '[]'); } catch (e) {}
+    const caption = 'Hook image \u2014 ' + conceptName + ' (' + modeLabel + ')\n' +
+      hookTexts.map(function(t, i) { return (i + 1) + '. "' + t.slice(0, 60) + '"'; }).join('\n');
+    const replyMarkup = {
+      inline_keyboard: [[
+        { text: '\u2705 Approve', callback_data: 'hookImg_ok_' + record.id },
+        { text: '\uD83D\uDD04 Redo', callback_data: 'hookImg_redo_' + record.id },
+      ]],
+    };
+
+    const msgId = await sendTelegramPhoto(kieImageUrl, caption, replyMarkup);
+    if (msgId) {
+      await queueUpdate(record.id, { telegram_msg_id: JSON.stringify([msgId]) });
+      console.log('[hookgen] Phase 1.5: Re-sent stuck image for ' + conceptName);
+    } else {
+      // Image URL expired — mark for full redo
+      await queueUpdate(record.id, { status: 'image_redo' });
+      console.log('[hookgen] Phase 1.5: Image URL expired for ' + conceptName + ', marking redo');
+    }
+  }
+} catch (e) {
+  console.log('[hookgen] Phase 1.5: Stuck recovery error: ' + e.message);
 }
 
 // ─── Regenerate redo'd images ───
@@ -968,297 +951,8 @@ try {
 tickResult.phase2 = { delivered: delivered };
 
 
-// ═══════════════════════════════════════
-// PHASE 3 — SKIPPED (moved to webhook)
-// Reviews are now processed instantly via Telegram Webhook Trigger
-// in the separate "Hook Review" workflow (process-review.js)
-// ═══════════════════════════════════════
-
-let reviewsProcessed = 0; // kept for output compatibility
-/* REMOVED — getUpdates conflicts with webhook
-  const res = await fetch(
-    'https://api.telegram.org/bot' + PREP01_BOT + '/getUpdates?offset=' + staticData.hookGenOffset + '&timeout=5'
-  );
-  const updateData = await res.json();
-  const updates = updateData.result || [];
-
-  for (const update of updates) {
-    staticData.hookGenOffset = update.update_id + 1; // always advance offset
-
-    // Only process text messages from admin
-    if (!update.message || !update.message.text || update.message.chat.id.toString() !== ADMIN_CHAT) continue;
-
-    const userText = update.message.text.trim();
-
-    // Find the oldest record waiting for review
-    let reviewRecord = null;
-    try {
-      const formula = encodeURIComponent("OR({status}='review_sent',{status}='clips_preview_sent')");
-      const qData = await airtableFetch(
-        QUEUE_TABLE + '?filterByFormula=' + formula +
-        '&sort%5B0%5D%5Bfield%5D=submitted_at&sort%5B0%5D%5Bdirection%5D=asc&maxRecords=1'
-      );
-      if (qData.records && qData.records.length > 0) reviewRecord = qData.records[0];
-    } catch (e) {
-      console.log('[hookgen] Review query error: ' + e.message);
-      continue;
-    }
-
-    if (!reviewRecord) {
-      // No pending review — ignore message
-      continue;
-    }
-
-    const rf = reviewRecord.fields;
-    const reviewStatus = rf.status;
-
-    // ─── WAITING FOR TIMESTAMPS ───
-    if (reviewStatus === 'review_sent') {
-      if (userText.toLowerCase() === 'skip') {
-        await queueUpdate(reviewRecord.id, { status: 'failed', error_message: 'Skipped by user' });
-        // Delete video + text messages
-        let skipMsgIds = [];
-        try { skipMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
-        for (const mid of skipMsgIds) { await deleteTelegramMessage(mid); }
-
-        let skipRemaining = 0;
-        try {
-          const remFormula = encodeURIComponent("OR({status}='review_sent',{status}='clips_preview_sent')");
-          const remData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + remFormula + '&fields%5B%5D=status');
-          skipRemaining = (remData.records || []).length;
-        } catch (e) {}
-        const skipMsg = skipRemaining > 0
-          ? 'Skipped. Next video ready (' + skipRemaining + ' left)'
-          : 'Skipped. No more videos to review.';
-        await sendTelegram(skipMsg);
-        reviewsProcessed++;
-        continue;
-      }
-
-      // Parse timestamps
-      const timestamps = userText.split(/[\s,]+/).map(function(t) { return parseFloat(t); }).filter(function(t) { return !isNaN(t); });
-      let hookTexts = [];
-      try { hookTexts = JSON.parse(rf.hook_texts_json || '[]'); } catch (e) {}
-      let scenarioIds = [];
-      try { scenarioIds = JSON.parse(rf.scenario_ids_json || '[]'); } catch (e) {}
-
-      if (timestamps.length !== hookTexts.length) {
-        await sendTelegram('Expected ' + hookTexts.length + ' timestamps, got ' + timestamps.length + '. Try again or "skip".');
-        continue;
-      }
-
-      const validTs = timestamps.every(function(t) { return t >= 0 && t <= 12; });
-      if (!validTs) {
-        await sendTelegram('Timestamps must be 0-12 (each clip = 3s from start). Decimals OK (e.g. 0.5). Try again or "skip".');
-        continue;
-      }
-
-      // Download video and trim clips
-      const videoUrl = rf.video_url;
-      const hookMode = rf.hook_mode || 'speaking';
-      const isSpeaking = hookMode === 'speaking';
-
-      try {
-        const vidRes = await fetch(videoUrl);
-        if (!vidRes.ok) throw new Error('Video download failed: ' + vidRes.status);
-        const videoBuffer = Buffer.from(await vidRes.arrayBuffer());
-        const rawPath = '/tmp/hookgen_raw_' + Date.now() + '.mp4';
-        fs.writeFileSync(rawPath, videoBuffer);
-
-        // Collect all message IDs (video + text from Phase 2 + clips + prompt)
-        let allMsgIds = [];
-        try { allMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
-
-        for (let ci = 0; ci < timestamps.length; ci++) {
-          const ts = timestamps[ci];
-          const ht = hookTexts[ci] || '';
-          try {
-            const trimPath = trimClip(rawPath, ts, isSpeaking);
-            const clipBuffer = fs.readFileSync(trimPath);
-            const audioLabel = isSpeaking ? '' : ' (silent)';
-            const clipMsgId = await sendTelegramVideo(clipBuffer, 'Clip ' + (ci + 1) + '/' + timestamps.length + audioLabel + ': "' + ht.slice(0, 50) + '"');
-            if (clipMsgId) allMsgIds.push(clipMsgId);
-            try { fs.unlinkSync(trimPath); } catch (e) {}
-          } catch (e) {
-            await sendTelegram('Clip ' + (ci + 1) + ' trim failed: ' + e.message);
-          }
-        }
-
-        try { fs.unlinkSync(rawPath); } catch (e) {}
-
-        const promptMsgId = await sendTelegram('Reply "all" or "1 3" to approve, or "skip"');
-        if (promptMsgId) allMsgIds.push(promptMsgId);
-
-        await queueUpdate(reviewRecord.id, {
-          status: 'clips_preview_sent',
-          timestamps_json: JSON.stringify(timestamps),
-          telegram_msg_id: JSON.stringify(allMsgIds),
-        });
-        reviewsProcessed++;
-
-      } catch (e) {
-        console.log('[hookgen] Trim error: ' + e.message);
-        await queueUpdate(reviewRecord.id, { status: 'failed', error_message: 'Trim error: ' + e.message });
-        await sendTelegram('Video processing failed: ' + e.message);
-      }
-
-      continue;
-    }
-
-    // ─── WAITING FOR APPROVAL ───
-    if (reviewStatus === 'clips_preview_sent') {
-      if (userText.toLowerCase() === 'skip') {
-        await queueUpdate(reviewRecord.id, { status: 'failed', error_message: 'Skipped at approval' });
-        // Delete all messages for this video
-        let skipMsgIds = [];
-        try { skipMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
-        for (const mid of skipMsgIds) { await deleteTelegramMessage(mid); }
-
-        // Count remaining
-        let skipRemaining = 0;
-        try {
-          const remFormula = encodeURIComponent("OR({status}='review_sent',{status}='clips_preview_sent')");
-          const remData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + remFormula + '&fields%5B%5D=status');
-          skipRemaining = (remData.records || []).length;
-        } catch (e) {}
-        const skipMsg = skipRemaining > 0
-          ? 'Skipped. Next video ready (' + skipRemaining + ' left)'
-          : 'Skipped. No more videos to review.';
-        await sendTelegram(skipMsg);
-        reviewsProcessed++;
-        continue;
-      }
-
-      let timestamps = [];
-      try { timestamps = JSON.parse(rf.timestamps_json || '[]'); } catch (e) {}
-      let hookTexts = [];
-      try { hookTexts = JSON.parse(rf.hook_texts_json || '[]'); } catch (e) {}
-      let scenarioIds = [];
-      try { scenarioIds = JSON.parse(rf.scenario_ids_json || '[]'); } catch (e) {}
-
-      // Parse approval
-      let approvedIndices;
-      if (userText.toLowerCase() === 'all') {
-        approvedIndices = hookTexts.map(function(_, i) { return i; });
-      } else {
-        approvedIndices = userText.split(/[\s,]+/)
-          .map(function(n) { return parseInt(n) - 1; }) // user uses 1-based
-          .filter(function(n) { return n >= 0 && n < hookTexts.length; });
-      }
-
-      if (approvedIndices.length === 0) {
-        await sendTelegram('No valid clips selected. Reply "all", "1 3", or "skip".');
-        continue;
-      }
-
-      // Download video again for trimming
-      const videoUrl = rf.video_url;
-      const hookMode = rf.hook_mode || 'speaking';
-      const isSpeaking = hookMode === 'speaking';
-      const conceptId = rf.concept_id || '';
-      const conceptName = rf.concept_name || '';
-      const girlRefUrl = rf.girl_ref_url || '';
-      const sourceImageUrl = rf.source_image_url || '';
-      const motionPrompt = rf.motion_prompt || '';
-
-      let clipsSaved = 0;
-
-      try {
-        const vidRes = await fetch(videoUrl);
-        if (!vidRes.ok) throw new Error('Video re-download failed: ' + vidRes.status);
-        const videoBuffer = Buffer.from(await vidRes.arrayBuffer());
-        const rawPath = '/tmp/hookgen_approve_' + Date.now() + '.mp4';
-        fs.writeFileSync(rawPath, videoBuffer);
-
-        const batchId = 'gen_' + new Date().toISOString().slice(0, 10) + '_' + reviewRecord.id.slice(-5);
-
-        for (const idx of approvedIndices) {
-          const ts = timestamps[idx];
-          const ht = hookTexts[idx] || '';
-          const scenarioId = scenarioIds[idx] || '';
-
-          try {
-            const trimPath = trimClip(rawPath, ts, isSpeaking);
-            const clipBuffer = fs.readFileSync(trimPath);
-            const clipUrl = await uploadFile(clipBuffer, 'hook_' + batchId + '_' + idx + '.mp4');
-
-            await poolCreate({
-              batch_id: batchId,
-              concept_id: conceptId,
-              concept_name: conceptName,
-              hook_type: hookMode,
-              girl_ref_url: girlRefUrl,
-              source_image_url: sourceImageUrl,
-              source_video_url: videoUrl,
-              video_file: [{ url: clipUrl }],
-              clip_start_sec: ts,
-              clip_duration_sec: CLIP_DURATION,
-              hook_text: ht,
-              scenario_id: scenarioId,
-              status: 'ready',
-              created_at: new Date().toISOString(),
-            });
-
-            clipsSaved++;
-            console.log('[hookgen] Saved clip: scenario ' + scenarioId + ' at ' + ts + 's');
-            try { fs.unlinkSync(trimPath); } catch (e) {}
-          } catch (e) {
-            console.log('[hookgen] Save error clip ' + idx + ': ' + e.message);
-            await sendTelegram('Clip ' + (idx + 1) + ' save failed: ' + e.message);
-          }
-        }
-
-        try { fs.unlinkSync(rawPath); } catch (e) {}
-
-        // If no clips were saved, go back to clips_preview_sent so user can retry
-        if (clipsSaved === 0) {
-          await sendTelegram('No clips saved (upload failed). Reply "all" to retry or "skip".');
-          reviewsProcessed++;
-        } else {
-          // Update ready count for notification
-          const newReadyCount = readyCount + clipsSaved;
-
-          await queueUpdate(reviewRecord.id, {
-            status: 'clips_saved',
-            reviewed_at: new Date().toISOString(),
-          });
-
-          // Delete ALL messages for this video (video, text, clips, prompt)
-          let allMsgIds = [];
-          try { allMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
-          for (const mid of allMsgIds) {
-            await deleteTelegramMessage(mid);
-          }
-
-          // Count remaining videos in queue
-          let remainingCount = 0;
-          try {
-            const remFormula = encodeURIComponent("OR({status}='review_sent',{status}='clips_preview_sent')");
-            const remData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + remFormula + '&fields%5B%5D=status');
-            remainingCount = (remData.records || []).length;
-          } catch (e) {}
-
-          let confirmMsg = clipsSaved + ' clip' + (clipsSaved > 1 ? 's' : '') + ' saved (pool: ~' + newReadyCount + '/' + TARGET_HOOKS + ')';
-          if (remainingCount > 0) {
-            confirmMsg += '\n\nNext video is ready — reply to continue (' + remainingCount + ' left)';
-          } else {
-            confirmMsg += '\n\nAll done! No more videos to review.';
-          }
-          await sendTelegram(confirmMsg);
-          reviewsProcessed++;
-        }
-
-      } catch (e) {
-        console.log('[hookgen] Approval processing error: ' + e.message);
-        await sendTelegram('Error saving clips: ' + e.message);
-      }
-
-      continue;
-    }
-  }
-REMOVED */
-
-tickResult.phase3 = { reviewsProcessed: reviewsProcessed };
+// Phase 3 moved to webhook (process-review.js)
+tickResult.phase3 = { reviewsProcessed: 0 };
 
 
 // ═══════════════════════════════════════
@@ -1453,13 +1147,14 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
 
           } catch (e) {
             console.log('[hookgen] Image generation error: ' + e.message);
-            // Don't notify on every failure — just log
+            tickResult.phase4_error = e.message;
           }
         }
       }
     }
   } catch (e) {
     console.log('[hookgen] Phase 4 error: ' + e.message);
+    tickResult.phase4_error = e.message;
   }
 }
 
