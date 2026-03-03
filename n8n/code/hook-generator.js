@@ -2,11 +2,12 @@
 // State machine that runs once per tick. Each tick advances the pipeline:
 //   Phase 0: QUOTA CHECK — exit early if enough hooks ready
 //   Phase 1: POLL PENDING — check provider status for submitted jobs
+//   Phase 1.5: PROCESS IMAGE APPROVALS — submit approved images to Sora 2, redo rejected
 //   Phase 2: DELIVER COMPLETED — download finished video, send to Telegram
-//   Phase 3: PROCESS REVIEWS — non-blocking getUpdates, trim clips, save to pool
-//   Phase 4: SUBMIT NEW — kie.ai image + provider submit (if quota allows)
+//   Phase 3: PROCESS REVIEWS — moved to webhook (process-review.js)
+//   Phase 4: GENERATE IMAGE — kie.ai image + send to Telegram for approval
 //
-// Multi-provider: PoYo (active), APIMart (disabled), laozhang (disabled)
+// Multi-provider: kie.ai (active, primary), PoYo (active, secondary), APIMart (disabled), laozhang (disabled)
 // State stored in Airtable "Hook Generation Queue" table.
 // Telegram review is non-blocking — videos queue up, user reviews at their pace.
 //
@@ -83,7 +84,7 @@ const CLIP_DURATION = 3;
 const VIDEOS_PER_DAY = 10;
 const BUFFER_DAYS = 2;
 const TARGET_HOOKS = VIDEOS_PER_DAY * BUFFER_DAYS; // 20
-const MAX_CONCURRENT = 3; // max simultaneous provider submissions
+const MAX_CONCURRENT = 4; // max simultaneous provider submissions (2 providers × 2 slots each)
 const GENERATION_TIMEOUT_MS = 20 * 60 * 1000; // 20 min — mark as failed after this
 
 // ─── Multi-Provider Config ───
@@ -92,6 +93,37 @@ const APIMART_KEY = (typeof $env !== 'undefined' && $env.APIMART_API_KEY) || '';
 const LAOZHANG_KEY = (typeof $env !== 'undefined' && $env.LAOZHANG_API_KEY) || '';
 
 const PROVIDERS = [
+  {
+    name: 'kieai',
+    enabled: true,
+    submitUrl: 'https://api.kie.ai/api/v1/jobs/createTask',
+    statusUrl: 'https://api.kie.ai/api/v1/jobs/recordInfo?taskId=',
+    apiKey: KIE_API_KEY,
+    authPrefix: 'Bearer ',
+    buildBody: function(prompt, imageUrl) {
+      return {
+        model: 'sora-2',
+        input: {
+          prompt: prompt,
+          image_urls: imageUrl ? [imageUrl] : [],
+          n_frames: 15,
+          aspect_ratio: 'portrait',
+          remove_watermark: true,
+        },
+      };
+    },
+    parseSubmitTaskId: function(data) { return data.data && data.data.taskId; },
+    isSubmitOk: function(data) { return data.code === 200 && data.data && data.data.taskId; },
+    parseStatus: function(data) { return data.data && data.data.state; },
+    parseVideoUrl: function(data) {
+      try {
+        var resultJson = JSON.parse(data.data.resultJson);
+        return resultJson.resultUrls && resultJson.resultUrls[0];
+      } catch (e) { return null; }
+    },
+    isComplete: function(status) { return status === 'success'; },
+    isFailed: function(status) { return status === 'fail'; },
+  },
   {
     name: 'poyo',
     enabled: true,
@@ -154,6 +186,7 @@ const PROVIDERS = [
 // ─── Static data (persists across n8n executions) ───
 const staticData = $getWorkflowStaticData('global');
 if (!staticData.hookGenOffset) staticData.hookGenOffset = 0;
+if (!staticData.lastGroupIndex) staticData.lastGroupIndex = 0;
 if (!staticData.lastProviderIndex) staticData.lastProviderIndex = 0;
 // Track last quota notification to avoid spam
 if (!staticData.lastQuotaNotification) staticData.lastQuotaNotification = '';
@@ -210,6 +243,25 @@ async function deleteTelegramMessage(messageId) {
       body: JSON.stringify({ chat_id: ADMIN_CHAT, message_id: messageId }),
     });
   } catch (e) { console.log('[hookgen] Telegram delete error: ' + e.message); }
+}
+
+async function sendTelegramPhoto(photoUrl, caption, replyMarkup) {
+  try {
+    const body = { chat_id: ADMIN_CHAT, photo: photoUrl };
+    if (caption) body.caption = caption;
+    if (replyMarkup) body.reply_markup = replyMarkup;
+    const res = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendPhoto', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.result ? json.result.message_id : null;
+  } catch (e) {
+    console.log('[hookgen] Telegram photo send error: ' + e.message);
+    return null;
+  }
 }
 
 // ─── kie.ai helpers ───
@@ -272,34 +324,117 @@ function burnTimecode(videoPath) {
 // ─── FFmpeg trim ───
 function trimClip(videoPath, startSec, keepAudio) {
   const outPath = videoPath.replace('.mp4', '_trim_' + startSec + '.mp4');
-  const audioFlag = keepAudio ? ' -c:a aac -b:a 128k' : ' -an';
-  execSync(
-    'ffmpeg -y -ss ' + startSec + ' -i "' + videoPath + '" -t ' + CLIP_DURATION +
-    ' -c:v libx264 -preset fast -crf 22' + audioFlag + ' -movflags +faststart "' + outPath + '"',
-    { timeout: 30000 }
-  );
+  const vf = 'trim=start=' + startSec + ':duration=' + CLIP_DURATION + ',setpts=PTS-STARTPTS';
+  let cmd = 'ffmpeg -y -i "' + videoPath + '" -vf "' + vf + '" -c:v libx264 -preset fast -crf 22 -pix_fmt yuv420p -an "' + outPath + '"';
+  console.log('[hookgen] FFmpeg cmd: ' + cmd);
+  try {
+    execSync(cmd, { timeout: 60000 });
+  } catch (e) {
+    console.log('[hookgen] FFmpeg stderr: ' + (e.stderr ? e.stderr.toString().slice(-500) : e.message));
+    throw e;
+  }
+  const size = fs.statSync(outPath).size;
+  console.log('[hookgen] Trimmed clip size: ' + size + ' bytes');
+  if (size < 5000) {
+    throw new Error('Trimmed clip too small (' + size + ' bytes) — likely corrupt');
+  }
   return outPath;
 }
 
-// ─── Upload to catbox.moe ───
-async function uploadCatbox(buffer, filename) {
-  const boundary = '----CatboxBoundary' + Date.now();
-  const parts = [];
-  parts.push('--' + boundary + '\r\nContent-Disposition: form-data; name="reqtype"\r\n\r\nfileupload');
-  parts.push('--' + boundary + '\r\nContent-Disposition: form-data; name="fileToUpload"; filename="' + filename + '"\r\nContent-Type: video/mp4\r\n\r\n');
-  const prefix = Buffer.from(parts.join('\r\n') + '\r\n');
-  const suffix = Buffer.from('\r\n--' + boundary + '--\r\n');
-  const body = Buffer.concat([prefix, buffer, suffix]);
-
-  const res = await fetch('https://catbox.moe/user/api.php', {
-    method: 'POST',
-    headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary },
-    body: body,
+// ─── Upload with multi-host fallback ───
+function uploadToHost(hostname, uploadPath, buffer, filename, mimeType, parseResponse) {
+  return new Promise((resolve, reject) => {
+    const boundary = '----UploadBoundary' + Date.now();
+    const bodyBuf = Buffer.concat([
+      Buffer.from('--' + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="' + filename + '"\r\nContent-Type: ' + mimeType + '\r\n\r\n'),
+      buffer,
+      Buffer.from('\r\n--' + boundary + '--\r\n'),
+    ]);
+    const req = _https.request({
+      hostname, path: uploadPath, method: 'POST',
+      headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary, 'Content-Length': bodyBuf.length },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        try {
+          const raw = Buffer.concat(chunks).toString().trim();
+          const url = parseResponse ? parseResponse(raw, res.statusCode) : raw;
+          if (url && url.startsWith('http')) resolve(url);
+          else reject(new Error(hostname + ': unexpected response: ' + raw.slice(0, 100)));
+        } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.write(bodyBuf);
+    req.end();
   });
-  if (!res.ok) throw new Error('catbox upload: ' + res.status);
-  const url = await res.text();
-  if (!url.startsWith('http')) throw new Error('catbox invalid response: ' + url.slice(0, 100));
-  return url.trim();
+}
+
+async function uploadFile(buffer, filename) {
+  const mimeType = 'video/mp4';
+  const hosts = [
+    {
+      name: 'tmpfiles.org',
+      fn: () => uploadToHost('tmpfiles.org', '/api/v1/upload', buffer, filename, mimeType, (raw) => {
+        const json = JSON.parse(raw);
+        if (json.status === 'success' && json.data && json.data.url) {
+          return json.data.url.replace('https://tmpfiles.org/', 'https://tmpfiles.org/dl/');
+        }
+        throw new Error('tmpfiles.org: ' + raw.slice(0, 100));
+      }),
+    },
+    {
+      name: '0x0.st',
+      fn: () => uploadToHost('0x0.st', '/', buffer, filename, mimeType, (raw, status) => {
+        if (status >= 400) throw new Error('0x0.st: HTTP ' + status);
+        return raw;
+      }),
+    },
+    {
+      name: 'catbox.moe',
+      fn: () => {
+        return new Promise((resolve, reject) => {
+          const boundary = '----UploadBoundary' + Date.now();
+          const bodyBuf = Buffer.concat([
+            Buffer.from('--' + boundary + '\r\nContent-Disposition: form-data; name="reqtype"\r\n\r\nfileupload\r\n'),
+            Buffer.from('--' + boundary + '\r\nContent-Disposition: form-data; name="fileToUpload"; filename="' + filename + '"\r\nContent-Type: ' + mimeType + '\r\n\r\n'),
+            buffer,
+            Buffer.from('\r\n--' + boundary + '--\r\n'),
+          ]);
+          const req = _https.request({
+            hostname: 'catbox.moe', path: '/user/api.php', method: 'POST',
+            headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary, 'Content-Length': bodyBuf.length },
+          }, (res) => {
+            const chunks = [];
+            res.on('data', c => chunks.push(c));
+            res.on('end', () => {
+              const url = Buffer.concat(chunks).toString().trim();
+              if (url.startsWith('https://')) resolve(url);
+              else reject(new Error('catbox.moe: ' + url.slice(0, 100)));
+            });
+          });
+          req.on('error', reject);
+          req.write(bodyBuf);
+          req.end();
+        });
+      },
+    },
+  ];
+
+  const errors = [];
+  for (const host of hosts) {
+    try {
+      console.log('[hookgen] Trying upload to ' + host.name + '...');
+      const url = await host.fn();
+      console.log('[hookgen] Uploaded to ' + host.name + ': ' + url);
+      return url;
+    } catch (e) {
+      console.log('[hookgen] ' + host.name + ' failed: ' + e.message);
+      errors.push(host.name + ': ' + e.message);
+    }
+  }
+  throw new Error('All upload hosts failed: ' + errors.join('; '));
 }
 
 // ─── Airtable helpers ───
@@ -326,6 +461,18 @@ async function queueUpdate(recordId, fields) {
     method: 'PATCH',
     body: JSON.stringify({ records: [{ id: recordId, fields: fields }] }),
   });
+}
+
+async function queueDelete(recordIds) {
+  // Airtable DELETE accepts up to 10 IDs per request
+  const batches = [];
+  for (let i = 0; i < recordIds.length; i += 10) {
+    batches.push(recordIds.slice(i, i + 10));
+  }
+  for (const batch of batches) {
+    const params = batch.map(id => 'records[]=' + id).join('&');
+    await airtableFetch(QUEUE_TABLE + '?' + params, { method: 'DELETE' });
+  }
 }
 
 async function poolCreate(fields) {
@@ -427,10 +574,35 @@ if (enabledProviders.length === 0) {
 }
 
 const tickResult = {
-  phase0: null, phase1: null, phase2: null, phase3: null, phase4: null,
+  phase0: null, phase1: null, phase1_5: null, phase2: null, phase3: null, phase4: null,
 };
 
 try {
+
+// ═══════════════════════════════════════
+// CLEANUP — disabled for testing (re-enable in production)
+// ═══════════════════════════════════════
+// try {
+//   const failFormula = encodeURIComponent("{status}='failed'");
+//   const failData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + failFormula + '&fields%5B%5D=task_id&fields%5B%5D=error_message');
+//   const failedRecords = failData.records || [];
+//   if (failedRecords.length > 0) {
+//     for (const r of failedRecords) {
+//       console.log('[hookgen] Removing failed: ' + (r.fields.task_id || r.id) + ' — ' + (r.fields.error_message || 'no details'));
+//     }
+//     await queueDelete(failedRecords.map(r => r.id));
+//     console.log('[hookgen] Cleaned up ' + failedRecords.length + ' failed record(s)');
+//   }
+//   const doneFormula = encodeURIComponent("{status}='clips_saved'");
+//   const doneData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + doneFormula + '&fields%5B%5D=task_id');
+//   const doneRecords = doneData.records || [];
+//   if (doneRecords.length > 0) {
+//     await queueDelete(doneRecords.map(r => r.id));
+//     console.log('[hookgen] Cleaned up ' + doneRecords.length + ' completed record(s)');
+//   }
+// } catch (e) {
+//   console.log('[hookgen] Cleanup error: ' + e.message);
+// }
 
 // ═══════════════════════════════════════
 // PHASE 0 — QUOTA CHECK
@@ -561,6 +733,121 @@ tickResult.phase1 = { polled: polledCount, completed: newlyCompleted, failed: ne
 
 
 // ═══════════════════════════════════════
+// PHASE 1.5 — PROCESS IMAGE APPROVALS
+// Submit approved images to Sora 2, regenerate redo'd images
+// ═══════════════════════════════════════
+
+console.log('[hookgen] Phase 1.5: Process image approvals');
+
+let imgSubmitted = 0;
+let imgRedone = 0;
+
+// Recalculate available Sora 2 slots (Phase 1 may have freed some)
+let currentActiveSlots = activeSubmissions - newlyCompleted - newlyFailed;
+if (currentActiveSlots < 0) currentActiveSlots = 0;
+
+// ─── Submit approved images to Sora 2 ───
+try {
+  const imgApprovedFormula = encodeURIComponent("{status}='image_approved'");
+  const imgApprovedData = await airtableFetch(
+    QUEUE_TABLE + '?filterByFormula=' + imgApprovedFormula +
+    '&sort%5B0%5D%5Bfield%5D=created_at&sort%5B0%5D%5Bdirection%5D=asc'
+  );
+  const imgApprovedRecords = imgApprovedData.records || [];
+
+  for (const record of imgApprovedRecords) {
+    if (currentActiveSlots >= MAX_CONCURRENT) {
+      console.log('[hookgen] Phase 1.5: No Sora 2 slots — will submit next tick');
+      break;
+    }
+
+    const f = record.fields;
+    const kieImageUrl = f.source_image_url;
+    const motionPrompt = f.motion_prompt || '';
+
+    // Pick provider (round-robin)
+    const providerIndex = (staticData.lastProviderIndex || 0) % enabledProviders.length;
+    const provider = enabledProviders[providerIndex];
+    staticData.lastProviderIndex = providerIndex + 1;
+
+    try {
+      const taskId = await providerSubmit(provider, motionPrompt, kieImageUrl);
+      await queueUpdate(record.id, {
+        status: 'submitted',
+        task_id: taskId,
+        provider: provider.name,
+        submitted_at: new Date().toISOString(),
+      });
+      currentActiveSlots++;
+      imgSubmitted++;
+      console.log('[hookgen] Phase 1.5: Submitted approved image to ' + provider.name + ' task ' + taskId);
+    } catch (e) {
+      console.log('[hookgen] Phase 1.5: Submit error for ' + record.id + ': ' + e.message);
+      // Don't fail the record — retry next tick
+    }
+  }
+} catch (e) {
+  console.log('[hookgen] Phase 1.5: Approved query error: ' + e.message);
+}
+
+// ─── Regenerate redo'd images ───
+try {
+  const imgRedoFormula = encodeURIComponent("{status}='image_redo'");
+  const imgRedoData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + imgRedoFormula);
+  const imgRedoRecords = imgRedoData.records || [];
+
+  for (const record of imgRedoRecords) {
+    const f = record.fields;
+    const hookMode = f.hook_mode || 'speaking';
+    const isSpeaking = hookMode === 'speaking';
+    const girlRefUrl = f.girl_ref_url || '';
+    const conceptName = f.concept_name || '';
+
+    // Clean up old Telegram message
+    let oldMsgIds = [];
+    try { oldMsgIds = JSON.parse(f.telegram_msg_id || '[]'); } catch (e) {}
+    for (const mid of oldMsgIds) { await deleteTelegramMessage(mid); }
+
+    try {
+      // Generate new image
+      const imagePrompt = isSpeaking ? pickRandom(SPEAKING_IMAGE_PROMPTS) : pickRandom(REACTION_IMAGE_PROMPTS);
+      const kieTaskId = await kieGenerate(imagePrompt, [girlRefUrl]);
+      const kieImageUrl = await kiePoll(kieTaskId);
+
+      // Send new image for approval
+      const modeLabel = isSpeaking ? 'Speaking' : 'Reaction';
+      let hookTexts = [];
+      try { hookTexts = JSON.parse(f.hook_texts_json || '[]'); } catch (e) {}
+      const caption = 'Hook image (redo) — ' + conceptName + ' (' + modeLabel + ')\n' +
+        hookTexts.map(function(t, i) { return (i + 1) + '. "' + t.slice(0, 60) + '"'; }).join('\n');
+      const replyMarkup = {
+        inline_keyboard: [[
+          { text: '\u2705 Approve', callback_data: 'hookImg_ok_' + record.id },
+          { text: '\uD83D\uDD04 Redo', callback_data: 'hookImg_redo_' + record.id },
+        ]],
+      };
+      const msgId = await sendTelegramPhoto(kieImageUrl, caption, replyMarkup);
+
+      await queueUpdate(record.id, {
+        status: 'image_approval',
+        source_image_url: kieImageUrl,
+        telegram_msg_id: JSON.stringify(msgId ? [msgId] : []),
+      });
+      imgRedone++;
+      console.log('[hookgen] Phase 1.5: Redo image sent for ' + conceptName);
+    } catch (e) {
+      console.log('[hookgen] Phase 1.5: Redo error for ' + record.id + ': ' + e.message);
+      await queueUpdate(record.id, { status: 'failed', error_message: 'Image redo failed: ' + e.message });
+    }
+  }
+} catch (e) {
+  console.log('[hookgen] Phase 1.5: Redo query error: ' + e.message);
+}
+
+tickResult.phase1_5 = { imgSubmitted: imgSubmitted, imgRedone: imgRedone };
+
+
+// ═══════════════════════════════════════
 // PHASE 2 — DELIVER COMPLETED VIDEOS (one at a time)
 // ═══════════════════════════════════════
 
@@ -608,7 +895,7 @@ try {
           const totalReady = (allCompData.records || []).length;
 
           if (totalReady > 0) {
-            await sendTelegram('Good morning! ' + totalReady + ' new Sora 2 video' + (totalReady > 1 ? 's' : '') + ' generated overnight. Let\'s review!');
+            await sendTelegram('Good morning! ' + totalReady + ' new video' + (totalReady > 1 ? 's' : '') + ' generated overnight. Let\'s review!');
           }
           staticData.lastDailySummary = today;
         }
@@ -670,15 +957,13 @@ tickResult.phase2 = { delivered: delivered };
 
 
 // ═══════════════════════════════════════
-// PHASE 3 — PROCESS TELEGRAM REVIEWS
+// PHASE 3 — SKIPPED (moved to webhook)
+// Reviews are now processed instantly via Telegram Webhook Trigger
+// in the separate "Hook Review" workflow (process-review.js)
 // ═══════════════════════════════════════
 
-console.log('[hookgen] Phase 3: Processing Telegram reviews');
-
-let reviewsProcessed = 0;
-
-try {
-  // Non-blocking getUpdates with short timeout
+let reviewsProcessed = 0; // kept for output compatibility
+/* REMOVED — getUpdates conflicts with webhook
   const res = await fetch(
     'https://api.telegram.org/bot' + PREP01_BOT + '/getUpdates?offset=' + staticData.hookGenOffset + '&timeout=5'
   );
@@ -883,7 +1168,7 @@ try {
           try {
             const trimPath = trimClip(rawPath, ts, isSpeaking);
             const clipBuffer = fs.readFileSync(trimPath);
-            const clipUrl = await uploadCatbox(clipBuffer, 'hook_' + batchId + '_' + idx + '.mp4');
+            const clipUrl = await uploadFile(clipBuffer, 'hook_' + batchId + '_' + idx + '.mp4');
 
             await poolCreate({
               batch_id: batchId,
@@ -913,37 +1198,43 @@ try {
 
         try { fs.unlinkSync(rawPath); } catch (e) {}
 
-        // Update ready count for notification
-        const newReadyCount = readyCount + clipsSaved;
-
-        await queueUpdate(reviewRecord.id, {
-          status: 'clips_saved',
-          reviewed_at: new Date().toISOString(),
-        });
-
-        // Delete ALL messages for this video (video, text, clips, prompt)
-        let allMsgIds = [];
-        try { allMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
-        for (const mid of allMsgIds) {
-          await deleteTelegramMessage(mid);
-        }
-
-        // Count remaining videos in queue
-        let remainingCount = 0;
-        try {
-          const remFormula = encodeURIComponent("OR({status}='review_sent',{status}='clips_preview_sent')");
-          const remData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + remFormula + '&fields%5B%5D=status');
-          remainingCount = (remData.records || []).length;
-        } catch (e) {}
-
-        let confirmMsg = clipsSaved + ' clip' + (clipsSaved > 1 ? 's' : '') + ' saved (pool: ~' + newReadyCount + '/' + TARGET_HOOKS + ')';
-        if (remainingCount > 0) {
-          confirmMsg += '\n\nNext video is ready — reply to continue (' + remainingCount + ' left)';
+        // If no clips were saved, go back to clips_preview_sent so user can retry
+        if (clipsSaved === 0) {
+          await sendTelegram('No clips saved (upload failed). Reply "all" to retry or "skip".');
+          reviewsProcessed++;
         } else {
-          confirmMsg += '\n\nAll done! No more videos to review.';
+          // Update ready count for notification
+          const newReadyCount = readyCount + clipsSaved;
+
+          await queueUpdate(reviewRecord.id, {
+            status: 'clips_saved',
+            reviewed_at: new Date().toISOString(),
+          });
+
+          // Delete ALL messages for this video (video, text, clips, prompt)
+          let allMsgIds = [];
+          try { allMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
+          for (const mid of allMsgIds) {
+            await deleteTelegramMessage(mid);
+          }
+
+          // Count remaining videos in queue
+          let remainingCount = 0;
+          try {
+            const remFormula = encodeURIComponent("OR({status}='review_sent',{status}='clips_preview_sent')");
+            const remData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + remFormula + '&fields%5B%5D=status');
+            remainingCount = (remData.records || []).length;
+          } catch (e) {}
+
+          let confirmMsg = clipsSaved + ' clip' + (clipsSaved > 1 ? 's' : '') + ' saved (pool: ~' + newReadyCount + '/' + TARGET_HOOKS + ')';
+          if (remainingCount > 0) {
+            confirmMsg += '\n\nNext video is ready — reply to continue (' + remainingCount + ' left)';
+          } else {
+            confirmMsg += '\n\nAll done! No more videos to review.';
+          }
+          await sendTelegram(confirmMsg);
+          reviewsProcessed++;
         }
-        await sendTelegram(confirmMsg);
-        reviewsProcessed++;
 
       } catch (e) {
         console.log('[hookgen] Approval processing error: ' + e.message);
@@ -953,9 +1244,7 @@ try {
       continue;
     }
   }
-} catch (e) {
-  console.log('[hookgen] Phase 3 error: ' + e.message);
-}
+REMOVED */
 
 tickResult.phase3 = { reviewsProcessed: reviewsProcessed };
 
@@ -968,9 +1257,11 @@ console.log('[hookgen] Phase 4: Submit new generation');
 
 let submitted = 0;
 
-// Skip if no slots or quota met
-if (availableSlots <= 0) {
-  console.log('[hookgen] No available slots (' + activeSubmissions + '/' + MAX_CONCURRENT + ')');
+// Skip if too many pending image approvals or quota met
+const imgWaitingApproval = pendingRecords.filter(function(r) { return r.fields.status === 'image_approval'; }).length;
+const MAX_PENDING_APPROVALS = 3;
+if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
+  console.log('[hookgen] Max pending image approvals (' + imgWaitingApproval + '/' + MAX_PENDING_APPROVALS + ')');
 } else if (readyCount + pendingCount >= TARGET_HOOKS) {
   console.log('[hookgen] Quota covered (ready + pending >= target)');
 } else {
@@ -1088,21 +1379,17 @@ if (availableSlots <= 0) {
         }
 
         if (groups.length > 0) {
-          // Pick next group (round-robin)
-          const groupIndex = (staticData.lastProviderIndex || 0) % groups.length;
+          // Pick next group (round-robin — separate counter from provider)
+          const groupIndex = (staticData.lastGroupIndex || 0) % groups.length;
           const group = groups[groupIndex];
-          staticData.lastProviderIndex = groupIndex + 1;
+          staticData.lastGroupIndex = groupIndex + 1;
 
           const concept = group.concept;
           const hookMode = group.hookMode;
           const isSpeaking = hookMode === 'speaking';
           const groupScenarios = group.scenarios;
 
-          // Pick provider (round-robin across enabled)
-          const providerIndex = (staticData.lastProviderIndex || 0) % enabledProviders.length;
-          const provider = enabledProviders[providerIndex];
-
-          console.log('[hookgen] Submitting: ' + concept.conceptId + ' (' + hookMode + ') via ' + provider.name + ', ' + groupScenarios.length + ' scenarios');
+          console.log('[hookgen] Generating image: ' + concept.conceptId + ' (' + hookMode + '), ' + groupScenarios.length + ' scenarios');
 
           try {
             // kie.ai image generation
@@ -1110,39 +1397,50 @@ if (availableSlots <= 0) {
             const kieTaskId = await kieGenerate(imagePrompt, [concept.girlRefUrl]);
             const kieImageUrl = await kiePoll(kieTaskId);
 
-            // Build Sora 2 prompt
+            // Build Sora 2 prompt (stored for Phase 1.5 after approval)
+            const hookTexts = groupScenarios.map(function(s) { return s.hookText; });
             let sora2Prompt;
             if (isSpeaking) {
-              const hookTexts = groupScenarios.map(function(s) { return s.hookText; });
               sora2Prompt = buildSpeakingPrompt(hookTexts);
             } else {
               sora2Prompt = pickRandom(REACTION_MOTION_PROMPTS);
             }
 
-            // Submit to provider
-            const taskId = await providerSubmit(provider, sora2Prompt, kieImageUrl);
-
-            // Save to queue
-            await queueCreate({
-              task_id: taskId,
-              provider: provider.name,
+            // Create queue record first (need ID for callback buttons)
+            const queueResult = await queueCreate({
               concept_id: concept.conceptId,
               concept_name: concept.conceptName,
               hook_mode: hookMode,
               scenario_ids_json: JSON.stringify(groupScenarios.map(function(s) { return s.recordId; })),
-              hook_texts_json: JSON.stringify(groupScenarios.map(function(s) { return s.hookText; })),
+              hook_texts_json: JSON.stringify(hookTexts),
               source_image_url: kieImageUrl,
               girl_ref_url: concept.girlRefUrl,
               motion_prompt: sora2Prompt,
-              status: 'submitted',
-              submitted_at: new Date().toISOString(),
+              status: 'image_approval',
             });
 
+            const queueRecordId = queueResult.records[0].id;
+
+            // Send image to Telegram for approval
+            const modeLabel = isSpeaking ? 'Speaking' : 'Reaction';
+            const caption = 'Hook image \u2014 ' + concept.conceptName + ' (' + modeLabel + ')\n' +
+              hookTexts.map(function(t, i) { return (i + 1) + '. "' + t.slice(0, 60) + '"'; }).join('\n');
+            const replyMarkup = {
+              inline_keyboard: [[
+                { text: '\u2705 Approve', callback_data: 'hookImg_ok_' + queueRecordId },
+                { text: '\uD83D\uDD04 Redo', callback_data: 'hookImg_redo_' + queueRecordId },
+              ]],
+            };
+            const msgId = await sendTelegramPhoto(kieImageUrl, caption, replyMarkup);
+            if (msgId) {
+              await queueUpdate(queueRecordId, { telegram_msg_id: JSON.stringify([msgId]) });
+            }
+
             submitted++;
-            console.log('[hookgen] Submitted task ' + taskId + ' to ' + provider.name);
+            console.log('[hookgen] Image sent for approval: ' + concept.conceptId + ' (' + hookMode + ')');
 
           } catch (e) {
-            console.log('[hookgen] Submit error: ' + e.message);
+            console.log('[hookgen] Image generation error: ' + e.message);
             // Don't notify on every failure — just log
           }
         }

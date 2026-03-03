@@ -1,10 +1,9 @@
-// NODE: Image to Video (Sora 2 via APIMart.ai — $0.025/video)
+// NODE: Image to Video (kie.ai primary + PoYo secondary — escalating dual-provider)
 // Converts an approved hook/outro image into an animated video clip.
-// Two paths:
-//   1. speaking → Sora 2 (image + VO text in prompt → video with lip movement + baked audio)
-//   2. reaction → Sora 2 (image + motion prompt → motion video, 10s, no audio)
-// Default (no sourceType) → Sora 2 motion as fallback.
-// Single node for BOTH hook and outro (assetType auto-detected).
+// Three paths:
+//   1. outro + speaking → Kling Avatar V2 via fal.ai (native lipsync, no FFmpeg overlay)
+//   2. hook + speaking → escalatingGenerate (kie.ai primary, PoYo after 3 min)
+//   3. reaction → escalatingGenerate motion (kie.ai primary, PoYo after 3 min)
 // Self-healing: on failure, returns the original image as fallback (FFmpeg will loop).
 // Mode: Run Once for All Items
 //
@@ -199,166 +198,222 @@ const DEFAULT_PROMPTS = {
   hook: 'locked off tripod shot, static camera, zero camera movement, girl eyes fixed on phone screen, shakes head slightly, concerned expression, subtle facial movement only, not typing on phone, no tears',
   outro: 'locked off tripod shot, static camera, zero camera movement, girl looking at camera, gentle expression change, subtle movement, not typing on phone, no tears',
 };
-// ─── Sora 2 via APIMart.ai — Shotgun + Escalating Backoff Strategy ───
-// Dual-model concurrent (sora-2 + sora-2-vip), 10 rounds, jittered backoff
-// $0.00 for failed attempts — only charges on success ($0.025/video)
-const APIMART_KEY = (typeof $env !== 'undefined' && $env.APIMART_API_KEY) || 'sk-kQeBOTjXlRbsutwcFSbjtDPmqLO5vZpFIFWkkW97WJYT5Y9l';
-const APIMART_MODELS = ['sora-2', 'sora-2-vip']; // different backend channel pools
+// ─── Escalating Dual-Provider: kie.ai (primary) + PoYo (secondary) ───
+// Submit to kie.ai first. If still generating after 3 min, also submit to PoYo.
+// If kie.ai fails mid-generation, instantly escalate to PoYo.
+// First provider to complete wins. Minimizes double-pay risk.
+const KIE_KEY = '7670ade582cc72601f388dbdc0525b9e';
+const POYO_KEY = (typeof $env !== 'undefined' && $env.POYO_API_KEY) || 'sk-vJqqGNNTcH9g89DnEYum48LHkdR0R6sZ-qQCFoiWzCJQlPmXKtbIdOWiRGnhB-';
+const ESCALATE_AFTER_MS = 3 * 60 * 1000;    // 3 min before firing secondary
+const PROVIDER_TIMEOUT_MS = 12 * 60 * 1000; // 12 min total timeout
 
-// Submit a single task to one model — returns { taskId, model } or throws
-async function apimartSubmit(model, imageUrl, prompt, options = {}) {
-  const { duration = 15, style, storyboard = false } = options;
-  const reqBody = {
-    model,
-    prompt,
-    duration,
-    aspect_ratio: '9:16',
-    watermark: false,
-    private: true,
-  };
-  if (imageUrl) reqBody.image_urls = [imageUrl];
-  if (style) reqBody.style = style;
-  if (storyboard) reqBody.storyboard = true;
-
-  const submitRes = await fetch('https://api.apimart.ai/v1/videos/generations', {
-    method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + APIMART_KEY,
-      'Content-Type': 'application/json',
+// ── kie.ai Sora 2 submit ──
+async function kieVideoSubmit(imageUrl, prompt) {
+  const body = {
+    model: 'sora-2',
+    input: {
+      prompt: prompt,
+      image_urls: imageUrl ? [imageUrl] : [],
+      n_frames: 15,
+      aspect_ratio: 'portrait',
+      remove_watermark: true,
     },
-    body: JSON.stringify(reqBody),
+  };
+  const res = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + KIE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
-
-  const bodyText = await submitRes.text();
-  if (!submitRes.ok) throw new Error('[' + model + '] HTTP ' + submitRes.status + ': ' + bodyText.slice(0, 300));
-
-  let submitData;
-  try { submitData = JSON.parse(bodyText); } catch(e) { throw new Error('[' + model + '] Invalid JSON: ' + bodyText.slice(0, 300)); }
-
-  if (submitData.code !== 200 || !submitData.data || !submitData.data[0] || !submitData.data[0].task_id) {
-    throw new Error('[' + model + '] No task_id: ' + bodyText.slice(0, 300));
+  const text = await res.text();
+  if (!res.ok) throw new Error('[kie.ai submit] HTTP ' + res.status + ': ' + text.slice(0, 200));
+  var data;
+  try { data = JSON.parse(text); } catch(e) { throw new Error('[kie.ai submit] Invalid JSON: ' + text.slice(0, 200)); }
+  if (data.code !== 200 || !data.data || !data.data.taskId) {
+    throw new Error('[kie.ai submit] Rejected: ' + text.slice(0, 200));
   }
-
-  return { taskId: submitData.data[0].task_id, model };
+  return data.data.taskId;
 }
 
-// Poll a submitted task until completed — returns video URL or throws
-async function apimartPoll(taskId, model, timeoutMs = 600000) {
-  const pollStart = Date.now();
-  let pollCount = 0;
-
-  while (Date.now() - pollStart < timeoutMs) {
-    await new Promise(r => setTimeout(r, 5000));
-    pollCount++;
-
-    try {
-      const statusRes = await fetch('https://api.apimart.ai/v1/tasks/' + taskId, {
-        headers: { 'Authorization': 'Bearer ' + APIMART_KEY },
-      });
-
-      if (!statusRes.ok) {
-        console.log('[' + model + ' poll #' + pollCount + '] HTTP ' + statusRes.status);
-        continue;
-      }
-
-      const statusData = await statusRes.json();
-      const taskData = statusData.data || {};
-      const st = taskData.status || '';
-      const progress = taskData.progress || 0;
-
-      if (pollCount % 3 === 0 || st === 'completed' || st === 'failed') {
-        console.log('[' + model + ' poll #' + pollCount + '] ' + st + ' (' + progress + '%)');
-      }
-
-      if (st === 'completed') {
-        const videos = taskData.result && taskData.result.videos;
-        if (videos && videos[0] && videos[0].url && videos[0].url[0]) {
-          return videos[0].url[0];
-        }
-        throw new Error('[' + model + '] Completed but no video URL: ' + JSON.stringify(taskData).slice(0, 500));
-      }
-
-      if (st === 'failed' || st === 'cancelled') {
-        throw new Error('[' + model + '] Task ' + st + ': ' + JSON.stringify(taskData).slice(0, 500));
-      }
-    } catch (err) {
-      if (err.message.includes('failed') || err.message.includes('cancelled') || err.message.includes('no video URL')) throw err;
-      console.log('[' + model + ' poll #' + pollCount + '] error: ' + err.message);
+// ── kie.ai single poll (non-blocking) ──
+async function kieVideoPollOnce(taskId) {
+  try {
+    const res = await fetch('https://api.kie.ai/api/v1/jobs/recordInfo?taskId=' + taskId, {
+      headers: { 'Authorization': 'Bearer ' + KIE_KEY },
+    });
+    if (!res.ok) return { status: 'generating' };
+    const data = await res.json();
+    const state = data.data && data.data.state;
+    if (state === 'success') {
+      try {
+        var resultJson = JSON.parse(data.data.resultJson);
+        var videoUrl = resultJson.resultUrls && resultJson.resultUrls[0];
+        if (videoUrl) return { status: 'completed', videoUrl: videoUrl };
+      } catch(e) {}
+      return { status: 'failed', error: 'No video URL in kie.ai response' };
     }
+    if (state === 'fail') {
+      return { status: 'failed', error: (data.data && data.data.failMsg) || 'kie.ai video failed' };
+    }
+    return { status: 'generating' };
+  } catch(e) {
+    return { status: 'generating' }; // network blip — keep polling
   }
-
-  throw new Error('[' + model + '] Poll timeout (' + (timeoutMs / 60000) + ' min)');
 }
 
-// Orchestrator: shotgun dual-model + escalating backoff + Telegram status
-async function sora2Generate(imageUrl, prompt, options = {}) {
-  const BACKOFFS_SEC = [20, 35, 50, 60, 60, 60, 60, 60, 60, 60]; // 10 rounds
-  const MAX_ROUNDS = 10;
+// ── PoYo submit ──
+async function poyoSubmit(imageUrl, prompt) {
+  const input = { prompt: prompt, duration: 15, aspect_ratio: '9:16' };
+  if (imageUrl) input.image_url = imageUrl;
+  const body = { model: 'sora-2', input: input };
+  const res = await fetch('https://api.poyo.ai/api/generate/submit', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + POYO_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error('[PoYo submit] HTTP ' + res.status + ': ' + text.slice(0, 200));
+  var data;
+  try { data = JSON.parse(text); } catch(e) { throw new Error('[PoYo submit] Invalid JSON: ' + text.slice(0, 200)); }
+  if (data.code !== 200 || !data.data || !data.data.task_id) {
+    throw new Error('[PoYo submit] Rejected: ' + text.slice(0, 200));
+  }
+  return data.data.task_id;
+}
 
-  // Telegram config for retry status updates
+// ── PoYo single poll (non-blocking) ──
+async function poyoPollOnce(taskId) {
+  try {
+    const res = await fetch('https://api.poyo.ai/api/generate/status/' + taskId, {
+      headers: { 'Authorization': 'Bearer ' + POYO_KEY },
+    });
+    if (!res.ok) return { status: 'generating' };
+    const data = await res.json();
+    const st = data.data && data.data.status;
+    if (st === 'finished') {
+      var videoUrl = data.data.files && data.data.files[0] && data.data.files[0].file_url;
+      if (videoUrl) return { status: 'completed', videoUrl: videoUrl };
+      return { status: 'failed', error: 'No video URL in PoYo response' };
+    }
+    if (st === 'failed') return { status: 'failed', error: 'PoYo task failed' };
+    return { status: 'generating' };
+  } catch(e) {
+    return { status: 'generating' }; // network blip — keep polling
+  }
+}
+
+// ── Escalating orchestrator ──
+// Primary (kie.ai) → after 3 min or failure → also Secondary (PoYo) → first wins
+async function escalatingGenerate(imageUrl, prompt) {
+  const POLL_INTERVAL = 5000;
   const TBOT = (typeof $env !== 'undefined' && $env.TELEGRAM_BOT_TOKEN) || '';
   const _chatId = (() => { try { return $('Prepare Production').first().json.chatId || ''; } catch(e) { return ''; } })();
 
-  for (let round = 0; round < MAX_ROUNDS; round++) {
-    const roundLabel = (round + 1) + '/' + MAX_ROUNDS;
+  function notifyTg(text) {
+    if (!TBOT || !_chatId) return Promise.resolve();
+    return fetch('https://api.telegram.org/bot' + TBOT + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: _chatId, text: text }),
+    }).catch(function() {});
+  }
 
-    // ── Shotgun: fire both models concurrently ──
-    console.log('[Round ' + roundLabel + '] Submitting to ' + APIMART_MODELS.join(' + ') + '...');
-    const submitResults = await Promise.allSettled(
-      APIMART_MODELS.map(m => apimartSubmit(m, imageUrl, prompt, options))
-    );
+  // Phase 1: Submit to kie.ai (primary)
+  var kieTaskId = null;
+  var kieError = null;
+  try {
+    console.log('[escalate] Submitting to kie.ai (primary)...');
+    kieTaskId = await kieVideoSubmit(imageUrl, prompt);
+    console.log('[escalate] kie.ai accepted, taskId: ' + kieTaskId);
+  } catch(e) {
+    kieError = e.message;
+    console.log('[escalate] kie.ai submit failed: ' + kieError);
+  }
 
-    // Check which submits succeeded (got a task_id)
-    const successes = submitResults
-      .filter(r => r.status === 'fulfilled')
-      .map(r => r.value);
-
-    const failures = submitResults
-      .filter(r => r.status === 'rejected')
-      .map(r => r.reason.message || String(r.reason));
-
-    if (successes.length > 0) {
-      // At least one model accepted — poll the first one (cheapest: sora-2 preferred)
-      const winner = successes[0];
-      console.log('[Round ' + roundLabel + '] \u2705 ' + winner.model + ' accepted! task_id: ' + winner.taskId);
-
-      if (successes.length > 1) {
-        console.log('[Round ' + roundLabel + '] (Also accepted: ' + successes[1].model + ' — ignoring, using first)');
-      }
-
-      // Poll until video is ready
-      return await apimartPoll(winner.taskId, winner.model);
-    }
-
-    // ── Both failed — log and backoff ──
-    console.log('[Round ' + roundLabel + '] \u274C Both models rejected: ' + failures.join(' | '));
-
-    if (round < MAX_ROUNDS - 1) {
-      const baseSec = BACKOFFS_SEC[round];
-      const jitterSec = Math.floor(Math.random() * 21) - 10; // ±10s
-      const delaySec = Math.max(10, baseSec + jitterSec);
-
-      console.log('[Round ' + roundLabel + '] Retrying in ' + delaySec + 's...');
-
-      // Telegram status every 3 rounds (not too spammy)
-      if (TBOT && _chatId && (round === 0 || round % 3 === 0)) {
-        try {
-          await fetch('https://api.telegram.org/bot' + TBOT + '/sendMessage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: _chatId,
-              text: '\u26A1 Sora 2 at capacity — retry ' + roundLabel + ', next attempt in ' + delaySec + 's...',
-            }),
-          });
-        } catch(e) { /* non-fatal */ }
-      }
-
-      await new Promise(r => setTimeout(r, delaySec * 1000));
+  // If kie.ai refused, try PoYo immediately
+  var poyoTaskId = null;
+  if (!kieTaskId) {
+    try {
+      console.log('[escalate] kie.ai refused — trying PoYo immediately...');
+      poyoTaskId = await poyoSubmit(imageUrl, prompt);
+      console.log('[escalate] PoYo accepted, taskId: ' + poyoTaskId);
+    } catch(e) {
+      throw new Error('Both providers refused: kie.ai=' + kieError + ', PoYo=' + e.message);
     }
   }
 
-  throw new Error('APIMart: all ' + MAX_ROUNDS + ' rounds failed (' + (MAX_ROUNDS * 2) + ' attempts across ' + APIMART_MODELS.join('+') + ')');
+  var poyoEscalated = !kieTaskId; // true if we already submitted to PoYo
+  var pollCount = 0;
+  var startTime = Date.now();
+
+  // Main polling loop
+  while (Date.now() - startTime < PROVIDER_TIMEOUT_MS) {
+    await new Promise(function(r) { setTimeout(r, POLL_INTERVAL); });
+    pollCount++;
+    var elapsed = Date.now() - startTime;
+
+    // Escalation trigger: if kie.ai still running after 3 min, fire PoYo
+    if (kieTaskId && !poyoTaskId && !poyoEscalated && elapsed >= ESCALATE_AFTER_MS) {
+      poyoEscalated = true;
+      console.log('[escalate] 3 min elapsed — escalating to PoYo...');
+      await notifyTg('Video generation still in progress — escalating to backup provider...');
+      try {
+        poyoTaskId = await poyoSubmit(imageUrl, prompt);
+        console.log('[escalate] PoYo escalation accepted, taskId: ' + poyoTaskId);
+      } catch(e) {
+        console.log('[escalate] PoYo escalation failed: ' + e.message);
+      }
+    }
+
+    // Poll kie.ai
+    if (kieTaskId) {
+      var kieResult = await kieVideoPollOnce(kieTaskId);
+      if (kieResult.status === 'completed') {
+        console.log('[escalate] kie.ai completed! URL: ' + kieResult.videoUrl);
+        return kieResult.videoUrl;
+      }
+      if (kieResult.status === 'failed') {
+        console.log('[escalate] kie.ai failed: ' + kieResult.error);
+        kieTaskId = null;
+        // Instantly escalate to PoYo on kie.ai failure
+        if (!poyoTaskId && !poyoEscalated) {
+          poyoEscalated = true;
+          console.log('[escalate] kie.ai failed — escalating to PoYo now...');
+          try {
+            poyoTaskId = await poyoSubmit(imageUrl, prompt);
+            console.log('[escalate] PoYo emergency accepted: ' + poyoTaskId);
+          } catch(e2) {
+            console.log('[escalate] PoYo emergency also failed: ' + e2.message);
+          }
+        }
+      }
+      if (pollCount % 6 === 0 && kieTaskId) {
+        console.log('[escalate] kie.ai poll #' + pollCount + ': generating (' + Math.round(elapsed / 1000) + 's)');
+      }
+    }
+
+    // Poll PoYo
+    if (poyoTaskId) {
+      var poyoResult = await poyoPollOnce(poyoTaskId);
+      if (poyoResult.status === 'completed') {
+        console.log('[escalate] PoYo completed! URL: ' + poyoResult.videoUrl);
+        return poyoResult.videoUrl;
+      }
+      if (poyoResult.status === 'failed') {
+        console.log('[escalate] PoYo failed: ' + poyoResult.error);
+        poyoTaskId = null;
+      }
+      if (pollCount % 6 === 0 && poyoTaskId) {
+        console.log('[escalate] PoYo poll #' + pollCount + ': generating');
+      }
+    }
+
+    // Both failed
+    if (!kieTaskId && !poyoTaskId) {
+      throw new Error('Both providers failed mid-generation');
+    }
+  }
+
+  throw new Error('escalatingGenerate timeout after ' + (PROVIDER_TIMEOUT_MS / 60000) + ' min');
 }
 
 // Strip ElevenLabs emotion tags from VO text for Sora 2 prompt
@@ -446,7 +501,93 @@ if (DEBUG_FAST) {
 }
 
 // ═══════════════════════════════════════
-// SORA 2 SPEAKING — image + VO text in prompt → video with lip movement + baked audio
+// KLING AVATAR V2 — OUTRO LIPSYNC (native audio baked in, no FFmpeg overlay)
+// ═══════════════════════════════════════
+const FAL_AVATAR_ENDPOINT = 'fal-ai/kling-video/ai-avatar/v2/standard';
+
+if (assetType === 'outro' && sourceType === 'speaking') {
+  // Get image URL from Generate Outro
+  let outroImageUrl = '';
+  try { outroImageUrl = $('Generate Outro').first().json.outroImageUrl || ''; } catch(e) {}
+
+  const outroBinary = (inputBinary || {}).outroImage;
+  if (!outroImageUrl && outroBinary) {
+    const imageBuffer = Buffer.from(outroBinary.data, 'base64');
+    outroImageUrl = await uploadToTempHost(imageBuffer, 'outro_for_kling.png');
+  }
+
+  // Get VO audio URL from Generate VO
+  const voData = (() => { try { return $('Generate VO').first().json; } catch(e) { return {}; } })();
+  const outroAudioUrl = voData.voOutroFileUrl;
+
+  if (outroImageUrl && outroAudioUrl) {
+    // Send Telegram status
+    try {
+      const TELEGRAM_BOT_TOKEN = (typeof $env !== 'undefined' && $env.TELEGRAM_BOT_TOKEN) || '';
+      if (TELEGRAM_BOT_TOKEN && chatId) {
+        await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: '\u23F3 Generating outro via Kling Avatar V2 (native lipsync)... (~3-6 min)' }),
+        });
+      }
+    } catch(e) { /* non-fatal */ }
+
+    try {
+      const outroMotionPrompt = 'Young woman speaking naturally to camera, slight natural head movement, composed expression';
+
+      console.log('[Kling Avatar V2] Submitting outro: image=' + outroImageUrl.slice(0, 60) + '... audio=' + outroAudioUrl.slice(0, 60) + '...');
+      const falResult = await falSubmitAndPoll(FAL_KEY, FAL_AVATAR_ENDPOINT, {
+        image_url: outroImageUrl,
+        audio_url: outroAudioUrl,
+        prompt: outroMotionPrompt,
+      }, 600000);
+
+      const klingVideoUrl = (falResult.video && falResult.video.url) || null;
+      if (!klingVideoUrl) {
+        throw new Error('Kling Avatar V2 returned no video URL: ' + JSON.stringify(falResult).slice(0, 200));
+      }
+
+      console.log('[Kling Avatar V2] Video URL: ' + klingVideoUrl);
+
+      // Download video — audio is baked in by Kling, no FFmpeg overlay needed
+      const vidRes = await fetch(klingVideoUrl);
+      if (!vidRes.ok) throw new Error('Kling video download failed: ' + vidRes.status);
+      const videoBuffer = Buffer.from(await vidRes.arrayBuffer());
+
+      if (videoBuffer.length < 1000) {
+        throw new Error('Kling video too small (' + videoBuffer.length + ' bytes)');
+      }
+
+      return [{
+        json: {
+          success: true,
+          assetType: 'outro',
+          videoSource: 'kling_avatar_v2',
+          videoSizeMB: (videoBuffer.length / (1024 * 1024)).toFixed(1),
+          chatId,
+          scenarioName,
+        },
+        binary: {
+          outroVideo: {
+            data: videoBuffer.toString('base64'),
+            mimeType: 'video/mp4',
+            fileName: 'outro_kling_avatar.mp4',
+          }
+        }
+      }];
+    } catch(err) {
+      console.log('[Kling Avatar V2] Failed: ' + err.message + ' — falling back to escalatingGenerate');
+      // Fall through to speaking block below
+    }
+  } else {
+    console.log('[Kling Avatar V2] Skipped — missing ' + (!outroImageUrl ? 'image' : 'audio') + ' URL, falling back to escalatingGenerate');
+  }
+  // Fall through: if Kling Avatar failed or missing audio, use speaking block as fallback
+}
+
+// ═══════════════════════════════════════
+// SPEAKING — image + VO text in prompt → video with lip movement
 // ═══════════════════════════════════════
 if (sourceType === 'speaking') {
   // Get image URL (kie.ai URL from Generate Hook/Outro, or upload binary to temp host)
@@ -493,13 +634,13 @@ if (sourceType === 'speaking') {
       await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: '\u23F3 Generating ' + assetType + ' video via Sora 2 (lip-sync)... (~2-5 min)' }),
+        body: JSON.stringify({ chat_id: chatId, text: '\u23F3 Generating ' + assetType + ' video (lip-sync, kie.ai + PoYo)... (~3-8 min)' }),
       });
     }
   } catch (e) { /* non-fatal */ }
 
   try {
-    const videoUrl = await sora2Generate(imageUrl, sora2Prompt, { duration: 15, style: 'selfie' });
+    const videoUrl = await escalatingGenerate(imageUrl, sora2Prompt);
     console.log('[Sora 2 lipsync] Video URL: ' + videoUrl);
 
     // Download generated video
@@ -617,7 +758,7 @@ try {
     await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: '\u23F3 Generating ' + assetType + ' video via Sora 2... (~2-5 min)' }),
+      body: JSON.stringify({ chat_id: chatId, text: '\u23F3 Generating ' + assetType + ' video (kie.ai + PoYo)... (~3-8 min)' }),
     });
   }
 } catch (e) { /* non-fatal */ }
@@ -630,7 +771,7 @@ if (!motionPromptFinal.includes('no text')) {
 if (Math.random() < 0.25) motionPromptFinal += ', slight asymmetrical micro expression, uneven muscle movement';
 
 try {
-  const videoUrl = await sora2Generate(imageUrl, motionPromptFinal, { duration: 15 });
+  const videoUrl = await escalatingGenerate(imageUrl, motionPromptFinal);
   console.log('[Sora 2 motion] Video URL: ' + videoUrl);
 
   const vidRes = await fetch(videoUrl);

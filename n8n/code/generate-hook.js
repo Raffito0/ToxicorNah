@@ -59,19 +59,13 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── Temp image upload (litterbox.catbox.moe — no API key, 1h expiry) ───
+// ─── Temp image upload (0x0.st — no API key, 30+ day retention) ───
 function uploadToTempHost(buffer, filename) {
   return new Promise((resolve, reject) => {
     const boundary = '----FormBoundary' + Date.now();
     const parts = [
       '--' + boundary + '\r\n' +
-      'Content-Disposition: form-data; name="reqtype"\r\n\r\n' +
-      'fileupload\r\n',
-      '--' + boundary + '\r\n' +
-      'Content-Disposition: form-data; name="time"\r\n\r\n' +
-      '1h\r\n',
-      '--' + boundary + '\r\n' +
-      'Content-Disposition: form-data; name="fileToUpload"; filename="' + filename + '"\r\n' +
+      'Content-Disposition: form-data; name="file"; filename="' + filename + '"\r\n' +
       'Content-Type: image/png\r\n\r\n',
     ];
     const bodyBuf = Buffer.concat([
@@ -80,8 +74,8 @@ function uploadToTempHost(buffer, filename) {
       Buffer.from('\r\n--' + boundary + '--\r\n'),
     ]);
     const req = _https.request({
-      hostname: 'litterbox.catbox.moe',
-      path: '/resources/internals/api.php',
+      hostname: '0x0.st',
+      path: '/',
       method: 'POST',
       headers: {
         'Content-Type': 'multipart/form-data; boundary=' + boundary,
@@ -92,8 +86,8 @@ function uploadToTempHost(buffer, filename) {
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
         const url = Buffer.concat(chunks).toString().trim();
-        if (url.startsWith('https://')) resolve(url);
-        else reject(new Error('Upload failed: ' + url));
+        if (url.startsWith('http')) resolve(url);
+        else reject(new Error('0x0.st upload failed: ' + url.slice(0, 100)));
       });
     });
     req.on('error', reject);

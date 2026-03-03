@@ -8,6 +8,7 @@ const codePath = path.join(__dirname, 'code');
 const workflowFiles = [
   'unified-pipeline-fixed.json',
   'workflow-hook-batch.json',
+  'workflow-hook-review.json',
   'workflow-poyo-monitor.json',
 ];
 
@@ -33,6 +34,7 @@ const codeMap = {
   'mark-clip-used.js': 'Prepare Clip Mark',
   'set-time-of-day.js': 'Set Time of Day',
   'hook-generator.js': 'Hook Generator',
+  'process-review.js': 'Process Review',
   'monitor-availability.js': 'Monitor Availability',
 };
 
