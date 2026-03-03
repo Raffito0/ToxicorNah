@@ -72,12 +72,14 @@ const ADMIN_CHAT = '5120450288';
 const CLIP_DURATION = 3;
 
 // ─── Telegram helpers ───
-async function sendTelegram(text) {
+async function sendTelegram(text, replyMarkup) {
   try {
+    const payload = { chat_id: ADMIN_CHAT, text: text };
+    if (replyMarkup) payload.reply_markup = replyMarkup;
     const res = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: ADMIN_CHAT, text: text }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     return data.result && data.result.message_id;
@@ -340,6 +342,184 @@ if (callbackQuery) {
     return [{ json: { type: 'hook_image_approval', action: isApprove ? 'approve' : 'redo', recordId: queueRecordId } }];
   }
 
+  // ─── review_skip_ — Skip video at timestamp step (inline button) ───
+  if (cbData.startsWith('review_skip_')) {
+    const queueRecordId = cbData.substring('review_skip_'.length);
+
+    if (cbId) {
+      try {
+        await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/answerCallbackQuery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callback_query_id: cbId, text: '\u23ED Skipped!' }),
+        });
+      } catch (e) { /* non-fatal */ }
+    }
+
+    // Remove inline keyboard
+    if (cbMsgId) {
+      try {
+        await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/editMessageReplyMarkup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: cbChatId, message_id: cbMsgId, reply_markup: { inline_keyboard: [] } }),
+        });
+      } catch (e) { /* non-fatal */ }
+    }
+
+    // Same logic as text "skip" in review_sent
+    try {
+      const recData = await airtableFetch(QUEUE_TABLE + '/' + queueRecordId);
+      const rf = recData.fields || {};
+      await queueUpdate(queueRecordId, { status: 'failed', error_message: 'Skipped by user' });
+      let skipMsgIds = [];
+      try { skipMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
+      for (const mid of skipMsgIds) { await deleteTelegramMessage(mid); }
+      await updateCounterMessage(0);
+    } catch (e) {
+      console.log('[review] review_skip error: ' + e.message);
+    }
+
+    return [{ json: { type: 'review_skip', recordId: queueRecordId } }];
+  }
+
+  // ─── clips_all_ — Approve all clips (inline button) ───
+  if (cbData.startsWith('clips_all_')) {
+    const queueRecordId = cbData.substring('clips_all_'.length);
+
+    if (cbId) {
+      try {
+        await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/answerCallbackQuery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callback_query_id: cbId, text: '\u2705 Approving all clips...' }),
+        });
+      } catch (e) { /* non-fatal */ }
+    }
+
+    // Update keyboard to show progress
+    if (cbMsgId) {
+      try {
+        await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/editMessageReplyMarkup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: cbChatId, message_id: cbMsgId,
+            reply_markup: { inline_keyboard: [[{ text: '\u2705 Saving clips...', callback_data: 'noop' }]] },
+          }),
+        });
+      } catch (e) { /* non-fatal */ }
+    }
+
+    // Load record and run same logic as text "all"
+    try {
+      const recData = await airtableFetch(QUEUE_TABLE + '/' + queueRecordId);
+      const rf = recData.fields || {};
+
+      let timestamps = [];
+      try { timestamps = JSON.parse(rf.timestamps_json || '[]'); } catch (e) {}
+      let hookTexts = [];
+      try { hookTexts = JSON.parse(rf.hook_texts_json || '[]'); } catch (e) {}
+      let scenarioIds = [];
+      try { scenarioIds = JSON.parse(rf.scenario_ids_json || '[]'); } catch (e) {}
+
+      const approvedIndices = hookTexts.map(function(_, i) { return i; });
+      const videoUrl = rf.video_url;
+      const hookMode = rf.hook_mode || 'speaking';
+      const conceptId = rf.concept_id || '';
+      const conceptName = rf.concept_name || '';
+      const girlRefUrl = rf.girl_ref_url || '';
+      const sourceImageUrl = rf.source_image_url || '';
+
+      let clipsSaved = 0;
+      const vidRes = await fetch(videoUrl);
+      if (!vidRes.ok) throw new Error('Video re-download failed: ' + vidRes.status);
+      const videoBuffer = Buffer.from(await vidRes.arrayBuffer());
+      const rawPath = '/tmp/review_cb_approve_' + Date.now() + '.mp4';
+      fs.writeFileSync(rawPath, videoBuffer);
+
+      const batchId = 'gen_' + new Date().toISOString().slice(0, 10) + '_' + queueRecordId.slice(-5);
+
+      for (const idx of approvedIndices) {
+        const ts = timestamps[idx];
+        const ht = hookTexts[idx] || '';
+        const scenarioId = scenarioIds[idx] || '';
+        try {
+          const trimPath = trimClip(rawPath, ts, hookMode === 'speaking');
+          const clipBuffer = fs.readFileSync(trimPath);
+          const clipUrl = await uploadFile(clipBuffer, 'hook_' + batchId + '_' + idx + '.mp4');
+          await poolCreate({
+            batch_id: batchId, concept_id: conceptId, concept_name: conceptName,
+            hook_type: hookMode, girl_ref_url: girlRefUrl, source_image_url: sourceImageUrl,
+            source_video_url: videoUrl, video_file: [{ url: clipUrl }],
+            clip_start_sec: ts, clip_duration_sec: CLIP_DURATION, hook_text: ht,
+            scenario_id: scenarioId, status: 'ready', created_at: new Date().toISOString(),
+          });
+          clipsSaved++;
+          try { fs.unlinkSync(trimPath); } catch (e) {}
+        } catch (e) {
+          console.log('[review] clips_all save error clip ' + idx + ': ' + e.message);
+        }
+      }
+
+      try { fs.unlinkSync(rawPath); } catch (e) {}
+
+      if (clipsSaved > 0) {
+        await queueUpdate(queueRecordId, { status: 'clips_saved', reviewed_at: new Date().toISOString() });
+        let allMsgIds = [];
+        try { allMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
+        for (const mid of allMsgIds) { await deleteTelegramMessage(mid); }
+        await updateCounterMessage(clipsSaved);
+      } else {
+        await sendTelegram('No clips saved (upload failed). Reply "all" to retry or "skip".');
+      }
+    } catch (e) {
+      console.log('[review] clips_all error: ' + e.message);
+      await sendTelegram('Error saving clips: ' + e.message);
+    }
+
+    return [{ json: { type: 'clips_approve_all', recordId: queueRecordId } }];
+  }
+
+  // ─── clips_skip_ — Skip all clips (inline button) ───
+  if (cbData.startsWith('clips_skip_')) {
+    const queueRecordId = cbData.substring('clips_skip_'.length);
+
+    if (cbId) {
+      try {
+        await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/answerCallbackQuery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callback_query_id: cbId, text: '\u23ED Skipped!' }),
+        });
+      } catch (e) { /* non-fatal */ }
+    }
+
+    if (cbMsgId) {
+      try {
+        await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/editMessageReplyMarkup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: cbChatId, message_id: cbMsgId, reply_markup: { inline_keyboard: [] } }),
+        });
+      } catch (e) { /* non-fatal */ }
+    }
+
+    try {
+      const recData = await airtableFetch(QUEUE_TABLE + '/' + queueRecordId);
+      const rf = recData.fields || {};
+      await queueUpdate(queueRecordId, { status: 'failed', error_message: 'Skipped at approval' });
+      let skipMsgIds = [];
+      try { skipMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
+      for (const mid of skipMsgIds) { await deleteTelegramMessage(mid); }
+      await updateCounterMessage(0);
+    } catch (e) {
+      console.log('[review] clips_skip error: ' + e.message);
+    }
+
+    return [{ json: { type: 'clips_skip', recordId: queueRecordId } }];
+  }
+
   // Unknown callback — ignore
   console.log('[review] Unknown callback: ' + cbData);
   return [{ json: { skipped: true, reason: 'unknown_callback', data: cbData } }];
@@ -450,7 +630,13 @@ if (reviewStatus === 'review_sent') {
 
           try { fs.unlinkSync(rawPath); } catch (e) {}
 
-          const promptMsgId = await sendTelegram('Reply "all" or "1 3" to approve, or "skip"');
+          const approveKeyboard = {
+            inline_keyboard: [[
+              { text: '\u2705 Approve All', callback_data: 'clips_all_' + reviewRecord.id },
+              { text: '\u23ED Skip', callback_data: 'clips_skip_' + reviewRecord.id },
+            ]],
+          };
+          const promptMsgId = await sendTelegram('Tap to approve, or reply "1 3" for selective', approveKeyboard);
           if (promptMsgId) allMsgIds.push(promptMsgId);
 
           await queueUpdate(reviewRecord.id, {

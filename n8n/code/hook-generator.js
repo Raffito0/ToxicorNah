@@ -194,12 +194,14 @@ if (!staticData.lastQuotaNotification) staticData.lastQuotaNotification = '';
 if (!staticData.lastDailySummary) staticData.lastDailySummary = '';
 
 // ─── Telegram helpers ───
-async function sendTelegram(text) {
+async function sendTelegram(text, replyMarkup) {
   try {
+    const payload = { chat_id: ADMIN_CHAT, text: text };
+    if (replyMarkup) payload.reply_markup = replyMarkup;
     const res = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: ADMIN_CHAT, text: text }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) return null;
     const json = await res.json();
@@ -933,13 +935,19 @@ try {
           throw new Error('Telegram video send failed — will retry next tick');
         }
 
-        // Send hook texts
+        // Send hook texts with inline Skip button
         let textList = hookTexts.map(function(t, i) { return (i + 1) + ': "' + t + '"'; }).join('\n');
         const n = hookTexts.length;
         const tsExample = n === 1 ? '"4.2"' : n === 2 ? '"0.5 4.2"' : '"0.5 4.2 9.8"';
+        const skipKeyboard = {
+          inline_keyboard: [[
+            { text: '\u23ED Skip', callback_data: 'review_skip_' + record.id },
+          ]],
+        };
         const textMsgId = await sendTelegram(
           modeLabel + ' hook' + (n > 1 ? 's' : '') + ':\n' + textList +
-          '\n\nReply with ' + n + ' start time' + (n > 1 ? 's' : '') + ' in seconds (e.g. ' + tsExample + ') or "skip"'
+          '\n\nReply with ' + n + ' start time' + (n > 1 ? 's' : '') + ' in seconds (e.g. ' + tsExample + ')',
+          skipKeyboard
         );
 
         // Save message IDs for cleanup after review
