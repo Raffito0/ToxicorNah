@@ -208,27 +208,31 @@ async function sendTelegram(text) {
 }
 
 async function sendTelegramVideo(videoBuffer, caption) {
-  const boundary = '----HookGenBoundary' + Date.now();
-  const parts = [];
-  parts.push('--' + boundary + '\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n' + ADMIN_CHAT);
-  if (caption) {
-    parts.push('--' + boundary + '\r\nContent-Disposition: form-data; name="caption"\r\n\r\n' + caption);
-  }
-  parts.push('--' + boundary + '\r\nContent-Disposition: form-data; name="video"; filename="hook_video.mp4"\r\nContent-Type: video/mp4\r\n\r\n');
-
-  const prefix = Buffer.from(parts.join('\r\n'));
-  const suffix = Buffer.from('\r\n--' + boundary + '--\r\n');
-  const body = Buffer.concat([prefix, videoBuffer, suffix]);
-
   try {
+    const boundary = '----HookGenBoundary' + Date.now();
+    const header =
+      '--' + boundary + '\r\n' +
+      'Content-Disposition: form-data; name="chat_id"\r\n\r\n' +
+      ADMIN_CHAT + '\r\n' +
+      '--' + boundary + '\r\n' +
+      'Content-Disposition: form-data; name="caption"\r\n\r\n' +
+      (caption || '') + '\r\n' +
+      '--' + boundary + '\r\n' +
+      'Content-Disposition: form-data; name="video"; filename="hook_video.mp4"\r\n' +
+      'Content-Type: video/mp4\r\n\r\n';
+    const prefix = Buffer.from(header);
+    const suffix = Buffer.from('\r\n--' + boundary + '--\r\n');
+    const body = Buffer.concat([prefix, videoBuffer, suffix]);
+
+    console.log('[hookgen] Sending video: ' + videoBuffer.length + ' bytes, total body: ' + body.length + ' bytes');
     const res = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendVideo', {
       method: 'POST',
       headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary },
       body: body,
     });
-    if (!res.ok) return null;
     const json = await res.json();
-    return json.result ? json.result.message_id : null;
+    if (!json.ok) { console.log('[hookgen] sendVideo error: ' + JSON.stringify(json)); return null; }
+    return json.result.message_id;
   } catch (e) {
     console.log('[hookgen] Telegram video send error: ' + e.message);
     return null;
@@ -580,29 +584,29 @@ const tickResult = {
 try {
 
 // ═══════════════════════════════════════
-// CLEANUP — disabled for testing (re-enable in production)
+// CLEANUP — remove finished/failed queue records
 // ═══════════════════════════════════════
-// try {
-//   const failFormula = encodeURIComponent("{status}='failed'");
-//   const failData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + failFormula + '&fields%5B%5D=task_id&fields%5B%5D=error_message');
-//   const failedRecords = failData.records || [];
-//   if (failedRecords.length > 0) {
-//     for (const r of failedRecords) {
-//       console.log('[hookgen] Removing failed: ' + (r.fields.task_id || r.id) + ' — ' + (r.fields.error_message || 'no details'));
-//     }
-//     await queueDelete(failedRecords.map(r => r.id));
-//     console.log('[hookgen] Cleaned up ' + failedRecords.length + ' failed record(s)');
-//   }
-//   const doneFormula = encodeURIComponent("{status}='clips_saved'");
-//   const doneData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + doneFormula + '&fields%5B%5D=task_id');
-//   const doneRecords = doneData.records || [];
-//   if (doneRecords.length > 0) {
-//     await queueDelete(doneRecords.map(r => r.id));
-//     console.log('[hookgen] Cleaned up ' + doneRecords.length + ' completed record(s)');
-//   }
-// } catch (e) {
-//   console.log('[hookgen] Cleanup error: ' + e.message);
-// }
+try {
+  const failFormula = encodeURIComponent("{status}='failed'");
+  const failData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + failFormula + '&fields%5B%5D=task_id&fields%5B%5D=error_message');
+  const failedRecords = failData.records || [];
+  if (failedRecords.length > 0) {
+    for (const r of failedRecords) {
+      console.log('[hookgen] Removing failed: ' + (r.fields.task_id || r.id) + ' — ' + (r.fields.error_message || 'no details'));
+    }
+    await queueDelete(failedRecords.map(r => r.id));
+    console.log('[hookgen] Cleaned up ' + failedRecords.length + ' failed record(s)');
+  }
+  const doneFormula = encodeURIComponent("{status}='clips_saved'");
+  const doneData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + doneFormula + '&fields%5B%5D=task_id');
+  const doneRecords = doneData.records || [];
+  if (doneRecords.length > 0) {
+    await queueDelete(doneRecords.map(r => r.id));
+    console.log('[hookgen] Cleaned up ' + doneRecords.length + ' completed record(s)');
+  }
+} catch (e) {
+  console.log('[hookgen] Cleanup error: ' + e.message);
+}
 
 // ═══════════════════════════════════════
 // PHASE 0 — QUOTA CHECK
