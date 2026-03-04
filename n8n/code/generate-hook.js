@@ -1,12 +1,12 @@
 // NODE: Generate Hook (Self-Contained + Env Frame Extraction)
 // Routes by hook type from concept config:
 //   - manual_clip → pass through the already-uploaded hook clip file_id
-//   - ai_image / ai_single_girl → extract env frame from 1st body clip → kie.ai
-//   - ai_multi_image → kie.ai x3 images
+//   - ai_image / ai_single_girl → extract env frame from 1st body clip → fal.ai
+//   - ai_multi_image → fal.ai x3 images
 //   - chat_screenshot → Puppeteer screenshot
 //
 // Self-contained: downloads first body clip from Telegram, extracts env frame,
-// uploads to temp host, then uses [girl_ref, env_frame] as kie.ai references.
+// uploads to temp host, then uses [girl_ref, env_frame] as fal.ai references.
 // Prompt NEVER describes the girl — only "same exact girl in reference image".
 // Mode: Run Once for All Items
 
@@ -98,6 +98,7 @@ function uploadToTempHost(buffer, filename) {
 
 const KIE_API_KEY = '7670ade582cc72601f388dbdc0525b9e';
 const KIE_API_URL = 'https://api.kie.ai/api/v1/jobs';
+const FAL_KEY = (typeof $env !== 'undefined' && $env.FAL_KEY) || '1f90e772-6c27-4772-9c31-9fb0efd2ccb7:e1ae20a74cf0ad9a5be03baefd1603e0';
 const SCREENSHOT_URL = 'http://host.docker.internal:3456/screenshot';
 const MAX_RETRIES = 1;
 const RETRY_DELAY_MS = 5000;
@@ -273,35 +274,23 @@ async function withRetry(fn, label = 'API call') {
   }
 }
 
-// ─── kie.ai helpers ───
+// ─── kie.ai nano-banana-2 (async: createTask → poll) ───
 async function kieGenerate(prompt, imageRefs, options = {}) {
   const { aspectRatio = '9:16', resolution = '2K', timeOfDay = 'day', isSelfie = false } = options;
-  // Time-aware lighting + UGC style — always appended
   const lighting = timeOfDay === 'night' ? 'nighttime' : 'daytime';
-  // UGC imperfection layer — 40% chance: organic asymmetry to avoid AI-polished look
-  // V2.0: structural imperfections (not meta-descriptive words like "phone tilt")
   const imperfections = [
-    'natural uneven posture',
-    'one shoulder slightly higher than the other',
-    'subtle natural skin texture',
-    'slight under-eye shadow',
-    'pillow slightly creased beside her',
+    'natural uneven posture', 'one shoulder slightly higher than the other',
+    'subtle natural skin texture', 'slight under-eye shadow', 'pillow slightly creased beside her',
   ];
   const imperfectionSuffix = Math.random() < 0.40
-    ? ', ' + imperfections[Math.floor(Math.random() * imperfections.length)]
-    : '';
-  // Selfie = camera IS the phone, so no phone visible in frame (her hands are free)
-  // Candid = she may be holding a phone she's reading from → specify model
-  const phoneClause = isSelfie
-    ? 'no phone visible in frame, hands relaxed'
+    ? ', ' + imperfections[Math.floor(Math.random() * imperfections.length)] : '';
+  const phoneClause = isSelfie ? 'no phone visible in frame, hands relaxed'
     : 'if holding a phone it must be a black iPhone XS';
-  const finalPrompt = prompt + ', maintain exact facial features from reference, ' + phoneClause + ', ' + lighting + ', shot on iPhone 13 Pro, no background blur, no bokeh, sharp background throughout, no color grading, raw UGC phone footage style' + imperfectionSuffix;
+  const finalPrompt = prompt + ', maintain exact facial features from reference, ' + phoneClause + ', ' + lighting +
+    ', shot on iPhone 13 Pro, no background blur, no bokeh, sharp background throughout, no color grading, raw UGC phone footage style' + imperfectionSuffix;
   const res = await fetch(KIE_API_URL + '/createTask', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + KIE_API_KEY,
-    },
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + KIE_API_KEY },
     body: JSON.stringify({
       model: 'nano-banana-2',
       input: { prompt: finalPrompt, image_input: imageRefs, aspect_ratio: aspectRatio, resolution, output_format: 'png' },
@@ -314,13 +303,12 @@ async function kieGenerate(prompt, imageRefs, options = {}) {
 }
 
 async function kiePoll(taskId) {
-  // Infinite polling — no timeout. Retries on network errors with doubled delay.
   const POLL_INTERVAL = 5000;
-  let attempt = 0;
-  while (true) {
-    attempt++;
+  const TIMEOUT = 120000;
+  const deadline = Date.now() + TIMEOUT;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL));
     try {
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
       const res = await fetch(KIE_API_URL + '/recordInfo?taskId=' + taskId, {
         headers: { 'Authorization': 'Bearer ' + KIE_API_KEY },
       });
@@ -331,12 +319,58 @@ async function kiePoll(taskId) {
         return JSON.parse(data.data.resultJson).resultUrls?.[0];
       }
       if (state === 'fail') throw new Error(data.data.failMsg || 'Generation failed');
-      // state === 'waiting' → keep polling
     } catch (err) {
       if (err.message.includes('failed') || err.message.includes('Generation')) throw err;
-      // Network error → wait longer and retry
-      await new Promise(r => setTimeout(r, POLL_INTERVAL * 2));
     }
+  }
+  throw new Error('kie.ai poll timeout after 120s');
+}
+
+// ─── fal.ai nano-banana-2 (synchronous — no polling needed) ───
+async function falGenerate(prompt, imageRefs, options = {}) {
+  const { aspectRatio = '9:16', resolution = '2K', timeOfDay = 'day', isSelfie = false } = options;
+  const lighting = timeOfDay === 'night'
+    ? 'soft ambient night lighting, consistent with previous scene'
+    : 'natural daylight consistent with previous scene';
+  const imperfectionPool = [
+    'subtle natural skin texture', 'slight asymmetry in posture',
+    'very faint under-eye shadow', 'natural uneven shoulder position',
+  ];
+  const imperfectionSuffix = Math.random() < 0.20
+    ? ', ' + imperfectionPool[Math.floor(Math.random() * imperfectionPool.length)] : '';
+  const framingSuffix = isSelfie
+    ? 'realistic selfie framing, handheld phone shot, looking directly into camera'
+    : 'realistic candid framing';
+  const ugcSuffix = ', maintain exact facial features from reference, wearing the exact same outfit and clothing as in the reference image, if holding a phone it must be a black iPhone XS, ' + lighting +
+    ', shot on iPhone, natural indoor lighting, ' + framingSuffix + ', 9:16 vertical' + imperfectionSuffix;
+  const finalPrompt = prompt + ugcSuffix;
+  console.log('[fal.ai] Generating image: ' + finalPrompt.slice(0, 100) + '...');
+  const res = await fetch('https://fal.run/fal-ai/nano-banana-2/edit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Key ' + FAL_KEY },
+    body: JSON.stringify({ prompt: finalPrompt, image_urls: imageRefs, resolution, aspect_ratio: aspectRatio, output_format: 'png' }),
+  });
+  if (!res.ok) throw new Error('fal.ai: ' + res.status + ' ' + (await res.text()).slice(0, 300));
+  const data = await res.json();
+  if (!data.images?.[0]?.url) throw new Error('fal.ai: no image URL in response: ' + JSON.stringify(data).slice(0, 300));
+  console.log('[fal.ai] Image ready: ' + data.images[0].url);
+  return data.images[0].url;
+}
+
+// ─── generateImage: kie.ai primary → fal.ai fallback ───
+async function generateImage(prompt, imageRefs, options = {}) {
+  try {
+    console.log('[imageGen] Trying kie.ai...');
+    const taskId = await kieGenerate(prompt, imageRefs, options);
+    const url = await kiePoll(taskId);
+    if (!url) throw new Error('kie.ai returned no image URL');
+    console.log('[imageGen] kie.ai OK: ' + url);
+    return url;
+  } catch (kieErr) {
+    console.log('[imageGen] kie.ai failed: ' + kieErr.message + ' — falling back to fal.ai');
+    const url = await falGenerate(prompt, imageRefs, options);
+    console.log('[imageGen] fal.ai fallback OK: ' + url);
+    return url;
   }
 }
 
@@ -577,8 +611,8 @@ if (hookType === 'manual_clip') {
 // Extracts env frame from first body clip, generates girl in that environment
 // ═══════════════════════════════════════
 if (hookType === 'ai_image' || hookType === 'ai_single_girl') {
-  if (!KIE_API_KEY) {
-    return [{ json: { error: true, chatId, message: 'kie.ai API key not configured' } }];
+  if (!KIE_API_KEY && !FAL_KEY) {
+    return [{ json: { error: true, chatId, message: 'No image gen API key configured' } }];
   }
 
   const girlRefUrl = production.girlRefUrl || '';
@@ -605,11 +639,10 @@ if (hookType === 'ai_image' || hookType === 'ai_single_girl') {
 
   try {
     const result = await withRetry(async () => {
-      const taskId = await kieGenerate(hookPrompt, imageRefs, { timeOfDay });
-      const imageUrl = await kiePoll(taskId);
-      if (!imageUrl) throw new Error('kie.ai returned no image');
+      const imageUrl = await generateImage(hookPrompt, imageRefs, { timeOfDay });
+      if (!imageUrl) throw new Error('Image gen returned no image');
       return imageUrl;
-    }, 'kie.ai hook');
+    }, 'hook image');
 
     const imgRes = await fetch(result);
     const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
@@ -654,8 +687,8 @@ if (hookType === 'ai_image' || hookType === 'ai_single_girl') {
 // AI MULTI IMAGE — 3 images for before_after
 // ═══════════════════════════════════════
 if (hookType === 'ai_multi_image') {
-  if (!KIE_API_KEY) {
-    return [{ json: { error: true, chatId, message: 'kie.ai API key not configured' } }];
+  if (!KIE_API_KEY && !FAL_KEY) {
+    return [{ json: { error: true, chatId, message: 'No image gen API key configured' } }];
   }
 
   const girlRefUrl = production.girlRefUrl || '';
@@ -684,11 +717,10 @@ if (hookType === 'ai_multi_image') {
   try {
     for (let i = 0; i < scenes.length; i++) {
       const imageUrl = await withRetry(async () => {
-        const taskId = await kieGenerate(scenes[i], imageRefs, { timeOfDay });
-        const url = await kiePoll(taskId);
+        const url = await generateImage(scenes[i], imageRefs, { timeOfDay });
         if (!url) throw new Error('Image ' + (i + 1) + ' returned no URL');
         return url;
-      }, 'kie.ai multi-hook #' + (i + 1));
+      }, 'multi-hook image #' + (i + 1));
 
       const imgRes = await fetch(imageUrl);
       const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
@@ -868,12 +900,12 @@ if (hookType === 'reaction' || hookType === 'speaking') {
 }
 
 // ═══════════════════════════════════════
-// SPEAKING HOOK — Step 1: Generate original image with kie.ai
+// SPEAKING HOOK — Step 1: Generate original image with fal.ai
 // Image gets approved on Telegram, then Img2Vid node converts via Sora 2 (speaking)
 // ═══════════════════════════════════════
 if (hookType === 'speaking') {
-  if (!KIE_API_KEY) {
-    return [{ json: { error: true, chatId, message: '❌ kie.ai API key not configured' } }];
+  if (!KIE_API_KEY && !FAL_KEY) {
+    return [{ json: { error: true, chatId, message: '❌ No image gen API key configured' } }];
   }
 
   const girlRefUrl = production.girlRefUrl || '';
@@ -913,11 +945,10 @@ if (hookType === 'speaking') {
     const imageRefs = [girlRefUrl];
 
     const generatedImageUrl = await withRetry(async () => {
-      const taskId = await kieGenerate(imagePrompt, imageRefs, { timeOfDay, isSelfie: true });
-      const url = await kiePoll(taskId);
-      if (!url) throw new Error('kie.ai returned no image');
+      const url = await generateImage(imagePrompt, imageRefs, { timeOfDay, isSelfie: true });
+      if (!url) throw new Error('Image gen returned no image');
       return url;
-    }, 'kie.ai hook for speaking');
+    }, 'speaking hook image');
 
     const imgRes = await fetch(generatedImageUrl);
     const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
@@ -928,7 +959,7 @@ if (hookType === 'speaking') {
         hookSource: 'speaking',
         hookImageUrl: generatedImageUrl,
         hookPromptUsed: imagePrompt,
-        hookPromptSource: 'kie_ai',
+        hookPromptSource: 'fal_ai',
         hookPoseCategory: poseCategory,
         hookPoseDesc: poseDesc,
         envFrameUsed: false,
@@ -959,12 +990,12 @@ if (hookType === 'speaking') {
 }
 
 // ═══════════════════════════════════════
-// REACTION HOOK — Step 1: Generate original image with kie.ai
+// REACTION HOOK — Step 1: Generate original image with fal.ai
 // Image gets approved on Telegram, then Img2Vid node converts via Sora 2 (reaction)
 // ═══════════════════════════════════════
 if (hookType === 'reaction') {
-  if (!KIE_API_KEY) {
-    return [{ json: { error: true, chatId, message: '❌ kie.ai API key not configured' } }];
+  if (!KIE_API_KEY && !FAL_KEY) {
+    return [{ json: { error: true, chatId, message: '❌ No image gen API key configured' } }];
   }
 
   const girlRefUrl = production.girlRefUrl || '';
@@ -1005,11 +1036,10 @@ if (hookType === 'reaction') {
     const imageRefs = [girlRefUrl];
 
     const generatedImageUrl = await withRetry(async () => {
-      const taskId = await kieGenerate(imagePrompt, imageRefs, { timeOfDay });
-      const url = await kiePoll(taskId);
-      if (!url) throw new Error('kie.ai returned no image');
+      const url = await generateImage(imagePrompt, imageRefs, { timeOfDay });
+      if (!url) throw new Error('Image gen returned no image');
       return url;
-    }, 'kie.ai hook for reaction');
+    }, 'reaction hook image');
 
     const imgRes = await fetch(generatedImageUrl);
     const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
@@ -1020,7 +1050,7 @@ if (hookType === 'reaction') {
         hookSource: 'reaction',
         hookImageUrl: generatedImageUrl,
         hookPromptUsed: imagePrompt,
-        hookPromptSource: 'kie_ai',
+        hookPromptSource: 'fal_ai',
         hookPoseCategory: poseCategory,
         hookPoseDesc: poseDesc,
         envFrameUsed: false,

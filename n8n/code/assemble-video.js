@@ -204,10 +204,11 @@ for (let i = 0; i < bodySegments.length; i++) {
   const seg = bodySegments[i];
   const idx = streamIdx++;
   const label = 'body' + i;
-  const actual = seg.actualDuration || probeDuration(seg.localPath);
+  // Always probe the real file duration — Airtable clip_duration_sec may be stale/wrong
+  const actual = probeDuration(seg.localPath) || seg.actualDuration || 0;
   const target = seg.targetDuration || 3.0;
-  // Always take the last `target` seconds of the clip
-  const startOffset = Math.max(0, actual - target);
+  // Always take the FIRST `target` seconds of the clip
+  const startOffset = 0;
 
   inputs.push('-i ' + q(seg.localPath));
 

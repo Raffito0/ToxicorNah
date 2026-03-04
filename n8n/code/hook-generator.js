@@ -5,9 +5,9 @@
 //   Phase 1.5: PROCESS IMAGE APPROVALS — submit approved images to Sora 2, redo rejected
 //   Phase 2: DELIVER COMPLETED — download finished video, send to Telegram
 //   Phase 3: PROCESS REVIEWS — moved to webhook (process-review.js)
-//   Phase 4: GENERATE IMAGE — kie.ai image + send to Telegram for approval
+//   Phase 4: GENERATE IMAGE — fal.ai image + send to Telegram for approval
 //
-// Multi-provider: kie.ai (active, primary), PoYo (active, secondary), APIMart (disabled), laozhang (disabled)
+// Multi-provider (Sora 2 video): kie.ai (active, primary), PoYo (active, secondary), APIMart (disabled), laozhang (disabled)
 // State stored in Airtable "Hook Generation Queue" table.
 // Telegram review is non-blocking — videos queue up, user reviews at their pace.
 //
@@ -77,6 +77,7 @@ const ADMIN_CHAT = '5120450288';
 
 const KIE_API_KEY = '7670ade582cc72601f388dbdc0525b9e';
 const KIE_API_URL = 'https://api.kie.ai/api/v1/jobs';
+const FAL_KEY = (typeof $env !== 'undefined' && $env.FAL_KEY) || '1f90e772-6c27-4772-9c31-9fb0efd2ccb7:e1ae20a74cf0ad9a5be03baefd1603e0';
 
 // ─── Quota constants ───
 const VIDEOS_PER_DAY = 10;
@@ -300,7 +301,7 @@ async function sendTelegramPhoto(photoUrl, caption, replyMarkup) {
   }
 }
 
-// ─── kie.ai helpers ───
+// ─── kie.ai nano-banana-2 (async: createTask → poll) ───
 async function kieGenerate(prompt, imageRefs) {
   const finalPrompt = prompt + ', maintain exact facial features from reference, shot on iPhone 13 Pro, no background blur, no bokeh, sharp background throughout, no color grading, raw UGC phone footage style';
   const res = await fetch(KIE_API_URL + '/createTask', {
@@ -319,7 +320,7 @@ async function kieGenerate(prompt, imageRefs) {
 
 async function kiePoll(taskId) {
   const POLL_INTERVAL = 5000;
-  const TIMEOUT = 120000; // 2 min max for kie.ai
+  const TIMEOUT = 120000;
   const deadline = Date.now() + TIMEOUT;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, POLL_INTERVAL));
@@ -330,24 +331,52 @@ async function kiePoll(taskId) {
       });
       if (!res.ok) continue;
       data = await res.json();
-    } catch (err) {
-      // Network error — retry next poll
-      continue;
-    }
+    } catch (err) { continue; }
     const state = data.data && data.data.state;
     if (state === 'success') {
       try {
-        const resultJson = JSON.parse(data.data.resultJson);
-        const url = resultJson.resultUrls && resultJson.resultUrls[0];
-        if (!url) throw new Error('kie.ai success but no resultUrls in response: ' + JSON.stringify(resultJson).slice(0, 500));
-        return url;
-      } catch (parseErr) {
-        throw new Error('kie.ai success but failed to parse result: ' + parseErr.message + ' | raw resultJson: ' + String(data.data.resultJson).slice(0, 500));
-      }
+        var resultJson = JSON.parse(data.data.resultJson);
+        return resultJson.resultUrls && resultJson.resultUrls[0];
+      } catch (e) { throw new Error('kie.ai parse error: ' + e.message); }
     }
     if (state === 'fail') throw new Error(data.data.failMsg || 'kie.ai generation failed');
   }
   throw new Error('kie.ai poll timeout after 120s');
+}
+
+// ─── fal.ai nano-banana-2 (synchronous — no polling needed) ───
+async function falGenerate(prompt, imageRefs) {
+  const finalPrompt = prompt + ', maintain exact facial features from reference, shot on iPhone 13 Pro, no background blur, no bokeh, sharp background throughout, no color grading, raw UGC phone footage style';
+  console.log('[hookgen] fal.ai generating: ' + finalPrompt.slice(0, 100) + '...');
+  const res = await fetch('https://fal.run/fal-ai/nano-banana-2/edit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Key ' + FAL_KEY },
+    body: JSON.stringify({ prompt: finalPrompt, image_urls: imageRefs, resolution: '2K', aspect_ratio: '9:16', output_format: 'png' }),
+  });
+  if (!res.ok) throw new Error('fal.ai: ' + res.status + ' ' + (await res.text()).slice(0, 300));
+  const data = await res.json();
+  if (!data.images || !data.images[0] || !data.images[0].url) {
+    throw new Error('fal.ai: no image URL in response: ' + JSON.stringify(data).slice(0, 300));
+  }
+  console.log('[hookgen] fal.ai image ready: ' + data.images[0].url);
+  return data.images[0].url;
+}
+
+// ─── generateImage: kie.ai primary → fal.ai fallback ───
+async function generateImage(prompt, imageRefs) {
+  try {
+    console.log('[hookgen] Trying kie.ai for image...');
+    const taskId = await kieGenerate(prompt, imageRefs);
+    const url = await kiePoll(taskId);
+    if (!url) throw new Error('kie.ai returned no image URL');
+    console.log('[hookgen] kie.ai OK: ' + url);
+    return url;
+  } catch (kieErr) {
+    console.log('[hookgen] kie.ai failed: ' + kieErr.message + ' — falling back to fal.ai');
+    const url = await falGenerate(prompt, imageRefs);
+    console.log('[hookgen] fal.ai fallback OK: ' + url);
+    return url;
+  }
 }
 
 // ─── FFmpeg burn timecode overlay (best-effort) ───
@@ -710,7 +739,7 @@ try {
     }
 
     const f = record.fields;
-    const kieImageUrl = f.source_image_url;
+    const sourceImageUrl = f.source_image_url;
     const motionPrompt = f.motion_prompt || '';
 
     // Pick provider (round-robin)
@@ -720,7 +749,7 @@ try {
     console.log('[hookgen] Phase 1.5: Submitting to ' + provider.name + ' for record ' + record.id);
 
     try {
-      const taskId = await providerSubmit(provider, motionPrompt, kieImageUrl);
+      const taskId = await providerSubmit(provider, motionPrompt, sourceImageUrl);
       await queueUpdate(record.id, {
         status: 'submitted',
         task_id: taskId,
@@ -749,7 +778,7 @@ try {
 
   for (const record of stuckRecords) {
     const f = record.fields;
-    const kieImageUrl = f.source_image_url;
+    const sourceImageUrl = f.source_image_url;
     const conceptName = f.concept_name || '';
     const hookMode = f.hook_mode || 'speaking';
     const modeLabel = hookMode === 'speaking' ? 'Speaking' : 'Reaction';
@@ -765,7 +794,7 @@ try {
       ]],
     };
 
-    const msgId = await sendTelegramPhoto(kieImageUrl, caption, replyMarkup);
+    const msgId = await sendTelegramPhoto(sourceImageUrl, caption, replyMarkup);
     if (msgId) {
       await queueUpdate(record.id, { telegram_msg_id: JSON.stringify([msgId]) });
       console.log('[hookgen] Phase 1.5: Re-sent stuck image for ' + conceptName);
@@ -798,10 +827,9 @@ try {
     for (const mid of oldMsgIds) { await deleteTelegramMessage(mid); }
 
     try {
-      // Generate new image
+      // Generate new image via fal.ai
       const imagePrompt = isSpeaking ? pickRandom(SPEAKING_IMAGE_PROMPTS) : pickRandom(REACTION_IMAGE_PROMPTS);
-      const kieTaskId = await kieGenerate(imagePrompt, [girlRefUrl]);
-      const kieImageUrl = await kiePoll(kieTaskId);
+      const falImageUrl = await generateImage(imagePrompt, [girlRefUrl]);
 
       // Send new image for approval
       const modeLabel = isSpeaking ? 'Speaking' : 'Reaction';
@@ -815,11 +843,11 @@ try {
           { text: '\uD83D\uDD04 Redo', callback_data: 'hookImg_redo_' + record.id },
         ]],
       };
-      const msgId = await sendTelegramPhoto(kieImageUrl, caption, replyMarkup);
+      const msgId = await sendTelegramPhoto(falImageUrl, caption, replyMarkup);
 
       await queueUpdate(record.id, {
         status: 'image_approval',
-        source_image_url: kieImageUrl,
+        source_image_url: falImageUrl,
         telegram_msg_id: JSON.stringify(msgId ? [msgId] : []),
       });
       imgRedone++;
@@ -1098,10 +1126,9 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
           console.log('[hookgen] Generating image: ' + concept.conceptId + ' (' + hookMode + '), ' + groupScenarios.length + ' scenarios');
 
           try {
-            // kie.ai image generation
+            // fal.ai image generation (synchronous — no polling)
             const imagePrompt = isSpeaking ? pickRandom(SPEAKING_IMAGE_PROMPTS) : pickRandom(REACTION_IMAGE_PROMPTS);
-            const kieTaskId = await kieGenerate(imagePrompt, [concept.girlRefUrl]);
-            const kieImageUrl = await kiePoll(kieTaskId);
+            const falImageUrl = await generateImage(imagePrompt, [concept.girlRefUrl]);
 
             // Build Sora 2 prompt (stored for Phase 1.5 after approval)
             const hookTexts = groupScenarios.map(function(s) { return s.hookText; });
@@ -1119,7 +1146,7 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
               hook_mode: hookMode,
               scenario_ids_json: JSON.stringify(groupScenarios.map(function(s) { return s.recordId; })),
               hook_texts_json: JSON.stringify(hookTexts),
-              source_image_url: kieImageUrl,
+              source_image_url: falImageUrl,
               girl_ref_url: concept.girlRefUrl,
               motion_prompt: sora2Prompt,
               status: 'image_approval',
@@ -1137,7 +1164,7 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
                 { text: '\uD83D\uDD04 Redo', callback_data: 'hookImg_redo_' + queueRecordId },
               ]],
             };
-            const msgId = await sendTelegramPhoto(kieImageUrl, caption, replyMarkup);
+            const msgId = await sendTelegramPhoto(falImageUrl, caption, replyMarkup);
             if (msgId) {
               await queueUpdate(queueRecordId, { telegram_msg_id: JSON.stringify([msgId]) });
             }
