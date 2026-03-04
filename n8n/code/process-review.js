@@ -186,7 +186,9 @@ async function uploadFile(buffer, filename) {
   const sendData = await sendRes.json();
   if (!sendData.ok) throw new Error('Telegram sendDocument failed: ' + JSON.stringify(sendData).slice(0, 200));
 
-  const fileId = sendData.result.document.file_id;
+  const doc = sendData.result.document || sendData.result.video || sendData.result.animation;
+  if (!doc) throw new Error('Telegram sendDocument: no file in response: ' + JSON.stringify(sendData.result).slice(0, 300));
+  const fileId = doc.file_id;
   const msgId = sendData.result.message_id;
 
   // Get direct download URL
