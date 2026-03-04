@@ -209,21 +209,6 @@ async function poolCreate(fields) {
   });
 }
 
-async function uploadAttachment(recordId, fieldName, buffer, filename) {
-  const url = 'https://content.airtable.com/v0/' + ABASE + '/' + recordId + '/' + fieldName + '/uploadAttachment';
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + ATOKEN,
-      'Content-Type': 'video/mp4',
-      'Content-Disposition': 'attachment; filename="' + filename + '"',
-    },
-    body: buffer,
-  });
-  if (!res.ok) throw new Error('Airtable upload: ' + res.status + ' ' + (await res.text()).slice(0, 200));
-  return res.json();
-}
-
 // ─── Counter message helpers ───
 // Stores the "Clips saved" counter msg_id in a special __counter__ queue record
 async function getCounter() {
@@ -445,19 +430,16 @@ if (callbackQuery) {
         try {
           const trimPath = trimClip(rawPath, ts, hookMode === 'speaking');
           const clipBuffer = fs.readFileSync(trimPath);
+          const clipUrl = await uploadFile(clipBuffer, 'hook_' + batchId + '_' + idx + '.mp4');
 
-          // Create pool record first (without video_file)
-          const poolResult = await poolCreate({
+          await poolCreate({
             batch_id: batchId, concept_id: conceptId, concept_name: conceptName,
             hook_type: hookMode, girl_ref_url: girlRefUrl, source_image_url: sourceImageUrl,
             source_video_url: videoUrl,
+            video_file: [{ url: clipUrl }],
             clip_start_sec: ts, clip_duration_sec: CLIP_DURATION, hook_text: ht,
             scenario_id: scenarioId, status: 'ready', created_at: new Date().toISOString(),
           });
-          const poolRecordId = poolResult.records[0].id;
-
-          // Upload clip directly to Airtable attachment field
-          await uploadAttachment(poolRecordId, 'video_file', clipBuffer, 'hook_' + batchId + '_' + idx + '.mp4');
 
           clipsSaved++;
           try { fs.unlinkSync(trimPath); } catch (e) {}
