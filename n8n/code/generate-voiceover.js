@@ -342,14 +342,39 @@ const copyJson = production.copyJson;
 const template = production.template;
 const segments = (template && template.segments) || [];
 
-// V3: Check if hook came from pool
-// 'pool' = speaking pool clip (audio baked in) → skip hook VO entirely
-// 'pool_reaction' = reaction pool clip (silent) → still need hook VO
-const hookSourceValue = (() => {
-  try { return $('Generate Hook').first().json.hookSource; } catch(e) { return ''; }
-})();
-const hookFromPool = hookSourceValue === 'pool'; // only TRUE for speaking pool (skip VO)
-const hookFromPoolReaction = hookSourceValue === 'pool_reaction'; // reaction pool: DO generate VO
+// V3: Check if hook will come from pool (query Hook Pool directly)
+// Generate Hook runs AFTER VO generation, so we can't read $('Generate Hook').
+// Instead, check Airtable Hook Pool for ready clips matching this scenario.
+const scenarioRecordId = production.scenarioRecordId || '';
+let hookFromPool = false;
+let hookFromPoolReaction = false;
+if (scenarioRecordId) {
+  const ATOKEN_VO = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
+  if (ATOKEN_VO) {
+    try {
+      const poolFormula = encodeURIComponent("AND({status}='ready',{scenario_id}='" + scenarioRecordId + "')");
+      const poolRes = await fetch(
+        'https://api.airtable.com/v0/appsgjIdkpak2kaXq/tbl3q91o3l0isSX9w?filterByFormula=' + poolFormula + '&maxRecords=1',
+        { headers: { 'Authorization': 'Bearer ' + ATOKEN_VO } }
+      );
+      if (poolRes.ok) {
+        const poolData = await poolRes.json();
+        if (poolData.records && poolData.records.length > 0) {
+          const poolHookType = poolData.records[0].fields.hook_type || 'speaking';
+          if (poolHookType === 'speaking') {
+            hookFromPool = true;
+            console.log('[VO] Hook Pool has ready speaking clip — will skip hook VO');
+          } else {
+            hookFromPoolReaction = true;
+            console.log('[VO] Hook Pool has ready reaction clip — hook VO still needed');
+          }
+        }
+      }
+    } catch(e) {
+      console.log('[VO] Hook Pool check failed: ' + e.message + ' — generating hook VO as fallback');
+    }
+  }
+}
 
 // ═══════════════════════════════════════
 // DEBUG MODE — skip Fish.audio TTS, return dummy audio per segment

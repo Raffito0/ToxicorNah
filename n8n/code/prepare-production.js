@@ -268,15 +268,26 @@ const bodyClips = clipRecords
   }));
 
 // Map clips to template body segments
+// Body clip sections use different names than template (e.g. chat_upload vs upload_chat)
+const SECTION_ALIASES = {
+  'chat_upload': 'upload_chat',
+  'score_reveal': 'toxic_score',
+  'soul_type_card': 'soul_type',
+  'decoded_insight': 'deep_dive',
+};
 const bodySegments = template.segments.filter(s => s.section !== 'hook' && s.section !== 'outro');
-const clipMapping = bodySegments.map((seg, i) => {
-  let clip = bodyClips.find(c => c.section === seg.section);
-  if (!clip && i < bodyClips.length) clip = bodyClips[i];
+// Build from actual body clips (not template segments) to avoid off-by-one
+// when template has segments without matching clips (e.g. screenshot)
+const clipMapping = bodyClips.map((clip, i) => {
+  const normalized = SECTION_ALIASES[clip.section] || clip.section;
+  const seg = bodySegments.find(s => s.section === normalized)
+           || bodySegments.find(s => s.section === clip.section)
+           || (i < bodySegments.length ? bodySegments[i] : null);
   return {
-    section: seg.section,
-    targetDuration: seg.duration,
-    fileId: clip ? clip.fileId : null,
-    actualDuration: clip ? clip.duration : null,
+    section: clip.section, // keep original name for caption matching in assemble
+    targetDuration: seg ? seg.duration : clip.duration || 3.0,
+    fileId: clip.fileId,
+    actualDuration: clip.duration || 0,
   };
 });
 
