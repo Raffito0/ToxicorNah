@@ -435,6 +435,9 @@ if (callbackQuery) {
       const sourceImageUrl = rf.source_image_url || '';
 
       let clipsSaved = 0;
+      let allMsgIds = [];
+      try { allMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
+
       const vidRes = await fetch(videoUrl);
       if (!vidRes.ok) throw new Error('Video re-download failed: ' + vidRes.status);
       const videoBuffer = Buffer.from(await vidRes.arrayBuffer());
@@ -474,16 +477,18 @@ if (callbackQuery) {
 
       if (clipsSaved > 0) {
         await queueUpdate(queueRecordId, { status: 'clips_saved', reviewed_at: new Date().toISOString() });
-        let allMsgIds = [];
-        try { allMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
         for (const mid of allMsgIds) { await deleteTelegramMessage(mid); }
         await updateCounterMessage(clipsSaved);
       } else {
-        await sendTelegram('Upload failed: ' + (lastClipError || 'unknown') + '\nReply "all" to retry or "skip".');
+        const errMid = await sendTelegram('Upload failed: ' + (lastClipError || 'unknown') + '\nReply "all" to retry or "skip".');
+        if (errMid) allMsgIds.push(errMid);
+        await queueUpdate(queueRecordId, { telegram_msg_id: JSON.stringify(allMsgIds) });
       }
     } catch (e) {
       console.log('[review] clips_all error: ' + e.message);
-      await sendTelegram('Error saving clips: ' + e.message);
+      const errMid = await sendTelegram('Error saving clips: ' + e.message);
+      if (errMid) allMsgIds.push(errMid);
+      try { await queueUpdate(queueRecordId, { telegram_msg_id: JSON.stringify(allMsgIds) }); } catch (e2) {}
     }
 
     return [{ json: { type: 'clips_approve_all', recordId: queueRecordId } }];
@@ -697,8 +702,15 @@ if (reviewStatus === 'clips_preview_sent') {
         .filter(function(n) { return n >= 0 && n < hookTexts.length; });
     }
 
+    // Track all message IDs (existing + user + any new error messages) for cleanup
+    let allMsgIds = [];
+    try { allMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
+    allMsgIds.push(userMsgId);
+
     if (approvedIndices.length === 0) {
-      await sendTelegram('No valid clips selected. Reply "all", "1 3", or "skip".');
+      const errMid = await sendTelegram('No valid clips selected. Reply "all", "1 3", or "skip".');
+      if (errMid) allMsgIds.push(errMid);
+      await queueUpdate(reviewRecord.id, { telegram_msg_id: JSON.stringify(allMsgIds) });
     } else {
       const videoUrl = rf.video_url;
       const hookMode = rf.hook_mode || 'speaking';
@@ -752,14 +764,18 @@ if (reviewStatus === 'clips_preview_sent') {
             try { fs.unlinkSync(trimPath); } catch (e) {}
           } catch (e) {
             console.log('[review] Save error clip ' + idx + ': ' + e.message);
-            await sendTelegram('Clip ' + (idx + 1) + ' save failed: ' + e.message);
+            const errMid = await sendTelegram('Clip ' + (idx + 1) + ' save failed: ' + e.message);
+            if (errMid) allMsgIds.push(errMid);
           }
         }
 
         try { fs.unlinkSync(rawPath); } catch (e) {}
 
         if (clipsSaved === 0) {
-          await sendTelegram('No clips saved (upload failed). Reply "all" to retry or "skip".');
+          const errMid = await sendTelegram('No clips saved (upload failed). Reply "all" to retry or "skip".');
+          if (errMid) allMsgIds.push(errMid);
+          // Save all msg IDs so next retry can clean them up
+          await queueUpdate(reviewRecord.id, { telegram_msg_id: JSON.stringify(allMsgIds) });
           result.processed = true;
           result.action = 'save_failed';
         } else {
@@ -768,10 +784,7 @@ if (reviewStatus === 'clips_preview_sent') {
             reviewed_at: new Date().toISOString(),
           });
 
-          // Delete ALL messages for this video (bot + user messages)
-          let allMsgIds = [];
-          try { allMsgIds = JSON.parse(rf.telegram_msg_id || '[]'); } catch (e) {}
-          allMsgIds.push(userMsgId);
+          // Delete ALL messages for this video (bot + user + error messages)
           for (const mid of allMsgIds) {
             await deleteTelegramMessage(mid);
           }
@@ -786,7 +799,9 @@ if (reviewStatus === 'clips_preview_sent') {
 
       } catch (e) {
         console.log('[review] Approval error: ' + e.message);
-        await sendTelegram('Error saving clips: ' + e.message + '. Reply "all" to retry or "skip".');
+        const errMid = await sendTelegram('Error saving clips: ' + e.message + '. Reply "all" to retry or "skip".');
+        if (errMid) allMsgIds.push(errMid);
+        await queueUpdate(reviewRecord.id, { telegram_msg_id: JSON.stringify(allMsgIds) });
         result.processed = true;
         result.action = 'approval_error';
       }
