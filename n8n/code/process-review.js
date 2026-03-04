@@ -161,25 +161,44 @@ function trimClip(videoPath, startSec, keepAudio) {
   return outPath;
 }
 
-// ─── Upload to catbox.moe ───
+// ─── Upload via Telegram (sendDocument → getFile → direct URL) ───
 async function uploadFile(buffer, filename) {
-  const boundary = '----CatboxBoundary' + Date.now();
-  let parts = '';
-  parts += '--' + boundary + '\r\nContent-Disposition: form-data; name="reqtype"\r\n\r\nfileupload\r\n';
-  parts += '--' + boundary + '\r\nContent-Disposition: form-data; name="fileToUpload"; filename="' + filename + '"\r\nContent-Type: video/mp4\r\n\r\n';
-  const prefix = Buffer.from(parts);
+  const boundary = '----TGUploadBoundary' + Date.now();
+  const header =
+    '--' + boundary + '\r\n' +
+    'Content-Disposition: form-data; name="chat_id"\r\n\r\n' +
+    ADMIN_CHAT + '\r\n' +
+    '--' + boundary + '\r\n' +
+    'Content-Disposition: form-data; name="disable_notification"\r\n\r\ntrue\r\n' +
+    '--' + boundary + '\r\n' +
+    'Content-Disposition: form-data; name="document"; filename="' + filename + '"\r\n' +
+    'Content-Type: video/mp4\r\n\r\n';
+  const prefix = Buffer.from(header);
   const suffix = Buffer.from('\r\n--' + boundary + '--\r\n');
   const body = Buffer.concat([prefix, buffer, suffix]);
 
-  console.log('[review] Uploading to catbox.moe (' + buffer.length + ' bytes)...');
-  const res = await fetch('https://catbox.moe/user/api.php', {
+  console.log('[review] Uploading to Telegram (' + buffer.length + ' bytes)...');
+  const sendRes = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendDocument', {
     method: 'POST',
     headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary },
     body: body,
   });
-  const url = (await res.text()).trim();
-  if (!url.startsWith('http')) throw new Error('Catbox upload failed: ' + url.slice(0, 200));
-  console.log('[review] Catbox URL: ' + url);
+  const sendData = await sendRes.json();
+  if (!sendData.ok) throw new Error('Telegram sendDocument failed: ' + JSON.stringify(sendData).slice(0, 200));
+
+  const fileId = sendData.result.document.file_id;
+  const msgId = sendData.result.message_id;
+
+  // Get direct download URL
+  const fileRes = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/getFile?file_id=' + fileId);
+  const fileData = await fileRes.json();
+  if (!fileData.ok || !fileData.result.file_path) throw new Error('Telegram getFile failed');
+  const url = 'https://api.telegram.org/file/bot' + PREP01_BOT + '/' + fileData.result.file_path;
+  console.log('[review] Telegram file URL: ' + url);
+
+  // Delete the document message (keep chat clean)
+  try { await deleteTelegramMessage(msgId); } catch (e) {}
+
   return url;
 }
 
