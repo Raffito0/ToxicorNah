@@ -389,9 +389,10 @@ if (selectedOutro.type === 'ai_generated') {
 // ═══════════════════════════════════════
 if (effectiveOutroType === 'app_store_clip') {
   // App store clips loaded from upstream Airtable node
+  // Filter out empty items from alwaysOutputData (node outputs {} when Airtable returns 0 records)
   let appStoreClips = [];
   try {
-    appStoreClips = $('Find App Store Clips').all().map(i => i.json);
+    appStoreClips = $('Find App Store Clips').all().map(i => i.json).filter(c => c.clip_name || c.clip_file);
   } catch(e) {
     // Node might not exist yet or returned no items
   }
@@ -422,6 +423,20 @@ if (effectiveOutroType === 'app_store_clip') {
   let clipFileUrl = null;
   if (Array.isArray(selected.clip_file) && selected.clip_file.length > 0) {
     clipFileUrl = selected.clip_file[0].url;
+  }
+
+  if (!clipFileUrl) {
+    // Clip record exists but has no file attachment — skip outro
+    return [{
+      json: {
+        outroReady: true,
+        outroSkipped: true,
+        outroSource: 'app_store_fallback_skip',
+        chatId,
+        scenarioName,
+        warning: '⚠️ App store clip "' + (selected.clip_name || '?') + '" has no file. Skipping outro.',
+      }
+    }];
   }
 
   return [{

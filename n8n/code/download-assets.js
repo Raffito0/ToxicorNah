@@ -298,6 +298,9 @@ if (clipMapping.length === 0) {
 const hookSource = (() => { try { return $('Generate Hook').first().json.hookSource || ''; } catch(e) { return ''; } })();
 const outroSource = (() => { try { return $('Generate Outro').first().json.outroSource || ''; } catch(e) { return ''; } })();
 
+// Debug: log clip mapping for troubleshooting
+const _debugClips = clipMapping.map(c => c.section + '(t=' + c.targetDuration + ',a=' + c.actualDuration + ',' + (c.localPath ? 'OK' : 'NO_FILE') + ')');
+
 return [{
   json: {
     scenarioName,
@@ -315,5 +318,12 @@ return [{
     outroSource,
     copyJson: production.copyJson || null,
     warnings: warnings.length > 0 ? warnings : undefined,
+    _debug: {
+      bodyClipsIn: (production.bodyClips || []).length,
+      clipMappingOut: clipMapping.length,
+      clips: _debugClips,
+      outro: outroFile || 'NONE',
+      outroSrc: outroSource,
+    },
   }
 }];

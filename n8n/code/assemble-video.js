@@ -199,15 +199,19 @@ if (hookFile && fs.existsSync(hookFile)) {
 
 // ─── Body clip inputs ───
 const bodySegments = (clipMapping || []).filter(c => c.localPath && fs.existsSync(c.localPath));
+const _debugBody = []; // debug: track probed vs stored durations
 
 for (let i = 0; i < bodySegments.length; i++) {
   const seg = bodySegments[i];
   const idx = streamIdx++;
   const label = 'body' + i;
-  const actual = seg.actualDuration || probeDuration(seg.localPath);
+  // Always probe REAL file duration — stored actualDuration from Airtable may be stale/wrong
+  const probed = probeDuration(seg.localPath);
+  const actual = probed > 0 ? probed : (seg.actualDuration || 1);
   const target = seg.targetDuration || 3.0;
   // Always take the last `target` seconds of the clip
   const startOffset = Math.max(0, actual - target);
+  _debugBody.push(seg.section + ': stored=' + (seg.actualDuration||0) + ' probed=' + probed.toFixed(2) + ' target=' + target + ' offset=' + startOffset.toFixed(2));
 
   inputs.push('-i ' + q(seg.localPath));
 
@@ -530,6 +534,12 @@ return [{
     chatId,
     runRecordId,
     warnings: assetWarnings.length > 0 ? assetWarnings : undefined,
+    _debug: {
+      bodyClips: _debugBody,
+      outroFile: outroFile ? 'YES' : 'NONE',
+      hookFile: hookFile ? 'YES' : 'NONE',
+      totalStreams: scaledStreams.length,
+    },
   },
   binary: {
     video: {
