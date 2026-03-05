@@ -6,6 +6,52 @@
 // References: $('Parse Message'), $('Find Scenario (Produce)'), $('Find Concept'),
 //             $('Find Body Clips'), $('Find Template'), $('Find Music')
 
+// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+const _https = require('https');
+const _http = require('http');
+const { URL } = require('url');
+function fetch(url, opts = {}, _redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (_redirectCount > 5) return reject(new Error('Too many redirects'));
+    const u = new URL(url);
+    const lib = u.protocol === 'https:' ? _https : _http;
+    const body = opts.body || null;
+    const ro = {
+      hostname: u.hostname, port: u.port || undefined,
+      path: u.pathname + u.search, method: opts.method || 'GET',
+      headers: { ...(opts.headers || {}) },
+    };
+    if (body && !ro.headers['Content-Length']) {
+      ro.headers['Content-Length'] = Buffer.byteLength(body);
+    }
+    const req = lib.request(ro, (res) => {
+      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+        return fetch(res.headers.location, opts, _redirectCount + 1).then(resolve, reject);
+      }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          statusText: res.statusMessage || '',
+          headers: res.headers,
+          text: () => Promise.resolve(buf.toString()),
+          json: () => Promise.resolve(JSON.parse(buf.toString())),
+          arrayBuffer: () => Promise.resolve(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)),
+        });
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+const AIRTABLE_BASE = 'https://api.airtable.com/v0/appsgjIdkpak2kaXq';
+const ATOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
+
 // Helper: "toxic-sad-happy-girl-1771197483216" → "Toxic Sad Happy Girl"
 function formatName(raw) {
   if (!raw) return 'Scenario';
@@ -14,6 +60,33 @@ function formatName(raw) {
 
 const chatId = $('Parse Message').first().json.chatId;
 const timeOfDay = $('Parse Message').first().json.timeOfDay || 'day'; // 'night' | 'day'
+
+// ——— Phone lookup (by telegram_chat_id → Phones table) ———
+let phoneId = '', phoneName = '', phoneRecordId = '';
+let phoneVoiceId = '', phoneGirlRefUrl = '';
+if (chatId && ATOKEN) {
+  try {
+    const pFilter = encodeURIComponent("{telegram_chat_id}='" + chatId + "'");
+    const pRes = await fetch(
+      AIRTABLE_BASE + '/tblCvT47GpZv29jz9?filterByFormula=' + pFilter + '&maxRecords=1',
+      { headers: { 'Authorization': 'Bearer ' + ATOKEN } }
+    );
+    const pData = await pRes.json();
+    if (pData.records && pData.records.length > 0) {
+      const pr = pData.records[0];
+      phoneId = pr.fields.phone_id || '';
+      phoneName = pr.fields.phone_name || '';
+      phoneRecordId = pr.id;
+      phoneVoiceId = pr.fields.elevenlabs_voice_id || '';
+      phoneGirlRefUrl = pr.fields.girl_ref_url || '';
+      console.log('[prepare] Phone matched: ' + phoneName + ' (' + phoneId + ')');
+    } else {
+      console.log('[prepare] No phone found for chatId ' + chatId + ' — using defaults');
+    }
+  } catch (e) {
+    console.log('[prepare] Phone lookup failed: ' + e.message);
+  }
+}
 
 // ——— Scenario ———
 const scenarioItems = $('Find Scenario (Produce)').all().map(i => i.json);
@@ -346,5 +419,11 @@ return [{
     outroCategory,
     // Time of day for hook/outro image generation lighting
     timeOfDay,
+    // Phone context (multi-phone support)
+    phoneId,
+    phoneName,
+    phoneRecordId,
+    phoneVoiceId,
+    phoneGirlRefUrl,
   }
 }];

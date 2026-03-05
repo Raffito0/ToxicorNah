@@ -354,7 +354,7 @@ if (selectedOutro.type === 'ai_generated') {
   // Read from Generate Hook node directly (AI Agent nodes swallow upstream fields)
   const hookImageUrl = $input.first().json.hookImageUrl
     || (() => { try { return $('Generate Hook').first().json.hookImageUrl || ''; } catch(e) { return ''; } })();
-  const girlRefUrl = production.girlRefUrl || '';
+  const girlRefUrl = production.phoneGirlRefUrl || production.girlRefUrl || '';
 
   if (!hookImageUrl && !girlRefUrl) {
     return [{ json: { error: true, chatId, message: 'No reference image for outro (need hook image or girl_ref_url)' } }];
@@ -492,7 +492,7 @@ if (effectiveOutroType === 'speaking') {
     return [{ json: { error: true, chatId, message: '❌ No image gen API key configured' } }];
   }
 
-  const girlRefUrl = production.girlRefUrl || '';
+  const girlRefUrl = production.phoneGirlRefUrl || production.girlRefUrl || '';
   if (!girlRefUrl) {
     return [{
       json: {

@@ -70,6 +70,91 @@ const PREP01_BOT = '8686184447:AAH688Be7c19XdzwFzOmONyrnrTCc-q8VHg';
 const ADMIN_CHAT = '5120450288';
 
 const CLIP_DURATION = 3;
+const FAL_KEY = (typeof $env !== 'undefined' && $env.FAL_KEY) || '1f90e772-6c27-4772-9c31-9fb0efd2ccb7:e1ae20a74cf0ad9a5be03baefd1603e0';
+
+// ─── fal.ai Topaz video enhance (deflicker + stabilize) ───
+async function falUploadVideo(buffer) {
+  // Step 1: Get presigned upload URL
+  const initRes = await fetch('https://rest.alpha.fal.ai/storage/upload/initiate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Key ' + FAL_KEY },
+    body: JSON.stringify({ file_name: 'clip_' + Date.now() + '.mp4', content_type: 'video/mp4' }),
+  });
+  if (!initRes.ok) throw new Error('fal upload init failed: ' + initRes.status);
+  const initData = await initRes.json();
+  const uploadUrl = initData.upload_url;
+  const fileUrl = initData.file_url;
+
+  // Step 2: PUT the file
+  const putRes = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'video/mp4' },
+    body: buffer,
+  });
+  if (!putRes.ok) throw new Error('fal upload PUT failed: ' + putRes.status);
+  console.log('[review] fal.ai upload OK: ' + fileUrl);
+  return fileUrl;
+}
+
+async function topazEnhance(videoUrl) {
+  // Submit to Topaz queue
+  console.log('[review] Submitting to Topaz enhance...');
+  const submitRes = await fetch('https://queue.fal.run/fal-ai/topaz/upscale/video', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Key ' + FAL_KEY },
+    body: JSON.stringify({
+      video_url: videoUrl,
+      upscale_factor: 1,  // same resolution — just deflicker/stabilize/denoise
+      H264_output: true,
+    }),
+  });
+  if (!submitRes.ok) {
+    const errText = await submitRes.text();
+    throw new Error('Topaz submit failed: ' + submitRes.status + ' ' + errText.slice(0, 200));
+  }
+  const submitData = await submitRes.json();
+  const requestId = submitData.request_id;
+  console.log('[review] Topaz request: ' + requestId);
+
+  // Poll for completion (max 3 min for a 3s clip)
+  for (let i = 0; i < 36; i++) {
+    await new Promise(function(r) { setTimeout(r, 5000); });
+    const statusRes = await fetch(
+      'https://queue.fal.run/fal-ai/topaz/upscale/video/requests/' + requestId + '/status',
+      { headers: { 'Authorization': 'Key ' + FAL_KEY } }
+    );
+    const statusData = await statusRes.json();
+    if (statusData.status === 'COMPLETED') {
+      const resultRes = await fetch(
+        'https://queue.fal.run/fal-ai/topaz/upscale/video/requests/' + requestId,
+        { headers: { 'Authorization': 'Key ' + FAL_KEY } }
+      );
+      const resultData = await resultRes.json();
+      const enhancedUrl = (resultData.video && resultData.video.url) || resultData.video_url;
+      if (!enhancedUrl) throw new Error('Topaz: no video URL in result');
+      console.log('[review] Topaz done: ' + enhancedUrl);
+      return enhancedUrl;
+    }
+    if (statusData.status === 'FAILED') {
+      throw new Error('Topaz failed: ' + JSON.stringify(statusData).slice(0, 200));
+    }
+  }
+  throw new Error('Topaz timeout (3 min)');
+}
+
+async function enhanceClip(clipPath) {
+  // Upload trimmed clip → Topaz enhance → download enhanced → return enhanced buffer
+  const clipBuffer = fs.readFileSync(clipPath);
+  const falUrl = await falUploadVideo(clipBuffer);
+  const enhancedUrl = await topazEnhance(falUrl);
+
+  // Download enhanced video
+  const dlRes = await fetch(enhancedUrl);
+  if (!dlRes.ok) throw new Error('Enhanced download failed: ' + dlRes.status);
+  const enhancedBuffer = Buffer.from(await dlRes.arrayBuffer());
+  console.log('[review] Enhanced clip: ' + clipBuffer.length + ' → ' + enhancedBuffer.length + ' bytes');
+  return enhancedBuffer;
+}
 
 // ─── Telegram helpers ───
 async function sendTelegram(text, replyMarkup) {
@@ -433,6 +518,7 @@ if (callbackQuery) {
       const conceptName = rf.concept_name || '';
       const girlRefUrl = rf.girl_ref_url || '';
       const sourceImageUrl = rf.source_image_url || '';
+      const queuePhoneId = rf.phone_id || '';
 
       let clipsSaved = 0;
       let allMsgIds = [];
@@ -453,13 +539,23 @@ if (callbackQuery) {
         const scenarioId = scenarioIds[idx] || '';
         try {
           const trimPath = trimClip(rawPath, ts, hookMode === 'speaking');
-          const clipBuffer = fs.readFileSync(trimPath);
+
+          // Topaz enhance (deflicker + stabilize) — graceful fallback to raw clip
+          let clipBuffer;
+          try {
+            clipBuffer = await enhanceClip(trimPath);
+            console.log('[review] Topaz enhanced clip ' + idx);
+          } catch (enhErr) {
+            console.log('[review] Topaz enhance failed clip ' + idx + ': ' + enhErr.message + ' — using raw');
+            clipBuffer = fs.readFileSync(trimPath);
+          }
+
           const clipUrl = await uploadFile(clipBuffer, 'hook_' + batchId + '_' + idx + '.mp4');
 
           await poolCreate({
             batch_id: batchId, concept_id: conceptId, concept_name: conceptName,
             hook_type: hookMode, girl_ref_url: girlRefUrl, source_image_url: sourceImageUrl,
-            source_video_url: videoUrl,
+            source_video_url: videoUrl, phone_id: queuePhoneId,
             video_file: [{ url: clipUrl }],
             clip_start_sec: ts, clip_duration_sec: CLIP_DURATION, hook_text: ht,
             scenario_id: scenarioId, status: 'ready', created_at: new Date().toISOString(),
@@ -739,7 +835,17 @@ if (reviewStatus === 'clips_preview_sent') {
 
           try {
             const trimPath = trimClip(rawPath, ts, isSpeaking);
-            const clipBuffer = fs.readFileSync(trimPath);
+
+            // Topaz enhance (deflicker + stabilize) — graceful fallback to raw clip
+            let clipBuffer;
+            try {
+              clipBuffer = await enhanceClip(trimPath);
+              console.log('[review] Topaz enhanced clip ' + idx);
+            } catch (enhErr) {
+              console.log('[review] Topaz enhance failed clip ' + idx + ': ' + enhErr.message + ' — using raw');
+              clipBuffer = fs.readFileSync(trimPath);
+            }
+
             const clipUrl = await uploadFile(clipBuffer, 'hook_' + batchId + '_' + idx + '.mp4');
 
             await poolCreate({
@@ -749,7 +855,7 @@ if (reviewStatus === 'clips_preview_sent') {
               hook_type: hookMode,
               girl_ref_url: girlRefUrl,
               source_image_url: sourceImageUrl,
-              source_video_url: videoUrl,
+              source_video_url: videoUrl, phone_id: queuePhoneId,
               video_file: [{ url: clipUrl }],
               clip_start_sec: ts,
               clip_duration_sec: CLIP_DURATION,

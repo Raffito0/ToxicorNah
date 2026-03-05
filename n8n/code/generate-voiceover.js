@@ -247,7 +247,7 @@ const TTS_PROVIDER = 'elevenlabs';
 
 // ─── ElevenLabs config ───
 const ELEVENLABS_API_KEY = 'sk_a645bb67bdb3fecc5604c41b18588e7b1d8a35092d0c28fc';
-const ELEVENLABS_VOICE_ID = 'cIZgE1zTtJx92OFuLtNz';
+let ELEVENLABS_VOICE_ID = 'cIZgE1zTtJx92OFuLtNz'; // overridden by phone config below
 const ELEVENLABS_MODEL = 'eleven_v3';
 const ELEVENLABS_OUTPUT_FORMAT = 'mp3_44100_128';
 
@@ -338,6 +338,12 @@ async function generateSegmentAudio(text) {
 const production = $('Prepare Production').first().json;
 const chatId = production.chatId;
 const scenarioName = production.scenarioName;
+
+// Phone-aware voice override
+if (production.phoneVoiceId) {
+  ELEVENLABS_VOICE_ID = production.phoneVoiceId;
+  console.log('[VO] Using phone voice: ' + ELEVENLABS_VOICE_ID);
+}
 const copyJson = production.copyJson;
 const template = production.template;
 const segments = (template && template.segments) || [];
@@ -352,7 +358,9 @@ if (scenarioRecordId) {
   const ATOKEN_VO = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
   if (ATOKEN_VO) {
     try {
-      const poolFormula = encodeURIComponent("AND({status}='ready',{scenario_id}='" + scenarioRecordId + "')");
+      let poolFormulaParts = "{status}='ready',{scenario_id}='" + scenarioRecordId + "'";
+      if (production.phoneId) poolFormulaParts += ",{phone_id}='" + production.phoneId + "'";
+      const poolFormula = encodeURIComponent("AND(" + poolFormulaParts + ")");
       const poolRes = await fetch(
         'https://api.airtable.com/v0/appsgjIdkpak2kaXq/tbl3q91o3l0isSX9w?filterByFormula=' + poolFormula + '&maxRecords=1',
         { headers: { 'Authorization': 'Bearer ' + ATOKEN_VO } }

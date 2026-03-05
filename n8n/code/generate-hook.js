@@ -468,12 +468,14 @@ function buildHookPromptFallback(production, hasEnvFrame, poseDesc, timeOfDay, h
 // ─── Hook Pool helpers (pre-generated Sora 2 hooks for instant /produce) ───
 const HOOK_POOL_TABLE = 'tbl3q91o3l0isSX9w';
 
-async function checkHookPool(scenarioRecordId) {
+async function checkHookPool(scenarioRecordId, phoneId) {
   const ATOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
   if (!ATOKEN || !scenarioRecordId) return null;
 
   const ABASE = 'appsgjIdkpak2kaXq';
-  const formula = encodeURIComponent("AND({status}='ready',{scenario_id}='" + scenarioRecordId + "')");
+  let formulaParts = "{status}='ready',{scenario_id}='" + scenarioRecordId + "'";
+  if (phoneId) formulaParts += ",{phone_id}='" + phoneId + "'";
+  const formula = encodeURIComponent("AND(" + formulaParts + ")");
 
   try {
     const res = await fetch(
@@ -615,7 +617,7 @@ if (hookType === 'ai_image' || hookType === 'ai_single_girl') {
     return [{ json: { error: true, chatId, message: 'No image gen API key configured' } }];
   }
 
-  const girlRefUrl = production.girlRefUrl || '';
+  const girlRefUrl = production.phoneGirlRefUrl || production.girlRefUrl || '';
   if (!girlRefUrl) {
     return [{ json: { error: true, chatId, message: 'No girl_ref_url configured on concept.' } }];
   }
@@ -691,7 +693,7 @@ if (hookType === 'ai_multi_image') {
     return [{ json: { error: true, chatId, message: 'No image gen API key configured' } }];
   }
 
-  const girlRefUrl = production.girlRefUrl || '';
+  const girlRefUrl = production.phoneGirlRefUrl || production.girlRefUrl || '';
 
   // Pose/style reference — text description (same for all 3 scenes for consistency)
   const poseCategory = selectPoseCategory(production);
@@ -828,7 +830,7 @@ if (hookType === 'reaction' || hookType === 'speaking') {
   const scenarioRecordId = production.scenarioRecordId || '';
 
   if (scenarioRecordId) {
-    const poolResult = await checkHookPool(scenarioRecordId);
+    const poolResult = await checkHookPool(scenarioRecordId, production.phoneId || '');
     if (poolResult) {
       console.log('[Hook Pool] Found pre-generated clip for scenario ' + scenarioRecordId + ': ' + poolResult.recordId);
 
@@ -908,7 +910,7 @@ if (hookType === 'speaking') {
     return [{ json: { error: true, chatId, message: '❌ No image gen API key configured' } }];
   }
 
-  const girlRefUrl = production.girlRefUrl || '';
+  const girlRefUrl = production.phoneGirlRefUrl || production.girlRefUrl || '';
   if (!girlRefUrl) {
     return [{ json: { error: true, chatId, message: '❌ No girl_ref_url configured on concept.' } }];
   }
@@ -998,7 +1000,7 @@ if (hookType === 'reaction') {
     return [{ json: { error: true, chatId, message: '❌ No image gen API key configured' } }];
   }
 
-  const girlRefUrl = production.girlRefUrl || '';
+  const girlRefUrl = production.phoneGirlRefUrl || production.girlRefUrl || '';
   if (!girlRefUrl) {
     return [{ json: { error: true, chatId, message: '❌ No girl_ref_url configured on concept.' } }];
   }

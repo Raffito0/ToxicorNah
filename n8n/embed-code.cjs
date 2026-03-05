@@ -36,6 +36,7 @@ const codeMap = {
   'hook-generator.js': 'Hook Generator',
   'process-review.js': 'Process Review',
   'monitor-availability.js': 'Monitor Availability',
+  'save-to-content-library.js': 'Save to Content Library',
 };
 
 let totalUpdated = 0;

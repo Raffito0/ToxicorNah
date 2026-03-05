@@ -80,10 +80,9 @@ const KIE_API_URL = 'https://api.kie.ai/api/v1/jobs';
 const FAL_KEY = (typeof $env !== 'undefined' && $env.FAL_KEY) || '1f90e772-6c27-4772-9c31-9fb0efd2ccb7:e1ae20a74cf0ad9a5be03baefd1603e0';
 
 // ─── Quota constants ───
-const VIDEOS_PER_DAY = 10;
+const DEFAULT_VIDEOS_PER_DAY = 10;
 const BUFFER_DAYS = 2;
-const TARGET_HOOKS = VIDEOS_PER_DAY * BUFFER_DAYS; // 20
-const MAX_CONCURRENT = 4; // max simultaneous provider submissions (2 providers × 2 slots each)
+const MAX_CONCURRENT = 6; // max simultaneous provider submissions across all phones
 const GENERATION_TIMEOUT_MS = 20 * 60 * 1000; // 20 min — mark as failed after this
 
 // ─── Multi-Provider Config ───
@@ -494,10 +493,10 @@ const REACTION_IMAGE_PROMPTS = [
 ];
 
 const REACTION_MOTION_PROMPTS = [
-  'Girl reading something on her phone, her facial expressions change subtly, she shifts position slightly, natural candid shot from the side, continuous uncut movement',
-  'Girl looking at phone screen, expression shifts from neutral to reacting, subtle body language changes, side angle, soft lighting, natural movement',
-  'Girl scrolling phone, her eyes widen slightly, jaw tightens, subtle emotional shift, candid side angle, continuous shot, no speech',
-  'Girl holding phone still, reading intently, micro-expressions of surprise then concern, natural side angle, soft indoor light',
+  'Girl reading something on her phone, her facial expressions change subtly, she shifts position slightly, natural candid shot from the side, continuous uncut movement, consistent lighting, stable exposure, temporal consistency',
+  'Girl looking at phone screen, expression shifts from neutral to reacting, subtle body language changes, side angle, soft lighting, natural movement, consistent lighting, stable exposure, smooth skin texture',
+  'Girl scrolling phone, her eyes widen slightly, jaw tightens, subtle emotional shift, candid side angle, continuous shot, no speech, consistent lighting, stable exposure, no brightness fluctuation',
+  'Girl holding phone still, reading intently, micro-expressions of surprise then concern, natural side angle, soft indoor light, consistent lighting, stable exposure, temporal consistency',
 ];
 
 function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -506,7 +505,9 @@ function buildSpeakingPrompt(hookTexts) {
   const textLines = hookTexts.map(function(t) { return '[' + t + ']'; }).join('\n');
   return 'A young woman saying:\n' + textLines +
     '\nto the camera with subtle facial expressions, ' +
-    'slight natural handheld sway, no text, no watermark, no subtitles';
+    'slight natural handheld sway, consistent lighting, stable exposure, ' +
+    'smooth skin texture, natural temporal flow, no brightness fluctuation, ' +
+    'no text, no watermark, no subtitles';
 }
 
 
@@ -559,25 +560,52 @@ try {
 }
 
 // ═══════════════════════════════════════
-// PHASE 0 — QUOTA CHECK
+// PHASE 0 — QUOTA CHECK (per-phone)
 // ═══════════════════════════════════════
 
 console.log('[hookgen] Phase 0: Quota check');
 
-// Count ready hooks in pool
+// Load active phones
+let activePhones = [];
+try {
+  const phonesData = await airtableFetch('tblCvT47GpZv29jz9?filterByFormula=' + encodeURIComponent("{is_active}=TRUE()"));
+  activePhones = (phonesData.records || []).map(function(r) {
+    return {
+      recordId: r.id,
+      phoneId: r.fields.phone_id || '',
+      phoneName: r.fields.phone_name || r.fields.phone_id || '',
+      girlRefUrl: r.fields.girl_ref_url || '',
+      videosPerDay: r.fields.videos_per_day || DEFAULT_VIDEOS_PER_DAY,
+    };
+  }).filter(function(p) { return p.girlRefUrl; }); // skip phones without girl ref
+} catch (e) {
+  console.log('[hookgen] Phones load error: ' + e.message);
+}
+
+if (activePhones.length === 0) {
+  console.log('[hookgen] No active phones with girl_ref_url — exiting');
+  return [{ json: { skipped: true, reason: 'no_active_phones' } }];
+}
+
+// Count ready hooks in pool (all phones combined + per-phone)
 let readyCount = 0;
+const readyByPhone = {};
 try {
   const formula = encodeURIComponent("{status}='ready'");
+  let allReady = [];
   const data = await airtableFetch(HOOK_POOL_TABLE + '?filterByFormula=' + formula + '&pageSize=100');
-  readyCount = (data.records || []).length;
-  // Handle pagination if more than 100
-  if (data.offset) {
-    let nextOffset = data.offset;
-    while (nextOffset) {
-      const more = await airtableFetch(HOOK_POOL_TABLE + '?filterByFormula=' + formula + '&pageSize=100&offset=' + nextOffset);
-      readyCount += (more.records || []).length;
-      nextOffset = more.offset || null;
-    }
+  allReady = data.records || [];
+  let nextOffset = data.offset || null;
+  while (nextOffset) {
+    const more = await airtableFetch(HOOK_POOL_TABLE + '?filterByFormula=' + formula + '&pageSize=100&offset=' + nextOffset);
+    allReady = allReady.concat(more.records || []);
+    nextOffset = more.offset || null;
+  }
+  readyCount = allReady.length;
+  // Count per phone
+  for (var ri = 0; ri < allReady.length; ri++) {
+    var pid = allReady[ri].fields.phone_id || '__none__';
+    readyByPhone[pid] = (readyByPhone[pid] || 0) + 1;
   }
 } catch (e) {
   console.log('[hookgen] Pool count error: ' + e.message);
@@ -599,23 +627,38 @@ const submittedOrGenerating = pendingRecords.filter(function(r) {
 });
 const activeSubmissions = submittedOrGenerating.length;
 
-console.log('[hookgen] Pool ready: ' + readyCount + '/' + TARGET_HOOKS + ', pending: ' + pendingCount + ', active subs: ' + activeSubmissions);
+// Determine which phones need hooks
+const phonesNeedingHooks = activePhones.filter(function(p) {
+  const ready = readyByPhone[p.phoneId] || 0;
+  const target = p.videosPerDay * BUFFER_DAYS;
+  return ready < target;
+});
 
-tickResult.phase0 = { readyCount: readyCount, pendingCount: pendingCount, activeSubmissions: activeSubmissions };
+// Log per-phone status
+for (var pi = 0; pi < activePhones.length; pi++) {
+  var p = activePhones[pi];
+  var ready = readyByPhone[p.phoneId] || 0;
+  var target = p.videosPerDay * BUFFER_DAYS;
+  console.log('[hookgen] ' + p.phoneName + ': ' + ready + '/' + target + ' hooks ready');
+}
 
-// Quota notification (avoid spamming — only notify on state change)
-const quotaState = readyCount >= TARGET_HOOKS ? 'full' : 'low';
-if (quotaState === 'full' && staticData.lastQuotaNotification !== 'full') {
-  await sendTelegram('Pool: ' + readyCount + '/' + TARGET_HOOKS + ' hooks ready. Pausing generation.');
+console.log('[hookgen] Total pool: ' + readyCount + ', pending: ' + pendingCount + ', active subs: ' + activeSubmissions + ', phones needing hooks: ' + phonesNeedingHooks.length);
+
+tickResult.phase0 = { readyCount: readyCount, pendingCount: pendingCount, activeSubmissions: activeSubmissions, phonesNeedingHooks: phonesNeedingHooks.length };
+
+// Quota notification (per-phone aware)
+const allPhonesFull = phonesNeedingHooks.length === 0;
+if (allPhonesFull && staticData.lastQuotaNotification !== 'full') {
+  await sendTelegram('All phones at quota! ' + readyCount + ' hooks ready. Pausing generation.');
   staticData.lastQuotaNotification = 'full';
-} else if (quotaState === 'low' && staticData.lastQuotaNotification === 'full') {
-  await sendTelegram('Pool: ' + readyCount + '/' + TARGET_HOOKS + ' — resuming generation');
+} else if (!allPhonesFull && staticData.lastQuotaNotification === 'full') {
+  await sendTelegram('Pool deficit detected — resuming generation');
   staticData.lastQuotaNotification = 'low';
 }
 
-// If quota met AND no pending work → exit early
-if (readyCount >= TARGET_HOOKS && pendingCount === 0) {
-  console.log('[hookgen] Quota met and no pending work — exiting');
+// If all phones at quota AND no pending work → exit early
+if (allPhonesFull && pendingCount === 0) {
+  console.log('[hookgen] All phones at quota and no pending work — exiting');
   return [{ json: { skipped: true, reason: 'quota_met', readyCount: readyCount } }];
 }
 
@@ -937,9 +980,11 @@ try {
           console.log('[hookgen] Timecode overlay skipped: ' + e.message);
         }
 
-        // Send video to Telegram
+        // Send video to Telegram (with phone label)
         const modeLabel = hookMode === 'speaking' ? 'Speaking' : 'Reaction';
-        const videoMsgId = await sendTelegramVideo(sendBuffer, conceptName + ' (' + modeLabel + ')');
+        const queuePhoneId = f.phone_id || '';
+        const queuePhoneLabel = queuePhoneId ? ('\uD83D\uDCF1 ' + queuePhoneId + ' \u2014 ') : '';
+        const videoMsgId = await sendTelegramVideo(sendBuffer, queuePhoneLabel + conceptName + ' (' + modeLabel + ')');
 
         // Only proceed if video was actually sent
         if (!videoMsgId) {
@@ -984,26 +1029,33 @@ tickResult.phase3 = { reviewsProcessed: 0 };
 
 
 // ═══════════════════════════════════════
-// PHASE 4 — SUBMIT NEW GENERATION
+// PHASE 4 — SUBMIT NEW GENERATION (phone-aware)
 // ═══════════════════════════════════════
 
 console.log('[hookgen] Phase 4: Submit new generation');
 
 let submitted = 0;
 
-// Skip if too many pending image approvals or quota met
+// Skip if too many pending image approvals
 const imgWaitingApproval = pendingRecords.filter(function(r) { return r.fields.status === 'image_approval'; }).length;
 const MAX_PENDING_APPROVALS = 3;
 if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
   console.log('[hookgen] Max pending image approvals (' + imgWaitingApproval + '/' + MAX_PENDING_APPROVALS + ')');
-} else if (readyCount + pendingCount >= TARGET_HOOKS) {
-  console.log('[hookgen] Quota covered (ready + pending >= target)');
+} else if (phonesNeedingHooks.length === 0) {
+  console.log('[hookgen] All phones at quota — skipping Phase 4');
 } else {
 
   try {
+    // Pick which phone to generate for (round-robin among phones needing hooks)
+    const phoneIndex = (staticData.lastPhoneIndex || 0) % phonesNeedingHooks.length;
+    const targetPhone = phonesNeedingHooks[phoneIndex];
+    staticData.lastPhoneIndex = phoneIndex + 1;
+
+    console.log('[hookgen] Generating for: ' + targetPhone.phoneName + ' (' + targetPhone.phoneId + ')');
+
     // Step 1: Get active concepts with batch hooks enabled
     let concepts = [];
-    const conceptFormula = encodeURIComponent("AND({is_active}=TRUE(),{girl_ref_url}!='',OR({hook_speaking_enabled}=TRUE(),{hook_reaction_enabled}=TRUE()))");
+    const conceptFormula = encodeURIComponent("AND({is_active}=TRUE(),OR({hook_speaking_enabled}=TRUE(),{hook_reaction_enabled}=TRUE()))");
     const conceptData = await airtableFetch(CONCEPTS_TABLE + '?filterByFormula=' + conceptFormula);
     concepts = (conceptData.records || []).map(function(r) {
       return {
@@ -1012,7 +1064,6 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
         conceptName: r.fields.concept_name || r.fields.concept_id || '',
         hookSpeakingEnabled: !!r.fields.hook_speaking_enabled,
         hookReactionEnabled: !!r.fields.hook_reaction_enabled,
-        girlRefUrl: r.fields.girl_ref_url || '',
       };
     });
 
@@ -1053,12 +1104,13 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
       // Filter: only scenarios from active concepts
       const validScenarios = scenarios.filter(function(s) { return conceptMap[s.conceptRecordId]; });
 
-      // Step 3: Exclude scenarios that already have a pool clip OR a pending queue entry
+      // Step 3: Exclude scenarios that already have a pool clip OR pending queue entry FOR THIS PHONE
       const scenariosNeedingClips = [];
 
-      // Get all pending queue scenario IDs (to exclude)
+      // Get pending queue scenario IDs for THIS PHONE
       const pendingScenarioIds = new Set();
       for (const pr of pendingRecords) {
+        if (pr.fields.phone_id && pr.fields.phone_id !== targetPhone.phoneId) continue; // other phone's entry
         try {
           const ids = JSON.parse(pr.fields.scenario_ids_json || '[]');
           ids.forEach(function(id) { pendingScenarioIds.add(id); });
@@ -1066,14 +1118,14 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
       }
 
       for (const s of validScenarios) {
-        // Skip if already in queue
+        // Skip if already in queue for this phone
         if (pendingScenarioIds.has(s.recordId)) continue;
 
-        // Check pool for existing clip
+        // Check pool for existing clip FOR THIS PHONE
         try {
-          const pFormula = encodeURIComponent("AND({status}='ready',{scenario_id}='" + s.recordId + "')");
+          const pFormula = encodeURIComponent("AND({status}='ready',{scenario_id}='" + s.recordId + "',{phone_id}='" + targetPhone.phoneId + "')");
           const pData = await airtableFetch(HOOK_POOL_TABLE + '?filterByFormula=' + pFormula + '&maxRecords=1');
-          if (pData.records && pData.records.length > 0) continue; // already has clip
+          if (pData.records && pData.records.length > 0) continue; // already has clip for this phone
         } catch (e) {
           // On error, include it (better to try than skip)
         }
@@ -1081,7 +1133,7 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
       }
 
       if (scenariosNeedingClips.length === 0) {
-        console.log('[hookgen] All scenarios have clips or are pending');
+        console.log('[hookgen] All scenarios have clips or are pending for ' + targetPhone.phoneName);
       } else {
 
         // Step 4: Group by concept + hookMode
@@ -1123,12 +1175,12 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
           const isSpeaking = hookMode === 'speaking';
           const groupScenarios = group.scenarios;
 
-          console.log('[hookgen] Generating image: ' + concept.conceptId + ' (' + hookMode + '), ' + groupScenarios.length + ' scenarios');
+          console.log('[hookgen] Generating image for ' + targetPhone.phoneName + ': ' + concept.conceptId + ' (' + hookMode + '), ' + groupScenarios.length + ' scenarios');
 
           try {
-            // fal.ai image generation (synchronous — no polling)
+            // fal.ai image generation — use PHONE's girl ref, not concept's
             const imagePrompt = isSpeaking ? pickRandom(SPEAKING_IMAGE_PROMPTS) : pickRandom(REACTION_IMAGE_PROMPTS);
-            const falImageUrl = await generateImage(imagePrompt, [concept.girlRefUrl]);
+            const falImageUrl = await generateImage(imagePrompt, [targetPhone.girlRefUrl]);
 
             // Build Sora 2 prompt (stored for Phase 1.5 after approval)
             const hookTexts = groupScenarios.map(function(s) { return s.hookText; });
@@ -1144,19 +1196,21 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
               concept_id: concept.conceptId,
               concept_name: concept.conceptName,
               hook_mode: hookMode,
+              phone_id: targetPhone.phoneId,
               scenario_ids_json: JSON.stringify(groupScenarios.map(function(s) { return s.recordId; })),
               hook_texts_json: JSON.stringify(hookTexts),
               source_image_url: falImageUrl,
-              girl_ref_url: concept.girlRefUrl,
+              girl_ref_url: targetPhone.girlRefUrl,
               motion_prompt: sora2Prompt,
               status: 'image_approval',
             });
 
             const queueRecordId = queueResult.records[0].id;
 
-            // Send image to Telegram for approval
+            // Send image to Telegram for approval (with phone label)
             const modeLabel = isSpeaking ? 'Speaking' : 'Reaction';
-            const caption = 'Hook image \u2014 ' + concept.conceptName + ' (' + modeLabel + ')\n' +
+            const phoneLabel = '\uD83D\uDCF1 ' + targetPhone.phoneName;
+            const caption = phoneLabel + ' \u2014 ' + concept.conceptName + ' (' + modeLabel + ')\n' +
               hookTexts.map(function(t, i) { return (i + 1) + '. "' + t.slice(0, 60) + '"'; }).join('\n');
             const replyMarkup = {
               inline_keyboard: [[
@@ -1170,7 +1224,7 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
             }
 
             submitted++;
-            console.log('[hookgen] Image sent for approval: ' + concept.conceptId + ' (' + hookMode + ')');
+            console.log('[hookgen] Image sent for approval: ' + targetPhone.phoneName + ' / ' + concept.conceptId + ' (' + hookMode + ')');
 
           } catch (e) {
             console.log('[hookgen] Image generation error: ' + e.message);
