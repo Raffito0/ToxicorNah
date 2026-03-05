@@ -135,10 +135,29 @@ const captionFont = FONT_PATHS.find(f => fs.existsSync(f)) || '';
 const captionFontParam = captionFont ? ':fontfile=' + captionFont : '';
 
 // Build section → caption text map from copyJson
+// Copy generation uses creative names (toxic_score, soul_type, wtf_happening)
+// Templates use technical names (score_reveal, soul_type_card, decoded_insight)
+// We store captions under ALL known aliases so either naming convention resolves
+const SECTION_ALIAS_GROUPS = [
+  ['toxic_score', 'score_reveal'],
+  ['soul_type', 'soul_type_card'],
+  ['deep_dive', 'decoded_insight', 'wtf_happening'],
+  ['upload_chat', 'chat_upload'],
+];
+const _sectionAliasMap = {};
+for (const group of SECTION_ALIAS_GROUPS) {
+  for (const name of group) _sectionAliasMap[name] = group;
+}
 const bodyCaptionMap = {};
 if (copyJson && copyJson.bodyClips) {
   for (const bc of copyJson.bodyClips) {
-    if (bc.section && bc.text) bodyCaptionMap[bc.section] = bc.text;
+    if (bc.section && bc.text) {
+      bodyCaptionMap[bc.section] = bc.text;
+      const aliases = _sectionAliasMap[bc.section] || [];
+      for (const alias of aliases) {
+        if (!bodyCaptionMap[alias]) bodyCaptionMap[alias] = bc.text;
+      }
+    }
   }
 }
 
@@ -211,7 +230,8 @@ for (let i = 0; i < bodySegments.length; i++) {
   const target = seg.targetDuration || 3.0;
   // Always take the last `target` seconds of the clip
   const startOffset = Math.max(0, actual - target);
-  _debugBody.push(seg.section + ': stored=' + (seg.actualDuration||0) + ' probed=' + probed.toFixed(2) + ' target=' + target + ' offset=' + startOffset.toFixed(2));
+  const _capMatch = bodyCaptionMap[seg.section] || null;
+  _debugBody.push(seg.section + ': stored=' + (seg.actualDuration||0) + ' probed=' + probed.toFixed(2) + ' target=' + target + ' offset=' + startOffset.toFixed(2) + ' cap=' + (_capMatch ? JSON.stringify(_capMatch) : 'NONE'));
 
   inputs.push('-i ' + q(seg.localPath));
 
@@ -223,13 +243,18 @@ for (let i = 0; i < bodySegments.length; i++) {
   const capText = bodyCaptionMap[seg.section] || null;
   const capFile = capText ? writeCaptionFile(capText, label) : null;
   if (capFile) {
-    // Pseudo-random (deterministic per segment index) for organic timing
+    // Pseudo-random (deterministic per segment index) for organic human-placed feel
     function capRand(seed) { const x = Math.sin(seed * 9301 + 49297) * 49297; return x - Math.floor(x); }
-    const capYOff = Math.round(-22 + capRand(i * 7 + 1) * 44); // -22 to +22px
-    const capY = 'h*0.32+(' + capYOff + ')';
-    const capStart = 0.2 + capRand(i * 13 + 3) * 0.5;  // 0.20–0.70s
-    const capEnd = target - capRand(i * 17 + 11) * 0.4;  // 0–0.40s before end
-    vf += ',drawtext=textfile=' + capFile + captionFontParam + ':fontsize=50:fontcolor=white:borderw=3:bordercolor=black@0.6:x=(w-text_w)/2:y=' + capY + ":enable='between(t\\," + capStart.toFixed(3) + '\\,' + capEnd.toFixed(3) + ")'";
+    // Y: base varies 0.27–0.37 of screen height + pixel jitter ±30px
+    const capYBase = 0.27 + capRand(i * 7 + 1) * 0.10;
+    const capYJitter = Math.round(-30 + capRand(i * 11 + 5) * 60);
+    const capY = 'h*' + capYBase.toFixed(3) + '+(' + capYJitter + ')';
+    // X: slight off-center ±40px (feels hand-placed, not machine-centered)
+    const capXOff = Math.round(-40 + capRand(i * 19 + 7) * 80);
+    const capX = '(w-text_w)/2+(' + capXOff + ')';
+    const capStart = 0.15 + capRand(i * 13 + 3) * 0.55;  // 0.15–0.70s
+    const capEnd = target - capRand(i * 17 + 11) * 0.45;  // 0–0.45s before end
+    vf += ',drawtext=textfile=' + capFile + captionFontParam + ':fontsize=50:fontcolor=white:borderw=3:bordercolor=black@0.6:x=' + capX + ':y=' + capY + ":enable='between(t\\," + capStart.toFixed(3) + '\\,' + capEnd.toFixed(3) + ")'";
   }
   vf += '[' + label + ']';
   filterParts.push(vf);
@@ -251,11 +276,14 @@ if (outroFile && fs.existsSync(outroFile)) {
   // Pre-compute outro caption drawtext (used in both baked and normal paths)
   const outroCapFile = (copyJson && copyJson.outroText) ? writeCaptionFile(copyJson.outroText, 'outro') : null;
   function outroRand(seed) { const x = Math.sin(seed * 9301 + 49297) * 49297; return x - Math.floor(x); }
-  const outroCStart = 0.2 + outroRand(42) * 0.5;
-  const outroCEnd = outroTarget - outroRand(77) * 0.35;
-  const outroCYOff = Math.round(-22 + outroRand(19) * 44);
+  const outroCStart = 0.15 + outroRand(42) * 0.55;
+  const outroCEnd = outroTarget - outroRand(77) * 0.40;
+  // Same organic positioning as body captions
+  const outroCYBase = 0.27 + outroRand(19) * 0.10;
+  const outroCYJitter = Math.round(-30 + outroRand(31) * 60);
+  const outroCXOff = Math.round(-40 + outroRand(53) * 80);
   const outroDT = outroCapFile
-    ? ",drawtext=textfile=" + outroCapFile + captionFontParam + ":fontsize=50:fontcolor=white:borderw=3:bordercolor=black@0.6:x=(w-text_w)/2:y=h*0.32+(" + outroCYOff + "):enable='between(t\\," + outroCStart.toFixed(3) + "\\," + outroCEnd.toFixed(3) + ")'"
+    ? ",drawtext=textfile=" + outroCapFile + captionFontParam + ":fontsize=50:fontcolor=white:borderw=3:bordercolor=black@0.6:x=(w-text_w)/2+(" + outroCXOff + "):y=h*" + outroCYBase.toFixed(3) + "+(" + outroCYJitter + "):enable='between(t\\," + outroCStart.toFixed(3) + "\\," + outroCEnd.toFixed(3) + ")'"
     : '';
 
   if (hasBakedOutroAudio) {
@@ -539,6 +567,12 @@ return [{
       outroFile: outroFile ? 'YES' : 'NONE',
       hookFile: hookFile ? 'YES' : 'NONE',
       totalStreams: scaledStreams.length,
+      bodyCaptionMap: Object.keys(bodyCaptionMap).length > 0 ? bodyCaptionMap : 'EMPTY',
+      captionFont: captionFont || 'NO_FONT_FOUND',
+      captionDir,
+      copyJsonPresent: !!copyJson,
+      copyJsonBodyClips: copyJson && copyJson.bodyClips ? copyJson.bodyClips.length : 0,
+      ffmpegCmd: cmd.slice(0, 2000),
     },
   },
   binary: {
