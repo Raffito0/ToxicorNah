@@ -221,7 +221,7 @@ if (templateItems.length > 0 && templateItems[0].id) {
     };
   }
 }
-// Fallback: hardcoded Standard template
+// Fallback: hardcoded Standard template (mirrors Airtable "Standard" template)
 if (!template) {
   template = {
     segments: [
@@ -231,8 +231,9 @@ if (!template) {
       { section: 'toxic_score', duration: 3.0 },
       { section: 'soul_type', duration: 3.0 },
       { section: 'deep_dive', duration: 3.0 },
+      { section: 'outro', duration: 3.0 },
     ],
-    totalDuration: 14.0,
+    totalDuration: 17.0,
   };
 }
 
