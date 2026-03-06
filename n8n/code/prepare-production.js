@@ -425,5 +425,7 @@ return [{
     phoneRecordId,
     phoneVoiceId,
     phoneGirlRefUrl,
+    // Concept ID for Hook Pool lookup
+    conceptId: concept.concept_id || '',
   }
 }];

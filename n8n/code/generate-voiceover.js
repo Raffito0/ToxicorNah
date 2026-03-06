@@ -352,20 +352,41 @@ const segments = (template && template.segments) || [];
 // Generate Hook runs AFTER VO generation, so we can't read $('Generate Hook').
 // Instead, check Airtable Hook Pool for ready clips matching this scenario.
 const scenarioRecordId = production.scenarioRecordId || '';
+const conceptIdVO = production.conceptId || '';
 let hookFromPool = false;
 let hookFromPoolReaction = false;
-if (scenarioRecordId) {
+if (scenarioRecordId || conceptIdVO) {
   const ATOKEN_VO = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
   if (ATOKEN_VO) {
     try {
-      let poolFormulaParts = "{status}='ready',{scenario_id}='" + scenarioRecordId + "'";
-      if (production.phoneId) poolFormulaParts += ",{phone_id}='" + production.phoneId + "'";
-      const poolFormula = encodeURIComponent("AND(" + poolFormulaParts + ")");
-      const poolRes = await fetch(
-        'https://api.airtable.com/v0/appsgjIdkpak2kaXq/tbl3q91o3l0isSX9w?filterByFormula=' + poolFormula + '&maxRecords=1',
-        { headers: { 'Authorization': 'Bearer ' + ATOKEN_VO } }
-      );
-      if (poolRes.ok) {
+      // Try concept_id first (batch generator), fallback to scenario_id (legacy)
+      const idFilterVO = conceptIdVO
+        ? "{concept_id}='" + conceptIdVO + "'"
+        : "{scenario_id}='" + scenarioRecordId + "'";
+      // Search: phone-specific first, then shared (no phone_id)
+      const voPoolQueries = [];
+      if (production.phoneId) {
+        voPoolQueries.push("{status}='ready'," + idFilterVO + ",{phone_id}='" + production.phoneId + "'");
+      }
+      voPoolQueries.push("{status}='ready'," + idFilterVO);
+
+      let poolRes = null;
+      for (const q of voPoolQueries) {
+        const poolFormula = encodeURIComponent("AND(" + q + ")");
+        poolRes = await fetch(
+          'https://api.airtable.com/v0/appsgjIdkpak2kaXq/tbl3q91o3l0isSX9w?filterByFormula=' + poolFormula + '&maxRecords=1',
+          { headers: { 'Authorization': 'Bearer ' + ATOKEN_VO } }
+        );
+        if (poolRes.ok) {
+          const check = await poolRes.json();
+          if (check.records && check.records.length > 0) {
+            poolRes = { ok: true, json: () => Promise.resolve(check) };
+            break;
+          }
+        }
+        poolRes = null;
+      }
+      if (poolRes && poolRes.ok) {
         const poolData = await poolRes.json();
         if (poolData.records && poolData.records.length > 0) {
           const poolHookType = poolData.records[0].fields.hook_type || 'speaking';
@@ -423,6 +444,14 @@ if (!copyJson) {
 let bodyIndex = 0;
 const voSegments = [];
 
+console.log('[VO-DEBUG] copyJson.bodyClips count: ' + (copyJson && copyJson.bodyClips ? copyJson.bodyClips.length : 'NONE'));
+console.log('[VO-DEBUG] copyJson.hookVO: ' + (copyJson && copyJson.hookVO ? 'YES' : 'NO'));
+console.log('[VO-DEBUG] copyJson.outroVO: ' + (copyJson && copyJson.outroVO ? 'YES' : 'NO'));
+if (copyJson && copyJson.bodyClips) {
+  copyJson.bodyClips.forEach((bc, idx) => console.log('[VO-DEBUG] bodyClip[' + idx + '] section=' + bc.section + ' vo=' + (bc.vo ? bc.vo.slice(0, 40) : 'NULL')));
+}
+console.log('[VO-DEBUG] template segments: ' + segments.map(s => s.section).join(', '));
+
 for (let i = 0; i < segments.length; i++) {
   const seg = segments[i];
   const section = seg.section;
@@ -440,6 +469,7 @@ for (let i = 0; i < segments.length; i++) {
   } else {
     // Body section WITH VO — use next bodyClip VO
     voText = getVoTextForSection(section, bodyIndex);
+    console.log('[VO-DEBUG] section=' + section + ' bodyIndex=' + bodyIndex + ' voText=' + (voText ? voText.slice(0, 40) : 'NULL'));
     bodyIndex++;
   }
 

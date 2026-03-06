@@ -3,13 +3,21 @@
 // Each 15s Sora 2 video = 5 × 3s hook segments stored in Hook Pool.
 // /produce pulls from pool instantly instead of waiting for real-time Sora 2 generation.
 //
-// Cost: $0.025 per 15s video = $0.005 per hook. At 10 videos/day = 2 calls = $0.05/day.
+// LOGIC:
+//   1. Weighted random pick of concept (batch_weight field on Concepts table)
+//   2. Weighted random pick of sub_concept within that concept (weight in sub_concepts_json)
+//   3. For ALL active phones in parallel: generate unique kie.ai image + Sora 2 video
+//   4. If Sora 2 fails, retry persistently (same combo) — never skip
+//   5. Repeat for BATCHES_PER_RUN rounds
+//
+// Cost: $0.025 per 15s video = $0.005 per hook. At 3 phones × 3 rounds = 9 videos = $0.225/run.
 //
 // WIRING: Schedule Trigger (0 6 * * *) → this Code node
 //
 // Airtable tables:
-//   - Video Concepts (tblhhTVI4EYofdY32) — source of concept configs
+//   - Video Concepts (tblhhTVI4EYofdY32) — source of concept configs + batch_weight
 //   - Hook Pool (tbl3q91o3l0isSX9w) — stores pre-generated hook video segments
+//   - Phones (tblCvT47GpZv29jz9) — active phones with girl_ref_url
 // Mode: Run Once for All Items
 
 const fs = require('fs');
@@ -66,11 +74,13 @@ function fetch(url, opts = {}, _redirectCount = 0) {
 const ABASE = 'appsgjIdkpak2kaXq';
 const CONCEPTS_TABLE = 'tblhhTVI4EYofdY32';
 const HOOK_POOL_TABLE = 'tbl3q91o3l0isSX9w';
+const PHONES_TABLE = 'tblCvT47GpZv29jz9';
 const KIE_API_KEY = '7670ade582cc72601f388dbdc0525b9e';
 const KIE_API_URL = 'https://api.kie.ai/api/v1/jobs';
 const APIMART_KEY = (typeof $env !== 'undefined' && $env.APIMART_API_KEY) || 'sk-kQeBOTjXlRbsutwcFSbjtDPmqLO5vZpFIFWkkW97WJYT5Y9l';
 const APIMART_MODELS = ['sora-2', 'sora-2-vip'];
-const TARGET_POOL_SIZE = 15; // maintain 15 available segments per concept (3 batches × 5)
+const BATCHES_PER_RUN = 3; // rounds per scheduled execution
+const SORA2_RETRY_COOLDOWN_SEC = 120; // wait between full retry cycles when Sora 2 is down
 
 // ─── kie.ai image generation ───
 async function kieGenerate(prompt, imageRefs, options = {}) {
@@ -160,51 +170,65 @@ async function apimartPoll(taskId, model, timeoutMs = 600000) {
   throw new Error('[' + model + '] Poll timeout');
 }
 
-async function sora2Generate(imageUrl, prompt, options = {}, chatId = '', botToken = '') {
+// Single attempt at Sora 2 (10 submit rounds with backoff)
+async function sora2Attempt(imageUrl, prompt, options = {}) {
   const BACKOFFS_SEC = [20, 35, 50, 60, 60, 60, 60, 60, 60, 60];
   const MAX_ROUNDS = 10;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const roundLabel = (round + 1) + '/' + MAX_ROUNDS;
-    console.log('[Batch Round ' + roundLabel + '] Submitting to ' + APIMART_MODELS.join(' + '));
-
     const submitResults = await Promise.allSettled(
       APIMART_MODELS.map(m => apimartSubmit(m, imageUrl, prompt, options))
     );
 
     const successes = submitResults.filter(r => r.status === 'fulfilled').map(r => r.value);
     if (successes.length > 0) {
-      console.log('[Batch Round ' + roundLabel + '] ' + successes[0].model + ' accepted!');
+      console.log('[Sora2 Round ' + roundLabel + '] ' + successes[0].model + ' accepted');
       return await apimartPoll(successes[0].taskId, successes[0].model);
     }
 
     const failures = submitResults.filter(r => r.status === 'rejected').map(r => r.reason.message || String(r.reason));
-    console.log('[Batch Round ' + roundLabel + '] Both rejected: ' + failures.join(' | '));
+    console.log('[Sora2 Round ' + roundLabel + '] Both rejected: ' + failures.join(' | '));
 
     if (round < MAX_ROUNDS - 1) {
       const baseSec = BACKOFFS_SEC[round];
       const jitterSec = Math.floor(Math.random() * 21) - 10;
       const delaySec = Math.max(10, baseSec + jitterSec);
-      console.log('[Batch Round ' + roundLabel + '] Retrying in ' + delaySec + 's...');
-
-      if (botToken && chatId && round % 3 === 0) {
-        try {
-          await fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, text: '\u26A1 Batch Sora 2 retry ' + roundLabel + ', next in ' + delaySec + 's...' }),
-          });
-        } catch(e) { /* non-fatal */ }
-      }
-
       await new Promise(r => setTimeout(r, delaySec * 1000));
     }
   }
 
-  throw new Error('Batch: all ' + MAX_ROUNDS + ' rounds failed');
+  throw new Error('Sora 2: all ' + MAX_ROUNDS + ' rounds failed');
+}
+
+// Persistent Sora 2: retries indefinitely until success (bounded only by n8n execution timeout)
+async function sora2Persistent(imageUrl, prompt, options = {}, label = '', botToken = '', chatId = '') {
+  let cycle = 0;
+  while (true) {
+    cycle++;
+    try {
+      return await sora2Attempt(imageUrl, prompt, options);
+    } catch (err) {
+      console.log('[' + label + '] Sora 2 cycle ' + cycle + ' failed: ' + err.message);
+      console.log('[' + label + '] Retrying in ' + SORA2_RETRY_COOLDOWN_SEC + 's...');
+
+      if (botToken && chatId && cycle % 2 === 0) {
+        try {
+          await fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: '\u26A1 Batch ' + label + ': Sora 2 retry cycle ' + (cycle + 1) + '...' }),
+          });
+        } catch(e) { /* non-fatal */ }
+      }
+
+      await new Promise(r => setTimeout(r, SORA2_RETRY_COOLDOWN_SEC * 1000));
+    }
+  }
 }
 
 // ─── Batch image prompt pools ───
+// speaking = kling_lipsync (selfie, direct gaze), reaction = kling_motion (candid, phone reading)
 const BATCH_IMAGE_PROMPTS = {
   kling_motion: [
     'Candid iPhone 13 Pro photo of a girl sitting on bed, 45 degree side angle, holding phone still, screen not visible, medium shot, frozen expression, jaw slightly set, realistic, natural indoor lighting, 9:16 vertical',
@@ -219,7 +243,7 @@ const BATCH_IMAGE_PROMPTS = {
   ],
 };
 
-// ─── Batch motion prompt pools (designed for 5 distinct 3s moments) ───
+// ─── Batch motion prompt pools ───
 const BATCH_MOTION_PROMPTS = {
   kling_motion: [
     'Locked off tripod shot, static camera, continuous uncut 15-second shot — girl sitting on bed holding phone still, not typing, screen not visible. She cycles through distinct micro-reactions: completely motionless with one slow blink, jaw subtly tightens, micro head tilt with eyes narrowing, brief eye-widen then settle, controlled exhale with lips pressing. Each reaction separated by moments of stillness. No tears, dry eyes, no text, no watermark, no subtitles',
@@ -232,7 +256,36 @@ const BATCH_MOTION_PROMPTS = {
   ],
 };
 
+// Aliases: speaking→lipsync prompts, reaction→motion prompts
+BATCH_IMAGE_PROMPTS.speaking = BATCH_IMAGE_PROMPTS.kling_lipsync;
+BATCH_IMAGE_PROMPTS.reaction = BATCH_IMAGE_PROMPTS.kling_motion;
+BATCH_MOTION_PROMPTS.speaking = BATCH_MOTION_PROMPTS.kling_lipsync;
+BATCH_MOTION_PROMPTS.reaction = BATCH_MOTION_PROMPTS.kling_motion;
+
+// ─── Utility functions ───
 function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// Pick N unique items from array (shuffled). If N > arr.length, allows repeats.
+function pickUniqueN(arr, n) {
+  const shuffled = [...arr].sort(() => Math.random() - 0.5);
+  if (n <= arr.length) return shuffled.slice(0, n);
+  // More phones than prompts: fill with unique first, then random extras
+  const result = [...shuffled];
+  while (result.length < n) result.push(pickRandom(arr));
+  return result;
+}
+
+// Weighted random selection
+function weightedPick(items, weightFn) {
+  const totalWeight = items.reduce((sum, item) => sum + weightFn(item), 0);
+  if (totalWeight <= 0) return items[Math.floor(Math.random() * items.length)];
+  let r = Math.random() * totalWeight;
+  for (const item of items) {
+    r -= weightFn(item);
+    if (r <= 0) return item;
+  }
+  return items[items.length - 1];
+}
 
 // ═══════════════════════════════════════
 // Main batch logic
@@ -252,103 +305,128 @@ if (TBOT && ADMIN_CHAT) {
     await fetch('https://api.telegram.org/bot' + TBOT + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: ADMIN_CHAT, text: '\uD83D\uDD04 Hook Pool batch starting...' }),
+      body: JSON.stringify({ chat_id: ADMIN_CHAT, text: '\uD83D\uDD04 Hook Pool batch starting (' + BATCHES_PER_RUN + ' rounds)...' }),
     });
   } catch(e) { /* non-fatal */ }
 }
 
-// 1. Get active concepts with kling_motion or kling_lipsync hook type
-const conceptsFormula = encodeURIComponent("AND({is_active}=TRUE(),OR({hook_type}='kling_motion',{hook_type}='kling_lipsync'))");
+// 1. Get active phones
+const phonesRes = await fetch(
+  'https://api.airtable.com/v0/' + ABASE + '/' + PHONES_TABLE + '?filterByFormula=' + encodeURIComponent("{is_active}=TRUE()"),
+  { headers: { 'Authorization': 'Bearer ' + ATOKEN } }
+);
+const activePhones = phonesRes.ok ? ((await phonesRes.json()).records || []).map(r => ({
+  phoneId: r.fields.phone_id,
+  phoneName: r.fields.phone_name,
+  girlRefUrl: r.fields.girl_ref_url,
+})).filter(p => p.girlRefUrl) : [];
+
+if (activePhones.length === 0) {
+  return [{ json: { error: true, message: 'No active phones with girl_ref_url' } }];
+}
+console.log('[batch] Found ' + activePhones.length + ' active phones');
+
+// 2. Get active concepts with batch_weight
+const SORA2_HOOK_TYPES = ['kling_motion', 'kling_lipsync', 'speaking', 'reaction'];
 const conceptsRes = await fetch(
-  'https://api.airtable.com/v0/' + ABASE + '/' + CONCEPTS_TABLE + '?filterByFormula=' + conceptsFormula,
+  'https://api.airtable.com/v0/' + ABASE + '/' + CONCEPTS_TABLE + '?filterByFormula=' + encodeURIComponent("{is_active}=TRUE()"),
   { headers: { 'Authorization': 'Bearer ' + ATOKEN } }
 );
 if (!conceptsRes.ok) {
   return [{ json: { error: true, message: 'Failed to query concepts: ' + conceptsRes.status } }];
 }
-const concepts = (await conceptsRes.json()).records || [];
-console.log('[batch] Found ' + concepts.length + ' active concepts with Sora 2 hooks');
+const conceptRecords = (await conceptsRes.json()).records || [];
 
-// Also check sub_concepts_json for concepts that have kling variants
-const allConcepts = [];
-for (const c of concepts) {
-  const hookType = c.fields.hook_type;
-  const girlRefUrl = c.fields.girl_ref_url;
-  if (!girlRefUrl) continue; // skip concepts without girl ref
+// Build concept list with Sora 2 sub_concepts and their weights
+const activeConcepts = [];
+for (const c of conceptRecords) {
+  const conceptId = c.fields.concept_id;
+  const conceptName = c.fields.concept_name || conceptId;
+  const batchWeight = Number(c.fields.batch_weight) || 100; // default weight = 100
+
+  // Collect Sora 2 hook types from main + sub_concepts with weights
+  const sora2SubConcepts = [];
+  const mainHookType = c.fields.hook_type;
+  if (SORA2_HOOK_TYPES.includes(mainHookType)) {
+    sora2SubConcepts.push({ hookType: mainHookType, weight: 100 });
+  }
 
   let subConcepts = c.fields.sub_concepts_json;
   if (typeof subConcepts === 'string') {
     try { subConcepts = JSON.parse(subConcepts); } catch(e) { subConcepts = null; }
   }
-
-  // If sub-concepts exist, they may override hook_type per variant
-  // For pool purposes, we generate based on the main hook_type
-  if (hookType === 'kling_motion' || hookType === 'kling_lipsync') {
-    allConcepts.push({
-      recordId: c.id,
-      conceptId: c.fields.concept_id,
-      conceptName: c.fields.concept_name || c.fields.concept_id,
-      hookType,
-      girlRefUrl,
-    });
+  if (Array.isArray(subConcepts)) {
+    for (const sc of subConcepts) {
+      if (sc.enabled !== false && SORA2_HOOK_TYPES.includes(sc.hook_type)) {
+        sora2SubConcepts.push({
+          hookType: sc.hook_type,
+          weight: Number(sc.weight) || 100, // default sub_concept weight = 100
+        });
+      }
+    }
   }
+
+  if (sora2SubConcepts.length === 0) continue;
+
+  activeConcepts.push({
+    recordId: c.id,
+    conceptId,
+    conceptName,
+    batchWeight,
+    sora2SubConcepts,
+  });
 }
 
-console.log('[batch] Processing ' + allConcepts.length + ' concepts');
+if (activeConcepts.length === 0) {
+  return [{ json: { error: true, message: 'No active concepts with Sora 2 hook types' } }];
+}
 
+console.log('[batch] ' + activeConcepts.length + ' concept(s) with Sora 2 hooks: ' +
+  activeConcepts.map(c => c.conceptName + ' (w=' + c.batchWeight + ', subs=' + c.sora2SubConcepts.length + ')').join(', '));
+
+// 3. Run batch rounds
 const results = [];
 
-for (const concept of allConcepts) {
-  const { conceptId, conceptName, hookType, girlRefUrl } = concept;
+for (let round = 0; round < BATCHES_PER_RUN; round++) {
+  const roundLabel = 'Round ' + (round + 1) + '/' + BATCHES_PER_RUN;
+  console.log('\n[' + roundLabel + '] ─────────────────────');
 
-  // 2. Check current pool level for this concept
-  const poolFormula = encodeURIComponent("AND({status}='ready',{concept_id}='" + conceptId + "')");
-  let totalAvailable = 0;
-  try {
-    const poolRes = await fetch(
-      'https://api.airtable.com/v0/' + ABASE + '/' + HOOK_POOL_TABLE + '?filterByFormula=' + poolFormula,
-      { headers: { 'Authorization': 'Bearer ' + ATOKEN } }
-    );
-    if (poolRes.ok) {
-      const poolRecords = (await poolRes.json()).records || [];
-      totalAvailable = poolRecords.reduce((sum, r) => sum + (r.fields.available_segments || 0), 0);
-    }
-  } catch(e) {
-    console.log('[' + conceptId + '] Pool check error: ' + e.message);
-  }
+  // a. Weighted pick of concept
+  const concept = weightedPick(activeConcepts, c => c.batchWeight);
+  console.log('[' + roundLabel + '] Concept: ' + concept.conceptName + ' (w=' + concept.batchWeight + ')');
 
-  if (totalAvailable >= TARGET_POOL_SIZE) {
-    console.log('[' + conceptId + '] Pool sufficient: ' + totalAvailable + ' segments available, target: ' + TARGET_POOL_SIZE);
-    results.push({ conceptId, status: 'sufficient', available: totalAvailable });
-    continue;
-  }
+  // b. Weighted pick of sub_concept (hook type)
+  const subConcept = weightedPick(concept.sora2SubConcepts, sc => sc.weight);
+  const hookType = subConcept.hookType;
+  console.log('[' + roundLabel + '] Hook type: ' + hookType + ' (w=' + subConcept.weight + ')');
 
-  const deficit = TARGET_POOL_SIZE - totalAvailable;
-  const batchesNeeded = Math.ceil(deficit / 5);
-  console.log('[' + conceptId + '] Pool deficit: ' + totalAvailable + '/' + TARGET_POOL_SIZE + ', generating ' + batchesNeeded + ' batch(es)');
+  // c. Pick unique prompts for each phone
+  const imagePromptPool = BATCH_IMAGE_PROMPTS[hookType] || BATCH_IMAGE_PROMPTS.kling_motion;
+  const motionPromptPool = BATCH_MOTION_PROMPTS[hookType] || BATCH_MOTION_PROMPTS.kling_motion;
+  const imagePrompts = pickUniqueN(imagePromptPool, activePhones.length);
+  const motionPrompts = pickUniqueN(motionPromptPool, activePhones.length);
 
-  // 3. Generate batches for this concept
-  for (let b = 0; b < batchesNeeded; b++) {
-    const batchId = 'batch_' + new Date().toISOString().slice(0, 10) + '_' + conceptId + '_' + b;
-    console.log('[' + batchId + '] Starting...');
+  // d. Generate for ALL phones in parallel
+  const batchId = 'batch_' + new Date().toISOString().slice(0, 10) + '_' + concept.conceptId + '_' + hookType + '_r' + round;
 
-    try {
-      // a. Generate kie.ai image
-      const imagePrompts = BATCH_IMAGE_PROMPTS[hookType] || BATCH_IMAGE_PROMPTS.kling_motion;
-      const imagePrompt = pickRandom(imagePrompts);
-      console.log('[' + batchId + '] Generating kie.ai image...');
-      const taskId = await kieGenerate(imagePrompt, [girlRefUrl]);
+  const phoneResults = await Promise.allSettled(
+    activePhones.map(async (phone, idx) => {
+      const phoneLabel = batchId + '/' + phone.phoneId;
+      const imagePrompt = imagePrompts[idx];
+      const motionPrompt = motionPrompts[idx];
+
+      // Step 1: Generate kie.ai image
+      console.log('[' + phoneLabel + '] Generating kie.ai image...');
+      const taskId = await kieGenerate(imagePrompt, [phone.girlRefUrl]);
       const sourceImageUrl = await kiePoll(taskId);
-      console.log('[' + batchId + '] kie.ai image: ' + sourceImageUrl);
+      console.log('[' + phoneLabel + '] kie.ai image ready');
 
-      // b. Generate Sora 2 video (15s)
-      const motionPrompts = BATCH_MOTION_PROMPTS[hookType] || BATCH_MOTION_PROMPTS.kling_motion;
-      const motionPrompt = pickRandom(motionPrompts);
-      console.log('[' + batchId + '] Generating Sora 2 video (15s)...');
-      const videoUrl = await sora2Generate(sourceImageUrl, motionPrompt, { duration: 15 }, ADMIN_CHAT, TBOT);
-      console.log('[' + batchId + '] Sora 2 video: ' + videoUrl);
+      // Step 2: Generate Sora 2 video (persistent retry)
+      console.log('[' + phoneLabel + '] Generating Sora 2 video (15s)...');
+      const videoUrl = await sora2Persistent(sourceImageUrl, motionPrompt, { duration: 15 }, phoneLabel, TBOT, ADMIN_CHAT);
+      console.log('[' + phoneLabel + '] Sora 2 video ready');
 
-      // c. Create Hook Pool record with video attachment
+      // Step 3: Save to Hook Pool
       const segments = Array.from({ length: 5 }, (_, i) => ({
         index: i,
         start: i * 3,
@@ -360,16 +438,17 @@ for (const concept of allConcepts) {
         records: [{
           fields: {
             batch_id: batchId,
-            concept_id: conceptId,
-            concept_name: conceptName,
+            concept_id: concept.conceptId,
+            concept_name: concept.conceptName,
             hook_type: hookType,
-            girl_ref_url: girlRefUrl,
+            girl_ref_url: phone.girlRefUrl,
             source_image_url: sourceImageUrl,
-            video_file: [{ url: videoUrl }], // Airtable downloads and stores permanently
+            video_file: [{ url: videoUrl }],
             motion_prompt: motionPrompt,
             total_segments: 5,
             available_segments: 5,
             segments_json: JSON.stringify(segments),
+            phone_id: phone.phoneId,
             status: 'ready',
             created_at: new Date().toISOString(),
           },
@@ -390,63 +469,69 @@ for (const concept of allConcepts) {
         throw new Error('Airtable create failed: ' + createRes.status + ' ' + errText.slice(0, 200));
       }
 
-      console.log('[' + batchId + '] Hook Pool record created with 5 segments');
-      results.push({ conceptId, batchId, status: 'generated', segments: 5 });
+      console.log('[' + phoneLabel + '] Saved to Hook Pool (5 segments)');
+      return { phoneId: phone.phoneId, segments: 5 };
+    })
+  );
 
-      // Telegram notification per batch
-      if (TBOT && ADMIN_CHAT) {
-        try {
-          await fetch('https://api.telegram.org/bot' + TBOT + '/sendMessage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: ADMIN_CHAT,
-              text: '\u2705 Hook Pool: generated 5 hooks for "' + conceptName + '" (' + batchId + ')',
-            }),
-          });
-        } catch(e) { /* non-fatal */ }
-      }
-
-      // Wait 30s between batches to avoid rate limiting
-      if (b < batchesNeeded - 1) {
-        await new Promise(r => setTimeout(r, 30000));
-      }
-
-    } catch (err) {
-      console.log('[' + batchId + '] FAILED: ' + err.message);
-      results.push({ conceptId, batchId, status: 'failed', error: err.message });
-
-      // Telegram error notification
-      if (TBOT && ADMIN_CHAT) {
-        try {
-          await fetch('https://api.telegram.org/bot' + TBOT + '/sendMessage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: ADMIN_CHAT,
-              text: '\u274C Hook Pool batch failed for "' + conceptName + '": ' + err.message.slice(0, 200),
-            }),
-          });
-        } catch(e) { /* non-fatal */ }
-      }
+  // Collect results for this round
+  const roundSuccesses = [];
+  const roundFailures = [];
+  for (let i = 0; i < phoneResults.length; i++) {
+    const pr = phoneResults[i];
+    if (pr.status === 'fulfilled') {
+      roundSuccesses.push(pr.value);
+    } else {
+      roundFailures.push({ phoneId: activePhones[i].phoneId, error: pr.reason.message || String(pr.reason) });
     }
   }
 
-  // Wait 60s between concepts
-  await new Promise(r => setTimeout(r, 60000));
+  const totalSegs = roundSuccesses.reduce((s, r) => s + r.segments, 0);
+  results.push({
+    round: round + 1,
+    conceptId: concept.conceptId,
+    hookType,
+    batchId,
+    generated: roundSuccesses.length,
+    failed: roundFailures.length,
+    segments: totalSegs,
+    failures: roundFailures,
+  });
+
+  // Telegram notification per round
+  if (TBOT && ADMIN_CHAT) {
+    const msg = roundFailures.length > 0
+      ? '\u26A0\uFE0F ' + roundLabel + ': ' + concept.conceptName + '/' + hookType + ' — ' + roundSuccesses.length + '/' + activePhones.length + ' phones OK (' + totalSegs + ' clips)\nFailed: ' + roundFailures.map(f => f.phoneId).join(', ')
+      : '\u2705 ' + roundLabel + ': ' + concept.conceptName + '/' + hookType + ' — ' + activePhones.length + ' phones, ' + totalSegs + ' clips generated';
+    try {
+      await fetch('https://api.telegram.org/bot' + TBOT + '/sendMessage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: ADMIN_CHAT, text: msg }),
+      });
+    } catch(e) { /* non-fatal */ }
+  }
+
+  // Wait between rounds
+  if (round < BATCHES_PER_RUN - 1) {
+    console.log('[batch] Waiting 30s before next round...');
+    await new Promise(r => setTimeout(r, 30000));
+  }
 }
 
 // 4. Send summary
-const generated = results.filter(r => r.status === 'generated');
-const failed = results.filter(r => r.status === 'failed');
-const sufficient = results.filter(r => r.status === 'sufficient');
-const totalSegments = generated.reduce((sum, r) => sum + (r.segments || 0), 0);
+const totalGenerated = results.reduce((s, r) => s + r.generated, 0);
+const totalSegments = results.reduce((s, r) => s + r.segments, 0);
+const totalFailed = results.reduce((s, r) => s + r.failed, 0);
 
 const summary = '\uD83D\uDCCA Hook Pool Batch Complete\n' +
-  '\u2705 Generated: ' + generated.length + ' batches (' + totalSegments + ' segments)\n' +
-  (failed.length > 0 ? '\u274C Failed: ' + failed.length + ' batches\n' : '') +
-  '\u2139\uFE0F Sufficient: ' + sufficient.length + ' concepts already stocked\n' +
-  'Total concepts processed: ' + allConcepts.length;
+  'Rounds: ' + BATCHES_PER_RUN + '\n' +
+  'Phones: ' + activePhones.length + '\n' +
+  '\u2705 Generated: ' + totalGenerated + ' videos (' + totalSegments + ' clips)\n' +
+  (totalFailed > 0 ? '\u274C Failed: ' + totalFailed + ' videos\n' : '') +
+  '\nBreakdown:\n' +
+  results.map(r => '  R' + r.round + ': ' + r.conceptId + '/' + r.hookType + ' — ' + r.generated + ' ok' +
+    (r.failed > 0 ? ', ' + r.failed + ' failed' : '')).join('\n');
 
 console.log(summary);
 
@@ -460,4 +545,4 @@ if (TBOT && ADMIN_CHAT) {
   } catch(e) { /* non-fatal */ }
 }
 
-return [{ json: { results, totalGenerated: generated.length, totalSegments, totalFailed: failed.length } }];
+return [{ json: { results, totalGenerated, totalSegments, totalFailed } }];

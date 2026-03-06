@@ -468,23 +468,38 @@ function buildHookPromptFallback(production, hasEnvFrame, poseDesc, timeOfDay, h
 // ─── Hook Pool helpers (pre-generated Sora 2 hooks for instant /produce) ───
 const HOOK_POOL_TABLE = 'tbl3q91o3l0isSX9w';
 
-async function checkHookPool(scenarioRecordId, phoneId) {
+async function checkHookPool(scenarioRecordId, phoneId, conceptId) {
   const ATOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
-  if (!ATOKEN || !scenarioRecordId) return null;
+  if (!ATOKEN || (!scenarioRecordId && !conceptId)) return null;
 
   const ABASE = 'appsgjIdkpak2kaXq';
-  let formulaParts = "{status}='ready',{scenario_id}='" + scenarioRecordId + "'";
-  if (phoneId) formulaParts += ",{phone_id}='" + phoneId + "'";
-  const formula = encodeURIComponent("AND(" + formulaParts + ")");
+  // Try concept_id first (batch generator), fallback to scenario_id (legacy)
+  const idFilter = conceptId
+    ? "{concept_id}='" + conceptId + "'"
+    : "{scenario_id}='" + scenarioRecordId + "'";
+  // Search with phone_id first, then fallback to shared clips (no phone_id)
+  const queries = [];
+  if (phoneId) {
+    queries.push("{status}='ready'," + idFilter + ",{phone_id}='" + phoneId + "'");
+  }
+  // Also try clips without phone_id (shared pool from batch generator)
+  queries.push("{status}='ready'," + idFilter + ",{phone_id}=BLANK()");
+  // Legacy: clips without phone_id field at all
+  queries.push("{status}='ready'," + idFilter);
 
   try {
-    const res = await fetch(
-      'https://api.airtable.com/v0/' + ABASE + '/' + HOOK_POOL_TABLE + '?filterByFormula=' + formula + '&maxRecords=1',
-      { headers: { 'Authorization': 'Bearer ' + ATOKEN } }
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.records || data.records.length === 0) return null;
+    let data = null;
+    for (const q of queries) {
+      const formula = encodeURIComponent("AND(" + q + ")");
+      const res = await fetch(
+        'https://api.airtable.com/v0/' + ABASE + '/' + HOOK_POOL_TABLE + '?filterByFormula=' + formula + '&maxRecords=1',
+        { headers: { 'Authorization': 'Bearer ' + ATOKEN } }
+      );
+      if (!res.ok) continue;
+      const d = await res.json();
+      if (d.records && d.records.length > 0) { data = d; break; }
+    }
+    if (!data || !data.records || data.records.length === 0) return null;
 
     const record = data.records[0];
     const fields = record.fields;
@@ -830,7 +845,7 @@ if (hookType === 'reaction' || hookType === 'speaking') {
   const scenarioRecordId = production.scenarioRecordId || '';
 
   if (scenarioRecordId) {
-    const poolResult = await checkHookPool(scenarioRecordId, production.phoneId || '');
+    const poolResult = await checkHookPool(scenarioRecordId, production.phoneId || '', production.conceptId || '');
     if (poolResult) {
       console.log('[Hook Pool] Found pre-generated clip for scenario ' + scenarioRecordId + ': ' + poolResult.recordId);
 

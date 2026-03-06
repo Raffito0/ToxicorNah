@@ -34,6 +34,7 @@ const codeMap = {
   'mark-clip-used.js': 'Prepare Clip Mark',
   'set-time-of-day.js': 'Set Time of Day',
   'hook-generator.js': 'Hook Generator',
+  'batch-generate-hooks.js': 'Batch Generate Hooks',
   'process-review.js': 'Process Review',
   'monitor-availability.js': 'Monitor Availability',
   'save-to-content-library.js': 'Save to Content Library',
