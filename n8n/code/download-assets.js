@@ -158,25 +158,33 @@ try {
 }
 
 // ─── Download body clips ───
+// Use clipMapping (template-mapped clips) — NOT bodyClips (all clips)
+// clipMapping has exactly 1 clip per template body segment (5 for Standard template)
+const mappedClips = production.clipMapping || [];
 const clipMapping = [];
-for (let i = 0; i < (production.bodyClips || []).length; i++) {
-  const clip = production.bodyClips[i];
-  const localPath = path.join(outputDir, 'body_' + clip.clipIndex + '.mp4');
+for (let i = 0; i < mappedClips.length; i++) {
+  const mapped = mappedClips[i];
+  const localPath = path.join(outputDir, 'body_' + i + '.mp4');
   try {
-    if (clip.fileId) {
-      await downloadTgFile(clip.fileId, localPath, CONTENT_BOT_TOKEN);
+    if (mapped.fileId) {
+      await downloadTgFile(mapped.fileId, localPath, CONTENT_BOT_TOKEN);
     }
-    // Find matching template segment
-    const segment = (production.clipMapping || [])[i] || {};
     clipMapping.push({
-      section: segment.section || clip.section || 'body_' + clip.clipIndex,
-      targetDuration: segment.targetDuration || 3.0,
+      section: mapped.section,
+      targetDuration: mapped.targetDuration || 3.0,
       localPath,
-      actualDuration: clip.duration || 0,
+      actualDuration: mapped.actualDuration || 0,
     });
   } catch (e) {
-    warnings.push('Body clip ' + clip.clipIndex + ': ' + e.message + ' (skipped)');
-    // Don't add to clipMapping — this clip will be excluded from assembly
+    warnings.push('Body clip ' + i + ' (' + mapped.section + '): ' + e.message + ' (using placeholder)');
+    // Still add to clipMapping so assemble-video can generate a black placeholder
+    // instead of silently dropping the segment
+    clipMapping.push({
+      section: mapped.section,
+      targetDuration: mapped.targetDuration || 3.0,
+      localPath: null,
+      actualDuration: 0,
+    });
   }
 }
 
@@ -188,8 +196,30 @@ try {
     // No outro — fine
   } else if (outroData.outroSource === 'manual_clip' && outroData.outroFileId) {
     outroFile = await downloadTgFile(outroData.outroFileId, path.join(outputDir, 'outro.mp4'));
-  } else if (outroData.outroSource === 'app_store_clip' && outroData.outroFileUrl) {
-    outroFile = await downloadUrl(outroData.outroFileUrl, path.join(outputDir, 'outro.mp4'));
+  } else if (outroData.outroSource === 'app_store_clip') {
+    // Airtable attachment URLs expire after ~2h — re-fetch fresh URL from record
+    let freshUrl = outroData.outroFileUrl || '';
+    if (outroData.appStoreClipRecordId) {
+      try {
+        const ATOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
+        if (ATOKEN) {
+          const recRes = await fetch('https://api.airtable.com/v0/appsgjIdkpak2kaXq/tblixE2hz3VVNqYiN/' + outroData.appStoreClipRecordId, {
+            headers: { 'Authorization': 'Bearer ' + ATOKEN },
+          });
+          const recData = await recRes.json();
+          if (recData.fields && Array.isArray(recData.fields.clip_file) && recData.fields.clip_file.length > 0) {
+            freshUrl = recData.fields.clip_file[0].url;
+          }
+        }
+      } catch (e) {
+        console.log('[download] App store clip re-fetch failed: ' + e.message);
+      }
+    }
+    if (freshUrl) {
+      outroFile = await downloadUrl(freshUrl, path.join(outputDir, 'outro.mp4'));
+    } else {
+      warnings.push('App store clip: no URL available');
+    }
   } else if (outroData.outroSource === 'fallback_skip' || outroData.outroSource === 'app_store_fallback_skip') {
     // AI/app store failed, outro was skipped — fine
     warnings.push('Outro skipped (fallback)');
@@ -317,9 +347,11 @@ return [{
     hookSource,
     outroSource,
     copyJson: production.copyJson || null,
+    phoneVoiceId: production.phoneVoiceId || '',
     warnings: warnings.length > 0 ? warnings : undefined,
     _debug: {
-      bodyClipsIn: (production.bodyClips || []).length,
+      bodyClipsAll: (production.bodyClips || []).length,
+      clipMappingIn: mappedClips.length,
       clipMappingOut: clipMapping.length,
       clips: _debugClips,
       outro: outroFile || 'NONE',

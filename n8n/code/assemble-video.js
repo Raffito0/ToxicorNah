@@ -16,6 +16,46 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const _https = require('https');
+
+// ─── ElevenLabs Speech-to-Speech: convert baked hook audio to phone's voice ───
+function elevenLabsSTS(audioBuffer, voiceId, apiKey) {
+  return new Promise((resolve, reject) => {
+    const boundary = '----STS' + Date.now();
+    const parts = [];
+    parts.push('--' + boundary + '\r\nContent-Disposition: form-data; name="model_id"\r\n\r\neleven_english_sts_v2\r\n');
+    parts.push('--' + boundary + '\r\nContent-Disposition: form-data; name="audio"; filename="hook.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n');
+    const bodyBuf = Buffer.concat([
+      Buffer.from(parts.join('')),
+      audioBuffer,
+      Buffer.from('\r\n--' + boundary + '--\r\n'),
+    ]);
+    const req = _https.request({
+      hostname: 'api.elevenlabs.io',
+      path: '/v1/speech-to-speech/' + voiceId + '?output_format=mp3_44100_128',
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'multipart/form-data; boundary=' + boundary,
+        'Content-Length': bodyBuf.length,
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(buf);
+        } else {
+          reject(new Error('STS HTTP ' + res.statusCode + ': ' + buf.toString().slice(0, 200)));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(bodyBuf);
+    req.end();
+  });
+}
 
 const production = $input.first().json;
 const {
@@ -64,6 +104,18 @@ function probeDuration(filePath) {
   }
 }
 
+function hasAudioStream(filePath) {
+  try {
+    const result = execSync(
+      'ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "' + filePath + '"',
+      { timeout: 10000 }
+    ).toString().trim();
+    return result.includes('audio');
+  } catch (e) {
+    return false;
+  }
+}
+
 // ═══════════════════════════════════════
 // STEP 2: Calculate speed factors for smart trimming
 // ═══════════════════════════════════════
@@ -94,10 +146,9 @@ function calcTrimStrategy(actualDuration, targetDuration) {
     return { method: 'speed', speedFactor: sf };
   }
 
-  // Much shorter: freeze last frame
+  // Much shorter: just trim (clip ends shorter — better than ugly freeze frame)
   if (sf < 0.7) {
-    const gap = targetDuration - actualDuration;
-    return { method: 'freeze', speedFactor: 1.0, freezeDuration: gap };
+    return { method: 'trim', speedFactor: 1.0 };
   }
 
   return { method: 'none', speedFactor: 1.0 };
@@ -185,30 +236,31 @@ if (hookFile && fs.existsSync(hookFile)) {
   if (hookFile.endsWith('.png') || hookFile.endsWith('.jpg')) {
     // Still image → create video
     inputs.push('-loop 1 -t ' + hookTarget + ' -framerate ' + FPS + ' -i ' + q(hookFile));
-    filterParts.push('[' + hookStreamIdx + ':v]scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=decrease,pad=' + WIDTH + ':' + HEIGHT + ':(ow-iw)/2:(oh-ih)/2,setsar=1,fps=' + FPS + '[hook]');
+    filterParts.push('[' + hookStreamIdx + ':v]scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS + '[hook]');
+    hookActualUsed = hookTarget;
+  } else if (hookActual <= 0.1) {
+    // File has no readable duration (e.g. Telegram document) — loop first frame
+    inputs.push('-loop 1 -t ' + hookTarget.toFixed(3) + ' -framerate ' + FPS + ' -i ' + q(hookFile));
+    filterParts.push('[' + hookStreamIdx + ':v]scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS + '[hook]');
     hookActualUsed = hookTarget;
   } else if (hasBakedHookAudio) {
     // Sora 2 speaking: DON'T speed-adjust (would break lip sync)
-    // VO is pre-padded to hookTarget in generate-voiceover → Kling video ≈ hookTarget
     // Trim to exact duration as safety net
     inputs.push('-i ' + q(hookFile));
     let vf = '[' + hookStreamIdx + ':v]';
-    vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=decrease,pad=' + WIDTH + ':' + HEIGHT + ':(ow-iw)/2:(oh-ih)/2,setsar=1,fps=' + FPS;
+    vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS;
     vf += ',trim=0:' + hookTarget.toFixed(3) + ',setpts=PTS-STARTPTS[hook]';
     filterParts.push(vf);
     hookActualUsed = hookTarget;
   } else {
-    // Normal: apply smart trim
+    // Normal: apply smart trim (speed up/down or hard trim, NO freeze)
     const hookTrim = calcTrimStrategy(hookActual, hookTarget);
     inputs.push('-i ' + q(hookFile));
     let vf = '[' + hookStreamIdx + ':v]';
     if (hookTrim.method === 'speed' && hookTrim.speedFactor !== 1.0) {
       vf += 'setpts=PTS/' + hookTrim.speedFactor.toFixed(4) + ',';
     }
-    vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=decrease,pad=' + WIDTH + ':' + HEIGHT + ':(ow-iw)/2:(oh-ih)/2,setsar=1,fps=' + FPS;
-    if (hookTrim.method === 'freeze') {
-      vf += ',tpad=stop=-1:stop_mode=clone:stop_duration=' + hookTrim.freezeDuration.toFixed(3);
-    }
+    vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS;
     vf += ',trim=0:' + hookTarget.toFixed(3) + ',setpts=PTS-STARTPTS[hook]';
     filterParts.push(vf);
     hookActualUsed = hookTarget;
@@ -217,34 +269,91 @@ if (hookFile && fs.existsSync(hookFile)) {
 }
 
 // ─── Body clip inputs ───
-const bodySegments = (clipMapping || []).filter(c => c.localPath && fs.existsSync(c.localPath));
+// NO filter — include ALL segments (missing files get black placeholder instead of being silently dropped)
+const bodySegments = clipMapping || [];
 const _debugBody = []; // debug: track probed vs stored durations
+
+// Deterministic pseudo-random for organic caption placement
+function capRand(seed) { const x = Math.sin(seed * 9301 + 49297) * 49297; return x - Math.floor(x); }
 
 for (let i = 0; i < bodySegments.length; i++) {
   const seg = bodySegments[i];
   const idx = streamIdx++;
   const label = 'body' + i;
-  // Always probe REAL file duration — stored actualDuration from Airtable may be stale/wrong
-  const probed = probeDuration(seg.localPath);
-  const actual = probed > 0 ? probed : (seg.actualDuration || 1);
   const target = seg.targetDuration || 3.0;
-  // Always take the FIRST `target` seconds of the clip
-  const startOffset = 0;
-  const _capMatch = bodyCaptionMap[seg.section] || null;
-  _debugBody.push(seg.section + ': stored=' + (seg.actualDuration||0) + ' probed=' + probed.toFixed(2) + ' target=' + target + ' offset=' + startOffset.toFixed(2) + ' cap=' + (_capMatch ? JSON.stringify(_capMatch) : 'NONE'));
+  const fileExists = seg.localPath && fs.existsSync(seg.localPath);
 
-  inputs.push('-i ' + q(seg.localPath));
+  // ── Handle missing files: generate black placeholder ──
+  if (!fileExists) {
+    const placeholderPath = path.join(outputDir, 'black_body_' + i + '.png');
+    try {
+      execSync('ffmpeg -y -f lavfi -i color=black:s=' + WIDTH + 'x' + HEIGHT + ':d=1 -frames:v 1 "' + placeholderPath + '"', { timeout: 10000 });
+    } catch (e) {
+      _debugBody.push(seg.section + ': SKIPPED (placeholder failed: ' + e.message + ')');
+      streamIdx--;
+      continue;
+    }
+    inputs.push('-loop 1 -t ' + target.toFixed(3) + ' -framerate ' + FPS + ' -i ' + q(placeholderPath));
+    let vf = '[' + idx + ':v]scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS;
+    // Still apply caption overlay on placeholder
+    const capText = bodyCaptionMap[seg.section] || null;
+    const capFile = capText ? writeCaptionFile(capText, label) : null;
+    if (capFile) {
+      const capYBase = 0.27 + capRand(i * 7 + 1) * 0.10;
+      const capYJitter = Math.round(-30 + capRand(i * 11 + 5) * 60);
+      const capY = 'h*' + capYBase.toFixed(3) + '+(' + capYJitter + ')';
+      const capXOff = Math.round(-40 + capRand(i * 19 + 7) * 80);
+      const capX = '(w-text_w)/2+(' + capXOff + ')';
+      const capStart = 0.15 + capRand(i * 13 + 3) * 0.55;
+      const capEnd = target - capRand(i * 17 + 11) * 0.45;
+      vf += ',drawtext=textfile=' + capFile + captionFontParam + ':fontsize=50:fontcolor=white:borderw=3:bordercolor=black@0.6:x=' + capX + ':y=' + capY + ":enable='between(t\\," + capStart.toFixed(3) + '\\,' + capEnd.toFixed(3) + ")'";
+    }
+    vf += '[' + label + ']';
+    filterParts.push(vf);
+    scaledStreams.push('[' + label + ']');
+    _debugBody.push(seg.section + ': BLACK_PLACEHOLDER target=' + target);
+    continue;
+  }
+
+  // ── File exists: probe and process ──
+  const probed = probeDuration(seg.localPath);
+  const _capMatch = bodyCaptionMap[seg.section] || null;
+  _debugBody.push(seg.section + ': stored=' + (seg.actualDuration||0) + ' probed=' + probed.toFixed(2) + ' target=' + target + ' cap=' + (_capMatch ? JSON.stringify(_capMatch) : 'NONE'));
+
+  // If file has no readable duration, treat as still image (loop first frame for target duration)
+  if (probed <= 0.1) {
+    inputs.push('-loop 1 -t ' + target.toFixed(3) + ' -framerate ' + FPS + ' -i ' + q(seg.localPath));
+  } else {
+    inputs.push('-i ' + q(seg.localPath));
+  }
 
   let vf = '[' + idx + ':v]';
-  vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=decrease,pad=' + WIDTH + ':' + HEIGHT + ':(ow-iw)/2:(oh-ih)/2,setsar=1,fps=' + FPS;
-  vf += ',trim=' + startOffset.toFixed(3) + ':' + (startOffset + target).toFixed(3) + ',setpts=PTS-STARTPTS';
+  vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS;
+
+  if (probed > 0.1) {
+    if (probed < target * 0.95) {
+      // Clip SHORTER than target: slow down to fill duration (max 2x slowdown)
+      const slowFactor = target / probed;
+      if (slowFactor <= 2.0) {
+        vf += ',setpts=PTS*' + slowFactor.toFixed(4);
+      }
+      // Trim to exact target + reset timestamps
+      vf += ',trim=0:' + target.toFixed(3) + ',setpts=PTS-STARTPTS';
+    } else if (probed > target * 1.05 && probed <= target * 1.4) {
+      // Clip slightly longer (5-40%): speed up to fit
+      const speedFactor = probed / target;
+      vf += ',setpts=PTS/' + speedFactor.toFixed(4) + ',trim=0:' + target.toFixed(3) + ',setpts=PTS-STARTPTS';
+    } else {
+      // Clip within ±5% or much longer: hard trim to exact target
+      vf += ',trim=0:' + target.toFixed(3) + ',setpts=PTS-STARTPTS';
+    }
+  }
+
   // Caption overlay (body clips only — hook is excluded, visual-only sections like screenshot/upload_chat get no caption)
   // Organic feel: random y-offset + random appear/disappear timing per segment
   const capText = bodyCaptionMap[seg.section] || null;
   const capFile = capText ? writeCaptionFile(capText, label) : null;
   if (capFile) {
-    // Pseudo-random (deterministic per segment index) for organic human-placed feel
-    function capRand(seed) { const x = Math.sin(seed * 9301 + 49297) * 49297; return x - Math.floor(x); }
     // Y: base varies 0.27–0.37 of screen height + pixel jitter ±30px
     const capYBase = 0.27 + capRand(i * 7 + 1) * 0.10;
     const capYJitter = Math.round(-30 + capRand(i * 11 + 5) * 60);
@@ -271,14 +380,11 @@ if (outroFile && fs.existsSync(outroFile)) {
   const outroActual = probeDuration(outroFile);
   outroStreamIdx = streamIdx++;
 
-  inputs.push('-i ' + q(outroFile));
-
-  // Pre-compute outro caption drawtext (used in both baked and normal paths)
+  // Pre-compute outro caption drawtext (used in all paths)
   const outroCapFile = (copyJson && copyJson.outroText) ? writeCaptionFile(copyJson.outroText, 'outro') : null;
   function outroRand(seed) { const x = Math.sin(seed * 9301 + 49297) * 49297; return x - Math.floor(x); }
   const outroCStart = 0.15 + outroRand(42) * 0.55;
   const outroCEnd = outroTarget - outroRand(77) * 0.40;
-  // Same organic positioning as body captions
   const outroCYBase = 0.27 + outroRand(19) * 0.10;
   const outroCYJitter = Math.round(-30 + outroRand(31) * 60);
   const outroCXOff = Math.round(-40 + outroRand(53) * 80);
@@ -286,26 +392,28 @@ if (outroFile && fs.existsSync(outroFile)) {
     ? ",drawtext=textfile=" + outroCapFile + captionFontParam + ":fontsize=50:fontcolor=white:borderw=3:bordercolor=black@0.6:x=(w-text_w)/2+(" + outroCXOff + "):y=h*" + outroCYBase.toFixed(3) + "+(" + outroCYJitter + "):enable='between(t\\," + outroCStart.toFixed(3) + "\\," + outroCEnd.toFixed(3) + ")'"
     : '';
 
-  if (hasBakedOutroAudio) {
+  if (outroActual <= 0.1 && !outroFile.endsWith('.png') && !outroFile.endsWith('.jpg')) {
+    // File has no readable duration (e.g. Telegram document) — loop first frame
+    inputs.push('-loop 1 -t ' + outroTarget.toFixed(3) + ' -framerate ' + FPS + ' -i ' + q(outroFile));
+    filterParts.push('[' + outroStreamIdx + ':v]scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS + outroDT + '[outro]');
+    outroActualUsed = outroTarget;
+  } else if (hasBakedOutroAudio) {
     // Sora 2 speaking: DON'T speed-adjust (would break lip sync)
-    // VO is pre-padded to outroTarget in generate-voiceover → Kling video ≈ outroTarget
-    // Trim to exact duration as safety net
+    inputs.push('-i ' + q(outroFile));
     let vf = '[' + outroStreamIdx + ':v]';
-    vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=decrease,pad=' + WIDTH + ':' + HEIGHT + ':(ow-iw)/2:(oh-ih)/2,setsar=1,fps=' + FPS;
+    vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS;
     vf += ',trim=0:' + outroTarget.toFixed(3) + ',setpts=PTS-STARTPTS' + outroDT + '[outro]';
     filterParts.push(vf);
     outroActualUsed = outroTarget;
   } else {
-    // Normal: apply smart trim
+    // Normal: apply smart trim (speed up/down or hard trim, NO freeze)
+    inputs.push('-i ' + q(outroFile));
     const outroTrim = calcTrimStrategy(outroActual, outroTarget);
     let vf = '[' + outroStreamIdx + ':v]';
     if (outroTrim.method === 'speed' && outroTrim.speedFactor !== 1.0) {
       vf += 'setpts=PTS/' + outroTrim.speedFactor.toFixed(4) + ',';
     }
-    vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=decrease,pad=' + WIDTH + ':' + HEIGHT + ':(ow-iw)/2:(oh-ih)/2,setsar=1,fps=' + FPS;
-    if (outroTrim.method === 'freeze') {
-      vf += ',tpad=stop=-1:stop_mode=clone:stop_duration=' + outroTrim.freezeDuration.toFixed(3);
-    }
+    vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS;
     vf += ',trim=0:' + outroTarget.toFixed(3) + ',setpts=PTS-STARTPTS' + outroDT + '[outro]';
     filterParts.push(vf);
     outroActualUsed = outroTarget;
@@ -354,9 +462,9 @@ if (voSegmentFiles && voSegmentFiles.length > 0) {
       }
 
       if (timeOffsetMs === 0) {
-        filterParts.push('[' + voIdx + ':a]' + atempoFilter + 'volume=1.0[' + label + ']');
+        filterParts.push('[' + voIdx + ':a]' + atempoFilter + 'loudnorm=I=-14:TP=-1:LRA=11,volume=1.0[' + label + ']');
       } else {
-        filterParts.push('[' + voIdx + ':a]' + atempoFilter + 'adelay=' + timeOffsetMs + '|' + timeOffsetMs + ',volume=1.0[' + label + ']');
+        filterParts.push('[' + voIdx + ':a]' + atempoFilter + 'loudnorm=I=-14:TP=-1:LRA=11,adelay=' + timeOffsetMs + '|' + timeOffsetMs + ',volume=1.0[' + label + ']');
       }
       voLabels.push('[' + label + ']');
     }
@@ -375,7 +483,7 @@ if (voSegmentFiles && voSegmentFiles.length > 0) {
     if (voLabels.length === 1) {
       filterParts.push(voLabels[0] + 'acopy[vo_mixed]');
     } else {
-      filterParts.push(voLabels.join('') + 'amix=inputs=' + voLabels.length + ':duration=longest:dropout_transition=0[vo_mixed]');
+      filterParts.push(voLabels.join('') + 'amix=inputs=' + voLabels.length + ':duration=longest:dropout_transition=0:normalize=0[vo_mixed]');
     }
   }
 } else if (voFile && fs.existsSync(voFile)) {
@@ -405,15 +513,55 @@ if (musicFile && fs.existsSync(musicFile)) {
 }
 
 // ─── Embedded audio: extract from speaking videos (Sora 2 with baked speech) ───
+// For speaking hooks: extract audio → ElevenLabs STS → convert to phone's voice
 const klingAudioLabels = [];
+let stsHookFile = null;
+let stsHookIdx = -1;
 
 if (hasBakedHookAudio && hookStreamIdx >= 0) {
-  // Hook is always the first segment — no adelay needed
-  filterParts.push('[' + hookStreamIdx + ':a]volume=1.0[kling_hook_a]');
-  klingAudioLabels.push('[kling_hook_a]');
+  const hookHasAudio = hookFile && fs.existsSync(hookFile) && hasAudioStream(hookFile);
+  const phoneVoiceId = production.phoneVoiceId || '';
+  const elevenLabsKey = (typeof $env !== 'undefined' && $env.ELEVENLABS_API_KEY) || 'sk_a645bb67bdb3fecc5604c41b18588e7b1d8a35092d0c28fc';
+
+  if (!hookHasAudio) {
+    // Hook video has no audio stream — skip hook audio entirely (VO + music still work)
+    console.log('[assemble] Hook video has no audio stream — skipping hook audio');
+  } else if (phoneVoiceId && elevenLabsKey && hookFile && fs.existsSync(hookFile)) {
+    // Extract audio from hook video
+    const hookAudioTmp = path.join(outputDir, 'hook_audio_' + Date.now() + '.mp3');
+    try {
+      execSync('ffmpeg -y -i ' + q(hookFile) + ' -vn -acodec libmp3lame -ar 44100 -ab 128k ' + q(hookAudioTmp), { timeout: 10000 });
+      const hookAudioBuf = fs.readFileSync(hookAudioTmp);
+      console.log('[assemble] STS: extracting hook audio (' + hookAudioBuf.length + ' bytes) → voice ' + phoneVoiceId);
+
+      // Speech-to-Speech conversion
+      const stsBuf = await elevenLabsSTS(hookAudioBuf, phoneVoiceId, elevenLabsKey);
+      stsHookFile = path.join(outputDir, 'hook_sts_' + Date.now() + '.mp3');
+      fs.writeFileSync(stsHookFile, stsBuf);
+      console.log('[assemble] STS: converted hook audio (' + stsBuf.length + ' bytes)');
+
+      // Add as separate input — use this instead of embedded audio
+      stsHookIdx = streamIdx++;
+      inputs.push('-i ' + q(stsHookFile));
+      filterParts.push('[' + stsHookIdx + ':a]loudnorm=I=-14:TP=-1:LRA=11,volume=1.0[kling_hook_a]');
+      klingAudioLabels.push('[kling_hook_a]');
+
+      try { fs.unlinkSync(hookAudioTmp); } catch (e) {}
+    } catch (e) {
+      console.log('[assemble] STS failed, using original baked audio: ' + e.message);
+      // Fallback: use original embedded audio
+      filterParts.push('[' + hookStreamIdx + ':a]loudnorm=I=-14:TP=-1:LRA=11,volume=1.0[kling_hook_a]');
+      klingAudioLabels.push('[kling_hook_a]');
+      try { fs.unlinkSync(hookAudioTmp); } catch (e2) {}
+    }
+  } else {
+    // No voice_id or API key — use original embedded audio
+    filterParts.push('[' + hookStreamIdx + ':a]loudnorm=I=-14:TP=-1:LRA=11,volume=1.0[kling_hook_a]');
+    klingAudioLabels.push('[kling_hook_a]');
+  }
 }
 
-if (hasBakedOutroAudio && outroStreamIdx >= 0) {
+if (hasBakedOutroAudio && outroStreamIdx >= 0 && outroFile && hasAudioStream(outroFile)) {
   // Calculate outro timeline offset (sum of all segments before outro)
   let outroTimeOffsetMs = 0;
   for (const seg of template.segments) {
@@ -425,9 +573,9 @@ if (hasBakedOutroAudio && outroStreamIdx >= 0) {
     }
   }
   if (outroTimeOffsetMs > 0) {
-    filterParts.push('[' + outroStreamIdx + ':a]adelay=' + outroTimeOffsetMs + '|' + outroTimeOffsetMs + ',volume=1.0[kling_outro_a]');
+    filterParts.push('[' + outroStreamIdx + ':a]loudnorm=I=-14:TP=-1:LRA=11,adelay=' + outroTimeOffsetMs + '|' + outroTimeOffsetMs + ',volume=1.0[kling_outro_a]');
   } else {
-    filterParts.push('[' + outroStreamIdx + ':a]volume=1.0[kling_outro_a]');
+    filterParts.push('[' + outroStreamIdx + ':a]loudnorm=I=-14:TP=-1:LRA=11,volume=1.0[kling_outro_a]');
   }
   klingAudioLabels.push('[kling_outro_a]');
 }
@@ -439,7 +587,7 @@ allAudioLabels.push(...klingAudioLabels);
 if (musicIdx >= 0) allAudioLabels.push('[music]');
 
 if (allAudioLabels.length > 1) {
-  filterParts.push(allAudioLabels.join('') + 'amix=inputs=' + allAudioLabels.length + ':duration=longest:dropout_transition=1[outa]');
+  filterParts.push(allAudioLabels.join('') + 'amix=inputs=' + allAudioLabels.length + ':duration=longest:dropout_transition=1:normalize=0[outa]');
 } else if (allAudioLabels.length === 1) {
   filterParts.push(allAudioLabels[0] + 'acopy[outa]');
 }
@@ -459,6 +607,7 @@ if (hasAudio) {
 
 cmd += ' -c:v libx264 -preset fast -crf 23' +
   ' -c:a aac -b:a 192k' +
+  ' -shortest' +
   ' -movflags +faststart' +
   ' ' + q(outputFile);
 
@@ -490,7 +639,7 @@ try {
       );
       // Re-mix only non-music audio
       if (nonMusicAudioLabels.length > 1) {
-        simpleFilterParts.push(nonMusicAudioLabels.join('') + 'amix=inputs=' + nonMusicAudioLabels.length + ':duration=longest:dropout_transition=1[outa]');
+        simpleFilterParts.push(nonMusicAudioLabels.join('') + 'amix=inputs=' + nonMusicAudioLabels.length + ':duration=longest:dropout_transition=1:normalize=0[outa]');
       } else {
         simpleFilterParts.push(nonMusicAudioLabels[0] + 'acopy[outa]');
       }
@@ -573,6 +722,7 @@ return [{
       copyJsonPresent: !!copyJson,
       copyJsonBodyClips: copyJson && copyJson.bodyClips ? copyJson.bodyClips.length : 0,
       ffmpegCmd: cmd.slice(0, 2000),
+      ffmpegError: ffmpegError ? ffmpegError.slice(-500) : 'none',
     },
   },
   binary: {
