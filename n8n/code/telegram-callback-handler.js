@@ -277,25 +277,59 @@ if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') |
       } catch (e) { /* non-fatal */ }
     }
 
-    const pendingSegs = segments.filter(s => s.status === 'pending');
-    const updateFields = { vo_segments_json: JSON.stringify(segments) };
+    // Race-condition-safe write: retry loop to handle concurrent callbacks
+    // that overwrite each other's changes to vo_segments_json
+    let allApproved = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // Re-read fresh data on retry (first attempt uses already-read data)
+      if (attempt > 0) {
+        try {
+          const freshRes = await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + VIDEO_RUNS_TABLE + '/' + recordId, {
+            headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN },
+          });
+          const freshRecord = await freshRes.json();
+          const freshRaw = freshRecord.fields?.vo_segments_json;
+          if (freshRaw) segments = JSON.parse(freshRaw);
+          const freshSeg = segments.find(s => s.index === segIndex);
+          if (freshSeg) freshSeg.status = 'approved';
+        } catch(e) { break; }
+      }
 
-    if (pendingSegs.length === 0) {
-      updateFields.vo_approval = 'approved';
+      const pendingSegs = segments.filter(s => s.status === 'pending');
+      const updateFields = { vo_segments_json: JSON.stringify(segments) };
+      if (pendingSegs.length === 0) {
+        updateFields.vo_approval = 'approved';
+      }
+
+      try {
+        await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + VIDEO_RUNS_TABLE + '/' + recordId, {
+          method: 'PATCH',
+          headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: updateFields }),
+        });
+      } catch (e) { break; }
+
+      // Verify our change stuck (another callback may have overwritten it)
+      try {
+        const verifyRes = await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + VIDEO_RUNS_TABLE + '/' + recordId, {
+          headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN },
+        });
+        const verifyRecord = await verifyRes.json();
+        const verifyRaw = verifyRecord.fields?.vo_segments_json;
+        if (verifyRaw) {
+          const verifySegs = JSON.parse(verifyRaw);
+          const verifySeg = verifySegs.find(s => s.index === segIndex);
+          if (verifySeg && verifySeg.status === 'approved') {
+            allApproved = verifySegs.filter(s => s.status === 'pending').length === 0;
+            break; // Our change is confirmed
+          }
+          // Our change was overwritten by a concurrent callback, retry
+          console.log('[VO callback] Segment ' + segIndex + ' was overwritten, retrying (attempt ' + (attempt + 1) + ')');
+        }
+      } catch(e) { break; }
     }
 
-    try {
-      await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + VIDEO_RUNS_TABLE + '/' + recordId, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': 'Bearer ' + AIRTABLE_TOKEN,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ fields: updateFields }),
-      });
-    } catch (e) { /* non-fatal */ }
-
-    if (pendingSegs.length === 0) {
+    if (allApproved) {
       try {
         await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
           method: 'POST',
@@ -308,7 +342,7 @@ if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') |
       } catch (e) { /* non-fatal */ }
     }
 
-    return [{ json: { type: 'vo_segment', action: 'approve', segIndex, recordId, allApproved: pendingSegs.length === 0 } }];
+    return [{ json: { type: 'vo_segment', action: 'approve', segIndex, recordId, allApproved } }];
 
   } else {
     // """ REDO / FASTER / SLOWER: regenerate via Fish.audio """
@@ -884,7 +918,7 @@ if (ledMatch) {
 
   // Answer callback
   if (callbackQueryId) {
-    const label = ledColor ? ('' ' + ledColor.charAt(0).toUpperCase() + ledColor.slice(1) + ' LED') : ' No LED';
+    const label = ledColor ? (ledColor.charAt(0).toUpperCase() + ledColor.slice(1) + ' LED') : 'No LED';
     try {
       await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/answerCallbackQuery', {
         method: 'POST',
@@ -896,7 +930,7 @@ if (ledMatch) {
 
   // Update button
   if (messageId) {
-    const btnLabel = ledColor ? ('' ' + ledColor.charAt(0).toUpperCase() + ledColor.slice(1) + ' LED') : ' No LED';
+    const btnLabel = ledColor ? (ledColor.charAt(0).toUpperCase() + ledColor.slice(1) + ' LED') : 'No LED';
     try {
       await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/editMessageReplyMarkup', {
         method: 'POST',

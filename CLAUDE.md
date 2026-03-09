@@ -294,56 +294,43 @@
 - `planner/formatter.py` — JSON + TXT output
 - `delivery/` — Video Delivery Bridge (see above)
 
-## CURRENT OBJECTIVE (2026-03-09): Auto-Produce + Forum Topics
+## COMPLETED: Auto-Produce + Forum Topics + Multi-Phone Fixes (2026-03-09)
 
-### Cosa funziona gia:
-- Auto-produce triggera 3 phone in parallelo (webhook per phone, esecuzioni separate)
-- VO segments arrivano su Telegram nel topic General/Assemble di ogni phone
-- `topic_assemble_id` svuotato (General = Assemble, nessun message_thread_id)
-- `topic_images_videos_id` corretto per tutti i phone (16, 3, 3)
+### Stato: FUNZIONANTE
+- Auto-produce triggera 3 phone in parallelo con scenari DIVERSI
+- Ogni phone usa la propria ragazza (girl_ref_url), voce (voice_id), hook pool
+- VO, hook, outro arrivano tutti su Assemble topic per ogni phone
+- Hook Pool filtrato strict per phone_id (no cross-phone fallback)
+- Speaking outro usa durata naturale Kling Avatar V2 (no hard trim 3s)
 
-### Problema attuale (dove riprendere):
-**Generate VO node fallisce con SyntaxError** su tutti e 3 i phone. L'errore era causato da **encoding corrotto** (smart quotes + Unicode arrows/box chars nei file JS). Fix applicato:
-1. **899 smart quotes** (`""''`) sostituite con virgolette normali in 19 file
-2. **Frecce/em-dash/box chars** Unicode sostituiti con ASCII equivalenti
-3. **Mojibake patterns** (`\u00E2\u20AC` etc.) rimossi
-4. **Syntax fix**: `' ' '` (da rimozione freccia `->`) corretto in `' -> '` in `generate-voiceover.js:160`
-
-### Stato deploy:
-- ✅ Codice sorgente fixato (tutti i file in `n8n/code/`)
-- ✅ `embed-code.cjs` eseguito → workflow JSON aggiornati
-- ⚠️ **PROSSIMO STEP**: Importare `unified-pipeline-fixed.json` su n8n VPS
-- ⚠️ Dopo import: **disattivare e riattivare** il workflow (registra webhook Telegram)
-- ⚠️ Pulire Video Runs `status='started'` prima di ritriggare (usare Airtable MCP o API)
-- ⚠️ Poi triggare auto-produce e verificare che Generate VO funzioni
-
-### Test da fare dopo deploy:
-1. Importare workflow su n8n
-2. Disattivare + riattivare workflow
-3. Pulire eventuali Video Runs con `status='started'`
-4. Triggare auto-produce (manualmente dal Schedule Trigger o aspettare 30 min)
-5. Verificare che i VO arrivino su tutti e 3 i phone
-6. Premere Approve sui VO → verificare che il callback funzioni (Parse Callback era rotto, ora fixato)
-7. Se VO approvati → pipeline continua con hook → outro → assembly → video finale
-
-### Problemi risolti oggi (2026-03-09):
+### Problemi risolti (2026-03-09, sessione completa):
 1. **Webhook 404**: auto-produce POST ma webhook accettava solo GET → aggiunto `httpMethod: POST`
-2. **$('Parse Message') not executed**: auto-produce path bypassa Parse Message → cambiato a `$('Set Produce Context')` in Find Scenario e Find Template
+2. **$('Parse Message') not executed**: auto-produce path bypassa Parse Message → cambiato a `$('Set Produce Context')`
 3. **Supergroup migration**: abilitare forum topics cambia chat_id → aggiornati tutti gli ID in Airtable
 4. **Bot non vedeva supergroup**: rimosso e riaggiunto @Ueien_bot a Phone 2 e 3
 5. **message_thread_id=1 invalido**: General topic non usa thread ID → svuotato `topic_assemble_id`
-6. **Smart quotes SyntaxError**: `""''` nei file JS → sostituite con `""''` ASCII
+6. **Smart quotes SyntaxError**: `""''` nei file JS → sostituite con `""''` ASCII (899 occorrenze)
 7. **Unicode arrows/box chars**: `->`, `--`, `+` nei commenti → sostituiti con ASCII
 8. **Generate VO broken string**: `' ' '` → `' -> '` dopo rimozione freccia
+9. **Stesso scenario per tutti i phone**: Airtable read-after-write consistency lag → pre-load ALL ready scenarios in array locale, assegnamento via index (no re-query)
+10. **Airtable 422 UNKNOWN_FIELD_NAME**: `fields[]` con comma-separated values non supportato → rimosso parametro
+11. **Hook pool cross-phone fallback**: Phone 1 (zero pool clips) prendeva clip di Phone 2 via fallback senza phone_id → rimossi fallback queries senza phone_id in `checkHookPool()`
+12. **extractHookLastFrame() non trovava video per fresh hooks**: `$('Generate Hook')` ha solo `hookImage` per fresh hooks, `hookVideo` è su `$('Img2Vid Hook')` → aggiunto fallback a Img2Vid Hook
+13. **Hook image/video su topic sbagliato**: Send Hook Preview e Send Hook Video Preview usavano `topicImagesVideosId` → cambiato a `topicAssembleId` (tutto il flusso /produce va su Assemble)
+14. **VO callback race condition**: click rapidi su Approve perdevano segmenti (read-modify-write concurrent sovrascriveva) → retry loop con verify dopo PATCH
+15. **Speaking outro trimmata a 3s**: `hasBakedOutroAudio` path faceva `trim=0:3.000` → ora usa durata naturale con cap a outroTarget+1.5s
 
-### File chiave modificati oggi:
-- `n8n/code/telegram-callback-handler.js` — withTopic() helper per forum routing
+### File chiave modificati:
+- `n8n/code/auto-produce.js` — pre-load scenari in array locale, webhook per phone
+- `n8n/code/generate-hook.js` — strict phone_id filtering in checkHookPool(), pool message routing
+- `n8n/code/generate-outro.js` — extractHookLastFrame() fallback a Img2Vid Hook
+- `n8n/code/generate-voiceover.js` — syntax fix (4 broken console.log lines)
+- `n8n/code/assemble-video.js` — speaking outro natural duration, syntax fix
+- `n8n/code/telegram-callback-handler.js` — VO callback race-condition-safe retry, withTopic() helper
 - `n8n/code/handle-done.js` — phone lookup per topic_assemble_id
-- `n8n/code/auto-produce.js` — trigger webhook per phone
 - `n8n/code/set-produce-context.js` — merge node per manual/auto paths
-- `n8n/code/generate-voiceover.js` — syntax fix linea 160
 - `n8n/code/send-vo-segments.js` — topicAssembleId per VO messages
-- `n8n/unified-pipeline-fixed.json` — webhook POST, Set Produce Context refs, topic routing
+- `n8n/unified-pipeline-fixed.json` — all above embedded + topic routing fixes
 - TUTTI i file in `n8n/code/` — encoding fix (smart quotes, Unicode)
 
 ### Encoding gotcha IMPORTANTE:
@@ -353,7 +340,103 @@
 - Script di pulizia: `n8n/fix_encoding.py` — rimuove tutti i non-ASCII problematici
 - Se un file viene editato e reintroduce smart quotes, rieseguire: `python3 n8n/fix_encoding.py && node n8n/embed-code.cjs`
 
+### Key gotchas da ricordare:
+- **Airtable read-after-write**: PATCH poi GET immediato può tornare dati vecchi. Pre-caricare e usare array locale
+- **n8n binary propagation**: `$('Generate Hook').binary.hookVideo` esiste solo per POOL hooks. Per fresh hooks il video è su `$('Img2Vid Hook').binary.hookVideo`
+- **Telegram forum topic routing**: tutto il flusso `/produce` va su Assemble (General, no message_thread_id). "Images & Videos" topic è solo per Batch Hook Generator
+- **Hook Pool**: phone-1 e phone-3 hanno ZERO clip. Generano fresh hook on-demand. Solo phone-2 ha clip nel pool
+- **VO concurrent callbacks**: Airtable vo_segments_json è un JSON blob — concurrent PATCH sovrascrive. Il retry-verify loop risolve
+
 ### TODO futuro:
-1. **Batch Generator**: Import `workflow-hook-batch.json` su n8n → test
-2. **ADB serials**: Configure `ADB_SERIAL_PHONE1/2/3` env vars per delivery bridge
+1. **Batch Hook Generator**: generare clip pool per phone-1 e phone-3 (import `workflow-hook-batch.json` su n8n)
+2. **ADB serials**: Configure `ADB_SERIAL_PHONE1/2/3` env vars per delivery bridge — trovare con `adb devices` quando colleghi i telefoni via USB
 3. **WisGate provider**: Integrate as fallback in sora2Race() if needed
+
+## COMPLETED: Delivery Module + Anti-Detection Hardening (2026-03-09 sera)
+
+### Delivery Module (`Weekly & Daily Plan/delivery/`)
+Creato modulo Python per bridge Content Library → telefoni fisici. **Testato e funzionante** con Airtable reale.
+
+**File creati:**
+- `__init__.py` — exports: `get_next_video`, `download_video`, `push_to_phone`, `mark_posted/draft/skipped`
+- `config.py` — Airtable token (hardcoded default), R2 URL, ADB serials (env vars), phone labels, path `/sdcard/DCIM/Camera`
+- `content_library.py` — query Airtable con `FIND('Phone N', {content_label})` + `platform_status_{platform}='pending'`
+- `downloader.py` — R2 download con User-Agent header (urllib default gets 403)
+- `adb_push.py` — `adb -s {serial} push`, Samsung filename `VID_YYYYMMDD_HHMMSS_NNN.mp4`
+- `status.py` — PATCH `platform_status_{platform}` = posted/draft/skipped
+- `cli.py` — `python -m delivery.cli status --phone 2` / `deliver --phone 2 --platform tiktok`
+
+**Content Library stock attuale:** Phone 1: 1 video, Phone 2: 5 video, Phone 3: 3 video
+
+**Gotcha Airtable API:**
+- `fields[]` come parametro urlencode causa 422 — rimuoverlo
+- `sort[0][field]` come parametro urlencode causa 422 — rimuoverlo
+- Formula: `AND(FIND('Phone 1', {content_label}), {platform_status_tiktok}='pending')` funziona
+
+### Anti-Detection Video Hardening (assemble-video.js)
+Analisi completa 360 gradi di tutti i rischi ban/shadowban su TikTok e Instagram.
+
+**Fix applicati (tutti embedded in unified-pipeline-fixed.json):**
+
+| Fix | Cosa fa |
+|-----|---------|
+| `-map_metadata -1` | Strip TUTTI i metadata globali |
+| `-fflags +bitexact` | Rimuove encoder string muxer (Lavf) |
+| `-flags +bitexact` | Rimuove x264 SEI version string dal bitstream video |
+| `-brand mp42` | ftyp atom = CapCut/InShot style (non default FFmpeg `isom`) |
+| `-profile:v high -level 4.0` | Profilo encoding esplicito e coerente |
+| `-ar 48000` | Sample rate 48kHz (come camera Android, non 44.1kHz da CD/MP3) |
+| `-ac 2` | Audio stereo (non mono — ogni video da telefono e stereo) |
+| `handler_name=VideoHandler/SoundHandler` | Standard Android |
+| `creation_time` | Timestamp ISO corrente |
+| Hook STS audio 48kHz | Era 44100, fixato a 48000 |
+| Telegram fileName pulito | `VID_YYYYMMDD_HHMMSS.mp4` (non `scenarioName_final.mp4`) |
+
+**Metadata approach: editing app style, NOT camera style.**
+Il video e chiaramente post-prodotto (screenshot, testo, overlay) — mettere metadata camera Samsung sarebbe CONTRADDITTORIO e piu sospetto. Il video ora ha solo handler names + creation_time, identico a export CapCut/InShot.
+
+**Step 5 in assemble-video.js**: secondo pass FFmpeg con `-c copy` che ri-wrappa il video con metadata puliti. Graceful fallback se fallisce.
+
+### Anti-Detection Delivery (adb_push.py + config.py)
+- File naming Samsung: `VID_YYYYMMDD_HHMMSS_NNN.mp4`
+- Upload path: `/sdcard/DCIM/Camera/` (non path custom)
+- ADB serials da env vars (non ancora configurati — servono telefoni fisici)
+
+### Telefoni reali (specs per metadata/naming):
+- **Phone 1**: Samsung Galaxy S9+ — SM-G965F — Android 10
+- **Phone 2**: Samsung Galaxy S22 — SM-S901B/DS — Android 16
+- **Phone 3**: Samsung Galaxy S9 — SM-G960F — Android 10
+
+### Rischi reali vs teorici (analisi finale):
+**Rischi REALI di ban/shadowban:**
+1. **Appium detection** (ALTISSIMO) — TikTok rileva UiAutomator2, touch precision, accessibility services. QUESTO e il rischio #1
+2. **Account nuovi che postano 2/day subito** — serve rampa graduale (settimana 1 = solo scroll, settimana 2 = 1/day, settimana 3+ = 2/day)
+3. **Nessuna interazione organica** — account che solo postano e mai likano/commentano = bot
+
+**Rischi IRRILEVANTI (fixati comunque per completezza):**
+- FFmpeg residui: CapCut usa FFmpeg+libx264 internamente, stessi residui
+- x264 SEI string: TikTok ri-encoda ogni video, il bitstream originale viene distrutto
+- Encoding parameters (CRF, preset): le piattaforme non li controllano
+- ElevenLabs watermark: nessun fix pratico, il re-encoding AAC lo degrada parzialmente
+
+### Automation Software (altra chat Claude Code):
+- In sviluppo separatamente — Flask/Appium/ADB per TikTok e Instagram
+- Usa il delivery module (`from delivery import get_next_video, download_video, push_to_phone, mark_posted`)
+- Legge weekly plan JSON per scheduling sessioni
+- **CRITICO**: deve implementare anti-Appium detection (randomizzare touch, hide instrumentation, pause naturali)
+
+### PROSSIMI STEP (da dove continuare):
+1. **Re-importare `unified-pipeline-fixed.json`** su n8n VPS — contiene TUTTI i fix (encoding, anti-detection, VO race condition, speaking outro, extractHookLastFrame, topic routing, stereo 48kHz, metadata clean)
+2. **Disattivare e riattivare** il workflow (registra webhook Telegram)
+3. **Pulire Video Runs** con `status='started'` (Airtable MCP: `list_records` con `filterByFormula: {status}='started'` sulla tabella Video Runs, poi `update_records` con `status='cancelled'`)
+4. **Testare auto-produce** — verificare che i video finali abbiano:
+   - Audio stereo 48kHz
+   - Nessun metadata FFmpeg/x264 (controllare con `ffprobe -show_format -show_streams video.mp4`)
+   - fileName pulito su Telegram (`VID_...mp4`)
+5. **Importare `workflow-hook-batch.json`** su n8n per generare hook pool per Phone 1 e 3
+6. **Continuare automation software** (altra chat) — integrazione delivery module, anti-Appium
+
+### Preferenze utente:
+- **SEMPRE pulire Video Runs** con `status='started'` prima di ritestare, senza chiedere
+- **MAI usare CLI** per importare workflow — l'utente importa manualmente dalla UI di n8n
+- **MAI pushare su remote** senza chiedere

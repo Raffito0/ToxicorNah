@@ -236,7 +236,7 @@ async function uploadToFalStorage(buffer, filename, mimeType) {
     req.end();
   });
 
-  console.log('[fal storage] SUCCESS ' ' + fileUrl);
+  console.log('[fal storage] SUCCESS ' + fileUrl);
   return fileUrl;
 }
 
@@ -623,9 +623,9 @@ if (effectiveHookType === 'speaking' && !hookFromPool) {
     // fal.ai storage first (guaranteed accessible), fallback to temp hosts
     try {
       voHookFileUrl = await uploadToFalStorage(hookVoBuffer, 'vo_hook.mp3', 'audio/mpeg');
-      console.log('[VO upload] hook ' fal.ai storage: ' + voHookFileUrl);
+      console.log('[VO upload] hook fal.ai storage: ' + voHookFileUrl);
     } catch (falErr) {
-      console.log('[VO upload] fal.ai storage failed: ' + falErr.message + ' " trying temp hosts');
+      console.log('[VO upload] fal.ai storage failed: ' + falErr.message + ' - trying temp hosts');
       try {
         voHookFileUrl = await uploadToTempHost(hookVoBuffer, 'vo_hook.mp3');
       } catch (err) {
@@ -645,9 +645,9 @@ if (effectiveOutroType === 'speaking') {
     const outroVoBuffer = Buffer.from(binaryData['voSegment_' + outroSeg.index].data, 'base64');
     try {
       voOutroFileUrl = await uploadToFalStorage(outroVoBuffer, 'vo_outro.mp3', 'audio/mpeg');
-      console.log('[VO upload] outro ' fal.ai storage: ' + voOutroFileUrl);
+      console.log('[VO upload] outro fal.ai storage: ' + voOutroFileUrl);
     } catch (falErr) {
-      console.log('[VO upload] fal.ai storage failed: ' + falErr.message + ' " trying temp hosts');
+      console.log('[VO upload] fal.ai storage failed: ' + falErr.message + ' - trying temp hosts');
       try {
         voOutroFileUrl = await uploadToTempHost(outroVoBuffer, 'vo_outro.mp3');
       } catch (err) {

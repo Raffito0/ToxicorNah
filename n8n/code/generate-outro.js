@@ -140,13 +140,27 @@ async function uploadToR2(r2Key, bodyBuffer, contentType) {
 // from the original hook image. Using the last frame ensures visual continuity.
 async function extractHookLastFrame() {
   try {
-    // Get hook video binary from Generate Hook node
+    // Get hook video binary: pool hooks have it on Generate Hook,
+    // fresh hooks have it on Img2Vid Hook (after Sora 2 conversion)
+    let videoBuf = null;
     const hookNode = $('Generate Hook').first();
-    if (!hookNode || !hookNode.binary || !hookNode.binary.hookVideo) {
-      console.log('[outro] No hook video binary available');
+    if (hookNode && hookNode.binary && hookNode.binary.hookVideo) {
+      videoBuf = Buffer.from(hookNode.binary.hookVideo.data, 'base64');
+      console.log('[outro] Found hookVideo on Generate Hook (pool hook)');
+    }
+    if (!videoBuf) {
+      try {
+        const img2vidNode = $('Img2Vid Hook').first();
+        if (img2vidNode && img2vidNode.binary && img2vidNode.binary.hookVideo) {
+          videoBuf = Buffer.from(img2vidNode.binary.hookVideo.data, 'base64');
+          console.log('[outro] Found hookVideo on Img2Vid Hook (fresh hook)');
+        }
+      } catch(e) { /* Img2Vid Hook might not have run (pool path) */ }
+    }
+    if (!videoBuf) {
+      console.log('[outro] No hook video binary on Generate Hook or Img2Vid Hook');
       return null;
     }
-    const videoBuf = Buffer.from(hookNode.binary.hookVideo.data, 'base64');
     const tmpVideo = '/tmp/outro_hook_' + Date.now() + '.mp4';
     const tmpFrame = '/tmp/outro_lastframe_' + Date.now() + '.jpg';
     fs.writeFileSync(tmpVideo, videoBuf);
@@ -458,8 +472,7 @@ if (selectedOutro.type === 'ai_generated') {
     return [{ json: { error: true, chatId, message: 'No image gen API key configured (kie.ai or fal.ai)' } }];
   }
 
-  // Best reference = last frame of hook VIDEO (what the viewer actually sees)
-  // Sora 2 reinterprets the input image, so the original hookImage differs from video content
+  // Best reference = last frame of hook VIDEO (visual continuity with hook scene)
   const lastFrameUrl = await extractHookLastFrame();
   const hookImageUrl = lastFrameUrl
     || $input.first().json.hookImageUrl
@@ -470,7 +483,7 @@ if (selectedOutro.type === 'ai_generated') {
     return [{ json: { error: true, chatId, message: 'No reference image for outro (need hook image or girl_ref_url)' } }];
   }
 
-  // Prefer last frame > hook image > girl ref (decreasing continuity quality)
+  // Prefer last frame > hook image > girl ref (visual continuity with hook scene)
   const imageRefs = hookImageUrl ? [hookImageUrl] : [girlRefUrl];
   const hasHookImage = !!hookImageUrl;
 
@@ -602,8 +615,8 @@ if (effectiveOutroType === 'speaking') {
     return [{ json: { error: true, chatId, message: '? No image gen API key configured' } }];
   }
 
-  // Best reference = last frame of hook VIDEO (what the viewer actually sees)
-  // Sora 2 reinterprets the input image, so original hookImage   video content
+  // Girl ref from phone (multi-phone) or concept fallback
+  // Best reference = last frame of hook VIDEO (visual continuity with hook scene)
   const lastFrameUrl = await extractHookLastFrame();
   const hookImageUrl = lastFrameUrl
     || $input.first().json.hookImageUrl
@@ -617,12 +630,12 @@ if (effectiveOutroType === 'speaking') {
         outroSkipped: true,
         chatId,
         scenarioName,
-        warning: ' ï? No reference image for speaking outro (need hook image or girl_ref_url). Skipping.',
+        warning: 'No reference image for speaking outro (need hook image or girl_ref_url). Skipping.',
       }
     }];
   }
 
-  // Prefer last frame > hook image > girl ref (decreasing continuity quality)
+  // Prefer last frame > hook image > girl ref (visual continuity with hook scene)
   const imageRefs = hookImageUrl ? [hookImageUrl] : [girlRefUrl];
   const hasHookImage = !!hookImageUrl;
 

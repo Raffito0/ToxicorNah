@@ -72,7 +72,7 @@ bodySegments.forEach((seg, i) => {
   msg += '  ' + (i + 1) + '. ' + seg.label + ' (~' + seg.duration + 's)\n';
 });
 msg += '\nManda i video uno alla volta, senza caption.\n';
-msg += '' /done quando hai finito.';
+msg += '/done quando hai finito.';
 
 return [{
   json: {

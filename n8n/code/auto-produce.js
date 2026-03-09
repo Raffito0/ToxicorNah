@@ -89,6 +89,23 @@ if (phones.length === 0) {
 const log = [];
 let triggered = 0;
 
+// --- Pre-load ready scenarios ONCE (avoids Airtable read-after-write consistency lag) ---
+let readyScenarios = [];
+try {
+  const scenarioData = await airtableGet(SCENARIOS_TABLE, {
+    filterByFormula: "{status}='ready'",
+  });
+  readyScenarios = (scenarioData.records || []).map(r => ({
+    id: r.id,
+    name: r.fields.scenario_name || '',
+  }));
+  console.log('[auto-produce] Loaded ' + readyScenarios.length + ' ready scenarios');
+} catch (e) {
+  console.log('[auto-produce] Failed to load scenarios: ' + e.message);
+}
+
+let scenarioIndex = 0; // local pointer — each phone gets the next scenario
+
 for (const phone of phones) {
   if (!phone.chatId) {
     log.push(phone.phoneName + ': skip (no chatId)');
@@ -100,7 +117,6 @@ for (const phone of phones) {
     const runsData = await airtableGet(VIDEO_RUNS_TABLE, {
       filterByFormula: "AND({telegram_chat_id}='" + phone.chatId + "', {status}='started')",
       maxRecords: '1',
-      'fields[]': 'status',
     });
     if ((runsData.records || []).length > 0) {
       log.push(phone.phoneName + ': skip (production in progress)');
@@ -117,7 +133,6 @@ for (const phone of phones) {
   try {
     const contentData = await airtableGet(CONTENT_LIBRARY_TABLE, {
       filterByFormula: "AND(FIND('" + phone.phoneName + "', {content_label}), OR({platform_status_tiktok}='pending', {platform_status_instagram}='pending'))",
-      'fields[]': 'content_label',
     });
     pendingCount = (contentData.records || []).length;
   } catch (e) {
@@ -130,28 +145,31 @@ for (const phone of phones) {
     continue;
   }
 
-  // --- 4. Check if any ready scenarios exist ---
-  try {
-    const scenarioData = await airtableGet(SCENARIOS_TABLE, {
-      filterByFormula: "{status}='ready'",
-      maxRecords: '1',
-      'fields[]': 'status',
-    });
-    if ((scenarioData.records || []).length === 0) {
-      log.push(phone.phoneName + ': skip (no ready scenarios)');
-      continue;
-    }
-  } catch (e) {
-    log.push(phone.phoneName + ': skip (scenario check error: ' + e.message + ')');
+  // --- 4. Assign next scenario from local list (no re-query, no consistency issues) ---
+  if (scenarioIndex >= readyScenarios.length) {
+    log.push(phone.phoneName + ': skip (no more ready scenarios)');
     continue;
   }
+  const assignedScenario = readyScenarios[scenarioIndex];
+  scenarioIndex++;
+
+  // Mark as in_production (fire-and-forget, not needed for correctness since local list handles uniqueness)
+  try {
+    await fetch(AIRTABLE_BASE + '/' + SCENARIOS_TABLE + '/' + assignedScenario.id, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + ATOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { status: 'in_production' } }),
+    });
+  } catch (e) { /* non-fatal */ }
+
+  console.log('[auto-produce] ' + phone.phoneName + ': assigned "' + assignedScenario.name + '"');
 
   // --- 5. Trigger production via internal webhook ---
   const hour = new Date().getHours();
   const timeOfDay = (hour >= 18 || hour < 6) ? 'night' : 'day';
   const payload = JSON.stringify({
     chatId: String(phone.chatId),
-    scenarioName: '',
+    scenarioName: assignedScenario.name,
     timeOfDay,
     phoneName: phone.phoneName,
     isAuto: true,
@@ -164,7 +182,7 @@ for (const phone of phones) {
       body: payload,
     });
     if (res.ok) {
-      log.push(phone.phoneName + ': TRIGGERED (' + pendingCount + '/' + targetPending + ' pending)');
+      log.push(phone.phoneName + ': TRIGGERED scenario="' + assignedScenario.name + '" (' + pendingCount + '/' + targetPending + ' pending)');
       triggered++;
     } else {
       log.push(phone.phoneName + ': webhook error ' + res.status);

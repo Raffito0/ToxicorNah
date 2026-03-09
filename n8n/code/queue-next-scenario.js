@@ -72,7 +72,7 @@ if (nextScenario) {
     nextMsg += '  ' + (i + 1) + '. ' + seg.label + ' (~' + seg.duration + 's)\n';
   });
   nextMsg += '\nManda i video senza caption.\n';
-  nextMsg += '' /done quando hai finito.';
+  nextMsg += '/done quando hai finito.';
 
   return [{
     json: {

@@ -139,7 +139,7 @@ function trimVO(vo) {
     if (trimmed.toLowerCase().endsWith(filler) || trimmed.toLowerCase().endsWith(filler + '.')) {
       trimmed = trimmed.substring(0, trimmed.length - (trimmed.toLowerCase().endsWith(filler + '.') ? filler.length + 1 : filler.length)).trim();
       // Re-add period if it makes sense
-      if (!/[.!?--...]$/.test(trimmed)) trimmed += '.';
+      if (!/[.!?\-.]$/.test(trimmed)) trimmed += '.';
       if (stripEmotionTags(trimmed).length <= VO_CHAR_LIMIT) return trimmed;
     }
   }

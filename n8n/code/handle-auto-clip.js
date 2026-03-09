@@ -52,7 +52,7 @@ if (clipIndex >= totalExpected) {
 } else {
   const nextSeg = expected[clipIndex];
   if (nextSeg) {
-    confirm += '\n\n' Prossima: ' + (clipIndex + 1) + '. ' + nextSeg.label;
+    confirm += '\n\nProssima: ' + (clipIndex + 1) + '. ' + nextSeg.label;
   }
 }
 

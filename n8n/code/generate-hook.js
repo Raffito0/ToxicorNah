@@ -518,17 +518,17 @@ async function checkHookPool(scenarioRecordId, phoneId, conceptId, timeOfDay) {
     ? "{concept_id}='" + conceptId + "'"
     : "{scenario_id}='" + scenarioRecordId + "'";
   const todFilter = timeOfDay ? ",{time_of_day}='" + timeOfDay + "'" : '';
-  // Search with phone_id + time_of_day first, then relax constraints
+  // Search with phone_id + time_of_day first, then relax time_of_day.
+  // NEVER relax phone_id — using another phone's clip means wrong girl in video.
   const queries = [];
   if (phoneId) {
     queries.push("{status}='ready'," + idFilter + ",{phone_id}='" + phoneId + "'" + todFilter);
-  }
-  queries.push("{status}='ready'," + idFilter + todFilter);
-  // Fallback: any time_of_day (better to have a mismatched hook than none)
-  if (phoneId) {
     queries.push("{status}='ready'," + idFilter + ",{phone_id}='" + phoneId + "'");
+  } else {
+    // No phone context (manual /produce) — any clip is fine
+    queries.push("{status}='ready'," + idFilter + todFilter);
+    queries.push("{status}='ready'," + idFilter);
   }
-  queries.push("{status}='ready'," + idFilter);
 
   try {
     let data = null;
@@ -962,7 +962,7 @@ if (hookType === 'reaction' || hookType === 'speaking') {
           await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(Object.assign({ chat_id: chatId, text: '\u26A1 Hook from pool (speaking, audio baked)' + hookTextPreview + ' \u2014 instant!' }, topicImagesVideosId ? { message_thread_id: Number(topicImagesVideosId) } : {})),
+            body: JSON.stringify(Object.assign({ chat_id: chatId, text: '\u26A1 Hook from pool (speaking, audio baked)' + hookTextPreview + ' \u2014 instant!' }, topicAssembleId ? { message_thread_id: Number(topicAssembleId) } : {})),
           });
         } catch(e) { /* non-fatal */ }
       }

@@ -398,13 +398,14 @@ if (outroFile && fs.existsSync(outroFile)) {
     filterParts.push('[' + outroStreamIdx + ':v]scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS + outroDT + '[outro]');
     outroActualUsed = outroTarget;
   } else if (hasBakedOutroAudio) {
-    // Sora 2 speaking: DON'T speed-adjust (would break lip sync)
+    // Speaking outro (Kling Avatar V2): use natural duration, no trim/speed (breaks lip sync)
     inputs.push('-i ' + q(outroFile));
+    const outroCap = Math.min(outroActual, outroTarget + 1.5); // max 1.5s over template target
     let vf = '[' + outroStreamIdx + ':v]';
     vf += 'scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS;
-    vf += ',trim=0:' + outroTarget.toFixed(3) + ',setpts=PTS-STARTPTS' + outroDT + '[outro]';
+    vf += ',trim=0:' + outroCap.toFixed(3) + ',setpts=PTS-STARTPTS' + outroDT + '[outro]';
     filterParts.push(vf);
-    outroActualUsed = outroTarget;
+    outroActualUsed = outroCap;
   } else {
     // Normal: apply smart trim (speed up/down or hard trim, NO freeze)
     inputs.push('-i ' + q(outroFile));
@@ -530,9 +531,9 @@ if (hasBakedHookAudio && hookStreamIdx >= 0) {
     // Extract audio from hook video
     const hookAudioTmp = path.join(outputDir, 'hook_audio_' + Date.now() + '.mp3');
     try {
-      execSync('ffmpeg -y -i ' + q(hookFile) + ' -vn -acodec libmp3lame -ar 44100 -ab 128k ' + q(hookAudioTmp), { timeout: 10000 });
+      execSync('ffmpeg -y -i ' + q(hookFile) + ' -vn -acodec libmp3lame -ar 48000 -ab 128k ' + q(hookAudioTmp), { timeout: 10000 });
       const hookAudioBuf = fs.readFileSync(hookAudioTmp);
-      console.log('[assemble] STS: extracting hook audio (' + hookAudioBuf.length + ' bytes) ' voice ' + phoneVoiceId);
+      console.log('[assemble] STS: extracting hook audio (' + hookAudioBuf.length + ' bytes) voice ' + phoneVoiceId);
 
       // Speech-to-Speech conversion
       const stsBuf = await elevenLabsSTS(hookAudioBuf, phoneVoiceId, elevenLabsKey);
@@ -605,10 +606,11 @@ if (hasAudio) {
   cmd += ' -map "[outa]"';
 }
 
-cmd += ' -c:v libx264 -preset fast -crf 23' +
-  ' -c:a aac -b:a 192k' +
+cmd += ' -c:v libx264 -preset fast -crf 23 -profile:v high -level 4.0' +
+  ' -flags +bitexact' +
+  ' -c:a aac -b:a 192k -ar 48000 -ac 2' +
   ' -shortest' +
-  ' -movflags +faststart' +
+  ' -map_metadata -1 -fflags +bitexact -movflags +faststart' +
   ' ' + q(outputFile);
 
 // *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
@@ -650,8 +652,8 @@ try {
       let simpleCmd = 'ffmpeg -y ' + simpleInputs.join(' ') +
         ' -filter_complex "' + simpleFilter + '"' +
         ' -map "[outv]" -map "[outa]"' +
-        ' -c:v libx264 -preset fast -crf 23' +
-        ' -c:a aac -b:a 192k -shortest -movflags +faststart ' + q(outputFile);
+        ' -c:v libx264 -preset fast -crf 23 -profile:v high -level 4.0 -flags +bitexact' +
+        ' -c:a aac -b:a 192k -ar 48000 -ac 2 -shortest -map_metadata -1 -fflags +bitexact -movflags +faststart' + q(outputFile);
 
       execSync(simpleCmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024 });
       ffmpegSuccess = true;
@@ -676,7 +678,8 @@ try {
       let videoOnlyCmd = 'ffmpeg -y ' + videoOnlyInputs.join(' ') +
         ' -filter_complex "' + videoOnlyFilter + '"' +
         ' -map "[outv]"' +
-        ' -c:v libx264 -preset fast -crf 23 -an -movflags +faststart ' + q(outputFile);
+        ' -c:v libx264 -preset fast -crf 23 -profile:v high -level 4.0 -flags +bitexact -an -map_metadata -1 -fflags +bitexact -movflags +faststart' + q(outputFile);
+        // No audio track, stereo/48k not needed
 
       execSync(videoOnlyCmd, { timeout: 600000, maxBuffer: 50 * 1024 * 1024 });
       ffmpegSuccess = true;
@@ -697,6 +700,27 @@ if (!ffmpegSuccess || !fs.existsSync(outputFile)) {
       command: cmd,
     }
   }];
+}
+
+// ── STEP 5: Clean metadata — mimic a mobile editing app (not a camera) ──
+// Video is clearly post-produced (screenshots, text, overlays), so camera metadata
+// would be contradictory and suspicious. Instead: strip everything, leave only
+// what CapCut/InShot would leave (handler names + creation_time, nothing else).
+const metaOutput = outputFile.replace('.mp4', '_meta.mp4');
+const creationTime = new Date().toISOString().replace('Z', '000Z');
+const metaCmd = 'ffmpeg -y -i ' + q(outputFile) + ' -c copy -map_metadata -1 -fflags +bitexact' +
+  ' -brand mp42' +
+  ' -metadata creation_time="' + creationTime + '"' +
+  ' -metadata:s:v handler_name="VideoHandler"' +
+  ' -metadata:s:a handler_name="SoundHandler"' +
+  ' -movflags +faststart ' + q(metaOutput);
+try {
+  execSync(metaCmd, { timeout: 60000 });
+  fs.renameSync(metaOutput, outputFile);
+} catch (metaErr) {
+  // Non-critical: if metadata injection fails, original file is still valid
+  assetWarnings.push('Metadata injection failed: ' + (metaErr.message || '').slice(0, 100));
+  if (fs.existsSync(metaOutput)) fs.unlinkSync(metaOutput);
 }
 
 const stats = fs.statSync(outputFile);
@@ -729,7 +753,7 @@ return [{
     video: {
       data: videoBase64,
       mimeType: 'video/mp4',
-      fileName: scenarioName + '_final.mp4',
+      fileName: 'VID_' + new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15) + '.mp4',
     }
   }
 }];
