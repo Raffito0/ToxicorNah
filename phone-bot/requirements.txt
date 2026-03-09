@@ -1,0 +1,10 @@
+fastapi>=0.104
+uvicorn>=0.24
+sqlalchemy>=2.0
+google-generativeai>=0.8
+Pillow>=10.0
+apscheduler>=3.10
+pyyaml>=6.0
+httpx>=0.25
+pyairtable>=2.0
+jinja2>=3.1
