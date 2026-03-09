@@ -1,5 +1,8 @@
 # Toxic or Nah - Project Memory
 
+## Workflow Rules
+- **ALWAYS present the plan and wait for user approval before implementing any code changes.** Do not start writing/editing code until the user confirms the plan.
+
 ## Architecture
 - React + TypeScript + Vite app for relationship chat analysis
 - AI provider: Gemini 2.0 Flash (via `geminiService.ts`)
@@ -164,50 +167,37 @@
 - Required Traefik labels: `traefik.docker.network=root_default` + `traefik.http.services.n8n.loadbalancer.server.port=5678` (needed when container is on multiple networks)
 - Unified Pipeline workflow = active workflow combining Workflow 2 + 3 logic
 
-## CURRENT OBJECTIVE (2026-03-09): Fix Video Assembly
+## COMPLETED: Video Assembly Fix (2026-03-09)
+- ✅ All 4 bugs fixed and deployed: missing clips → black placeholder, smart trim, amix duration=longest, tpad removed
+- ✅ Re-verified working after body clip cleanup (scenario `toxic-sad-happy-girl-1772930496805`)
+- Body clip gotcha: Telegram `BQ` file_id = document (duration 0), `BA` = video. Both work with FFmpeg, BA preferred
+- Body Clips table: `tblJcmlW99FNxMNXk`. Template needs 5: screenshot(1s), upload_chat(1s), toxic_score(3s), soul_type(3s), deep_dive(3s)
+- When uploading body clips via `#body`, send as VIDEO not document to get correct duration
 
-**Problema principale**: L'assemblaggio video (`assemble-video.js`) ha 4 bug che producono video finali difettosi. NESSUN altro lavoro finché l'assemblaggio non è perfetto.
+## Video Delivery Bridge (2026-03-09)
+- **Location**: `C:\Users\trmlsn\Desktop\Weekly & Daily Plan\delivery\`
+- **Purpose**: Bridge between Content Library (Airtable/R2) → physical phones (ADB push)
+- **Approach**: Runtime assignment (Approach B) — video assigned when execution script reaches a posting session, NOT pre-assigned in weekly plan
+- **Modules**: `config.py`, `content_library.py`, `downloader.py`, `adb_push.py`, `status.py`, `cli.py`
+- **Status**: Tested and working — Airtable query ✅, R2 download ✅, ADB push ready (needs phone USB)
+- **API**: `from delivery import get_next_video, download_video, push_to_phone, mark_posted`
+- **CLI**: `python -m delivery.cli status --phone 2` / `deliver --phone 2 --platform tiktok`
+- **Gotchas**: R2 download needs User-Agent header (Python urllib default gets 403). Airtable linked record filter uses `FIND('Phone 2', {content_label})` not record ID
+- **Same video** goes to both TikTok + IG on same phone. First platform downloads+pushes, second just posts (file already there)
+- **Status tracking**: `platform_status_tiktok` / `platform_status_instagram` = pending → posted / draft / skipped
+- **Content Library orphans**: Old records with deleted R2 files return 403 — clean periodically
 
-### Bug identificati (analisi frame-by-frame del video finale):
-1. **Screenshot body clip MANCANTE** — il download fallisce silenziosamente, il segmento viene droppato dal video finale
-2. **Body clip durata sbagliata (troppo lungo)** — Toxic Score ~4s invece di 3s target. `trim=0:3` da solo non basta, serve speed adjustment
-3. **Body clip durata sbagliata (troppo corto)** — Between the Lines ~2s invece di 3s target. `trim` non può estendere, serve slowdown
-4. **Outro mancante** — causato da `amix duration=first` che tagliava l'audio alla durata del primo stream
+## Weekly & Daily Plan Integration
+- **Location**: `C:\Users\trmlsn\Desktop\Weekly & Daily Plan\`
+- **Python system**: Generates realistic posting schedules for 6 accounts (3 phones × TikTok + IG)
+- **17 behavioral rules**: scroll timing, rest days, one-post days, aborted sessions, personality evolution, proxy rotation, extended sessions, post errors (draft/skip)
+- **Output**: `weekly_plan_YYYY-WNN.json` consumed by automation software
+- **Delivery bridge lives inside** this project as `delivery/` module
+- **Will be integrated** into user's Flask-based automation software (Python 3.12, Appium/ADB, currently Instagram-only, TikTok in progress)
+- **Execution flow**: Weekly plan says "post at 19:45" → execution script calls `get_next_video()` → `download_video()` → `push_to_phone()` → automation posts → `mark_posted()`
 
-### Fix applicati (codice committato + deployato su VPS il 2026-03-09):
-1. **download-assets.js**: catch block ora pusha comunque su `clipMapping` con `localPath: null` invece di skippare — così assemble sa che il segmento esiste
-2. **assemble-video.js body clips**: riscritta la sezione body clips (linee 271-370):
-   - File mancanti → genera black placeholder PNG con ffmpeg (`-f lavfi -i color=black`) invece di skippare
-   - Clip più corti del target (< 95%): slowdown con `setpts=PTS*slowFactor` (max 2x) per riempire la durata target
-   - Clip leggermente più lunghi (105-140%): speedup con `setpts=PTS/speedFactor`
-   - Clip molto più lunghi (>140%): hard trim
-   - `capRand()` spostata fuori dal loop (era function declaration dentro for loop)
-3. **assemble-video.js amix**: `duration=first` → `duration=longest` (fixato sessione precedente)
-4. **assemble-video.js**: rimosso tpad/freeze da tutti i path (hook, body, outro)
-5. **assemble-video.js**: aggiunto `hasAudioStream()`, `elevenLabsSTS()` per speaking hook STS
-6. **generate-outro.js**: sempre angolo selfie indipendentemente dal hook type
-
-### Stato deploy:
-- ✅ Codice committato su git (branch master)
-- ✅ `embed-code.cjs` eseguito → workflow JSON aggiornati
-- ✅ Unified Pipeline importato su VPS (`n8n-n8n-1` container)
-- ⚠️ Workflow **disattivato** durante import — RIATTIVARE dalla UI di n8n
-- ⚠️ Container riavviato con `docker restart n8n-n8n-1`
-
-### Prossimo step:
-1. **Riattivare** il workflow Unified Pipeline dalla UI n8n
-2. Testare con `/produce` su un scenario esistente
-3. Analizzare il video risultante frame-by-frame per verificare:
-   - Tutti i body clip presenti (incluso Screenshot)
-   - Ogni body clip dura esattamente il target (3s)
-   - Outro presente e completa
-   - Audio corretto (VO + musica non tagliati)
-4. Se OK → testare pipeline completa end-to-end
-
-### File chiave per debug assemblaggio:
-- `n8n/code/assemble-video.js` — linee 271-370 (body clips), linee 539-543 (amix)
-- `n8n/code/download-assets.js` — linee 160-185 (body clip download + catch)
-- Output `_debug.bodyClips` nel risultato mostra probed vs target per ogni clip
-- Video di test precedente: `public/ASSEMBLED VIDEOS/toxic-sad-happy-girl-177zxc2930496805_final (NUOVO).mp4`
-
-- **WisGate provider**: API funziona (submit/poll OK) ma content filter aggressivo. Da integrare come fallback nella sora2Race() se necessario
+## CURRENT TODO (2026-03-09)
+1. **Batch Generator**: Import `workflow-hook-batch.json` + `unified-pipeline-fixed.json` on n8n → test
+2. **Produce videos for Phone 1 and Phone 3** (currently 0 pending in Content Library)
+3. **ADB serials**: Configure `ADB_SERIAL_PHONE1/2/3` env vars for delivery bridge
+4. **WisGate provider**: API works (submit/poll OK) but aggressive content filter. Integrate as fallback in sora2Race() if needed
