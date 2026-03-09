@@ -1,12 +1,12 @@
-// NODE: Prepare Production (Dynamic — reads concept, template, music from Airtable)
+// NODE: Prepare Production (Dynamic â€” reads concept, template, music from Airtable)
 // Consolidates all loaded data into a production plan
 // Mode: Run Once for All Items
 //
-// WIRING: Find Music → this Code node → Produce Error? → Create Video Run → Generate Hook
+// WIRING: Find Music â†’ this Code node â†’ Produce Error? â†’ Create Video Run â†’ Generate Hook
 // References: $('Parse Message'), $('Find Scenario (Produce)'), $('Find Concept'),
 //             $('Find Body Clips'), $('Find Template'), $('Find Music')
 
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// â”€â”€â”€ fetch polyfill (n8n Code node sandbox lacks global fetch) â”€â”€â”€
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -52,7 +52,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
 const AIRTABLE_BASE = 'https://api.airtable.com/v0/appsgjIdkpak2kaXq';
 const ATOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
 
-// Helper: "toxic-sad-happy-girl-1771197483216" → "Toxic Sad Happy Girl"
+// Helper: "toxic-sad-happy-girl-1771197483216" â†’ "Toxic Sad Happy Girl"
 function formatName(raw) {
   if (!raw) return 'Scenario';
   return raw.replace(/-\d{10,}$/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -61,7 +61,7 @@ function formatName(raw) {
 const chatId = $('Parse Message').first().json.chatId;
 const timeOfDay = $('Parse Message').first().json.timeOfDay || 'day'; // 'night' | 'day'
 
-// ——— Phone lookup (by telegram_chat_id → Phones table) ———
+// â€”â€”â€” Phone lookup (by telegram_chat_id â†’ Phones table) â€”â€”â€”
 let phoneId = '', phoneName = '', phoneRecordId = '';
 let phoneVoiceId = '', phoneGirlRefUrl = '';
 if (chatId && ATOKEN) {
@@ -81,14 +81,14 @@ if (chatId && ATOKEN) {
       phoneGirlRefUrl = pr.fields.girl_ref_url || '';
       console.log('[prepare] Phone matched: ' + phoneName + ' (' + phoneId + ')');
     } else {
-      console.log('[prepare] No phone found for chatId ' + chatId + ' — using defaults');
+      console.log('[prepare] No phone found for chatId ' + chatId + ' â€” using defaults');
     }
   } catch (e) {
     console.log('[prepare] Phone lookup failed: ' + e.message);
   }
 }
 
-// ——— Scenario ———
+// â€”â€”â€” Scenario â€”â€”â€”
 const scenarioItems = $('Find Scenario (Produce)').all().map(i => i.json);
 if (scenarioItems.length === 0 || !scenarioItems[0].id) {
   return [{
@@ -113,7 +113,7 @@ if (typeof copyJson === 'string') {
   try { copyJson = JSON.parse(copyJson); } catch(e) { copyJson = null; }
 }
 
-// ——— Concept config ———
+// â€”â€”â€” Concept config â€”â€”â€”
 const conceptItems = $('Find Concept').all().map(i => i.json);
 const concept = conceptItems.length > 0 && conceptItems[0].id ? conceptItems[0] : {};
 const hookType = concept.hook_type || 'chat_screenshot';
@@ -126,6 +126,10 @@ const environmentDescription = concept.environment_description || '';
 const environmentFurniture = concept.environment_furniture || '';
 const hookImageSystemPrompt = concept.hook_image_system_prompt || '';
 const outroImageSystemPrompt = concept.outro_image_system_prompt || '';
+const hookImagePromptSpeaking = concept.hook_image_prompt_speaking || concept.hook_image_prompt || '';
+const hookImagePromptReaction = concept.hook_image_prompt_reaction || concept.hook_image_prompt || '';
+const sora2SpeakingPrompt = concept.sora2_speaking_prompt || '';
+const sora2ReactionPrompt = concept.sora2_reaction_prompt || '';
 
 // Outro pool: parse JSON, weighted random selection
 let selectedOutro = { type: 'none' };
@@ -146,7 +150,7 @@ if (Array.isArray(outroPoolRaw) && outroPoolRaw.length > 0) {
   }
 }
 
-// ——— Sub-concept selection (for concepts with variants like sad-happy-girl) ———
+// â€”â€”â€” Sub-concept selection (for concepts with variants like sad-happy-girl) â€”â€”â€”
 let selectedSubconcept = null;
 let effectiveHookType = hookType;
 let effectiveOutroType = selectedOutro.type;
@@ -179,9 +183,9 @@ if (Array.isArray(subconceptsRaw) && subconceptsRaw.length > 0) {
     hookKlingPrompt = selectedSubconcept.hook_prompt || '';
     outroKlingPrompt = selectedSubconcept.outro_prompt || '';
 
-    // Randomize motion prompts for reaction (candid, not selfie) — V2.0
+    // Randomize motion prompts for reaction (candid, not selfie) â€” V2.0
     if (selectedSubconcept.hook_type === 'reaction' && !hookKlingPrompt) {
-      // STRATEGY: phone is always HELD STILL — she is REACTING, not actively operating it.
+      // STRATEGY: phone is always HELD STILL â€” she is REACTING, not actively operating it.
       // V2.0: two separate pools (cold_calculated vs explosive_control) + eye focus randomization.
 
       // Determine poseCategory from toxicity score (mirrors generate-hook.js logic)
@@ -191,7 +195,7 @@ if (Array.isArray(subconceptsRaw) && subconceptsRaw.length > 0) {
         poseCategory = sc <= 15 ? 'cold_calculated' : 'explosive_control';
       }
 
-      // Weighted eye focus randomizer — micro saccade language (humans do this, AI doesn't)
+      // Weighted eye focus randomizer â€” micro saccade language (humans do this, AI doesn't)
       const eyeFocusOpts = [
         { weight: 40, text: 'eyes naturally settling forward, brief micro saccade before focusing' },
         { weight: 30, text: 'eyes slightly past camera, micro saccade then settle' },
@@ -205,25 +209,25 @@ if (Array.isArray(subconceptsRaw) && subconceptsRaw.length > 0) {
         return eyeFocusOpts[0].text;
       }
 
-      // Cold pool — glacial, minimal, physical micro-action (85–99% toxic tier)
+      // Cold pool â€” glacial, minimal, physical micro-action (85â€“99% toxic tier)
       const coldMotionPool = [
-        'Locked off tripod shot, static camera — she is sitting holding her phone still, not typing, remains completely still for a moment, blinks once slowly, jaw subtly tightens, {EYE}, no tears, dry eyes',
-        'Locked off tripod shot, static camera — she is sitting holding her phone still, not typing, barely tilts chin forward, breath steady and controlled, minimal movement, {EYE}, no tears, dry eyes',
-        'Locked off tripod shot, static camera — she is sitting holding her phone still, not typing, micro eyebrow lift, no other visible movement, {EYE}, no tears, dry eyes',
-        'Locked off tripod shot, static camera — she is sitting holding her phone still, not typing, holds completely still, slow controlled exhale through nose, {EYE}, no tears, dry eyes',
-        'Locked off tripod shot, static camera — she is sitting holding her phone still, not typing, slight head tilt, expression unreadable, stillness dominates, {EYE}, no tears, dry eyes',
+        'Locked off tripod shot, static camera â€” she is sitting holding her phone still, not typing, remains completely still for a moment, blinks once slowly, jaw subtly tightens, {EYE}, no tears, dry eyes',
+        'Locked off tripod shot, static camera â€” she is sitting holding her phone still, not typing, barely tilts chin forward, breath steady and controlled, minimal movement, {EYE}, no tears, dry eyes',
+        'Locked off tripod shot, static camera â€” she is sitting holding her phone still, not typing, micro eyebrow lift, no other visible movement, {EYE}, no tears, dry eyes',
+        'Locked off tripod shot, static camera â€” she is sitting holding her phone still, not typing, holds completely still, slow controlled exhale through nose, {EYE}, no tears, dry eyes',
+        'Locked off tripod shot, static camera â€” she is sitting holding her phone still, not typing, slight head tilt, expression unreadable, stillness dominates, {EYE}, no tears, dry eyes',
       ];
 
-      // Explosive pool — contained physical tension (70–84% toxic tier)
+      // Explosive pool â€” contained physical tension (70â€“84% toxic tier)
       const explosiveMotionPool = [
-        'Locked off tripod shot, static camera — she is sitting holding her phone still, not typing, sharp short exhale, jaw tightens briefly, {EYE}, no tears, dry eyes',
-        'Locked off tripod shot, static camera — she is sitting holding her phone still, not typing, quick blink of disbelief, minimal head shift, {EYE}, no tears, dry eyes',
-        'Locked off tripod shot, static camera — she is sitting holding her phone still, not typing, subtle head shake once, lips press then relax, {EYE}, no tears, dry eyes',
-        'Locked off tripod shot, static camera — she is sitting holding her phone still, not typing, eyes widen slightly before narrowing, {EYE}, no tears, dry eyes',
-        'Locked off tripod shot, static camera — she is sitting holding her phone still, not typing, visible tension in jaw and neck, small breath reset, {EYE}, no tears, dry eyes',
+        'Locked off tripod shot, static camera â€” she is sitting holding her phone still, not typing, sharp short exhale, jaw tightens briefly, {EYE}, no tears, dry eyes',
+        'Locked off tripod shot, static camera â€” she is sitting holding her phone still, not typing, quick blink of disbelief, minimal head shift, {EYE}, no tears, dry eyes',
+        'Locked off tripod shot, static camera â€” she is sitting holding her phone still, not typing, subtle head shake once, lips press then relax, {EYE}, no tears, dry eyes',
+        'Locked off tripod shot, static camera â€” she is sitting holding her phone still, not typing, eyes widen slightly before narrowing, {EYE}, no tears, dry eyes',
+        'Locked off tripod shot, static camera â€” she is sitting holding her phone still, not typing, visible tension in jaw and neck, small breath reset, {EYE}, no tears, dry eyes',
       ];
 
-      // 15% energy contrast injection — deliberately mismatches tier for human feel
+      // 15% energy contrast injection â€” deliberately mismatches tier for human feel
       const useContrast = Math.random() < 0.15;
       const motionPool = (poseCategory === 'cold_calculated' && !useContrast) ? coldMotionPool : explosiveMotionPool;
 
@@ -234,7 +238,7 @@ if (Array.isArray(subconceptsRaw) && subconceptsRaw.length > 0) {
     }
     hookKlingDuration = selectedSubconcept.hook_duration || null;
 
-    // Seedance v1.5 Pro only supports '5' and '10' — leave null to use SEEDANCE_DURATION default
+    // Seedance v1.5 Pro only supports '5' and '10' â€” leave null to use SEEDANCE_DURATION default
 
     // Image prompts for kie.ai (generate original images each time)
     // These override the AI-generated prompt or fallback template in generate-hook/outro
@@ -252,22 +256,29 @@ if (Array.isArray(subconceptsRaw) && subconceptsRaw.length > 0) {
   }
 }
 
-// ——— Outro Category Override (from Workflow 1 copyJson) ———
+// â€”â€”â€” Outro Category Override (from Workflow 1 copyJson) â€”â€”â€”
 // outroCategory is set during scenario generation: 'organic', 'app_store', 'cta_lipsync'
 const outroCategory = (copyJson && copyJson.outroCategory) || 'organic';
 
 if (outroCategory === 'app_store') {
-  // App store clip — override whatever the outro pool selected
+  // App store clip â€” override whatever the outro pool selected
   selectedOutro = { type: 'app_store_clip', label: 'app_store', weight: 0 };
   effectiveOutroType = 'app_store_clip';
 } else if (outroCategory === 'cta_lipsync') {
-  // Sora 2 speaking video — override outro type
+  // Sora 2 speaking video â€” override outro type
   effectiveOutroType = 'speaking';
 }
-// 'organic' → keep existing outro_pool_json selection (no override)
+// 'organic' â†’ keep existing outro_pool_json selection (no override)
 
-// ——— Body clips (from Find Body Clips, includes all clip types) ———
-const clipRecords = $('Find Body Clips').all().map(i => i.json);
+// â€”â€”â€” Body clips (from Find Body Clips, includes all clip types) â€”â€”â€”
+// Deduplicate: n8n runs Airtable query once per upstream input item, `.all()` accumulates duplicates
+const _rawClips = $('Find Body Clips').all().map(i => i.json);
+const _seenIds = new Set();
+const clipRecords = _rawClips.filter(c => {
+  if (!c.id || _seenIds.has(c.id)) return false;
+  _seenIds.add(c.id);
+  return true;
+});
 if (clipRecords.length === 0 || !clipRecords[0].id) {
   return [{
     json: {
@@ -278,7 +289,7 @@ if (clipRecords.length === 0 || !clipRecords[0].id) {
   }];
 }
 
-// ——— Template (from Airtable, fallback to hardcoded Standard) ———
+// â€”â€”â€” Template (from Airtable, fallback to hardcoded Standard) â€”â€”â€”
 const templateItems = $('Find Template').all().map(i => i.json);
 let template;
 if (templateItems.length > 0 && templateItems[0].id) {
@@ -310,7 +321,7 @@ if (!template) {
   };
 }
 
-// ——— Music (random pick from active tracks) ———
+// â€”â€”â€” Music (random pick from active tracks) â€”â€”â€”
 const musicItems = $('Find Music').all().map(i => i.json);
 let musicTrack = null;
 if (musicItems.length > 0 && musicItems[0].id) {
@@ -329,10 +340,16 @@ if (musicItems.length > 0 && musicItems[0].id) {
   };
 }
 
-// ——— Sort and map body clips ———
+// â€”â€”â€” Sort and map body clips â€”â€”â€”
 const bodyClips = clipRecords
   .filter(c => c.clip_type === 'body' || !c.clip_type)
-  .sort((a, b) => (a.clip_index || 0) - (b.clip_index || 0))
+  .sort((a, b) => {
+    // Primary: sort by clip_index
+    const idxDiff = (a.clip_index || 0) - (b.clip_index || 0);
+    if (idxDiff !== 0) return idxDiff;
+    // Secondary: prefer clips with known duration (duration > 0 = valid file, 0 = possibly corrupt)
+    return (b.clip_duration_sec || 0) - (a.clip_duration_sec || 0);
+  })
   .map(clip => ({
     clipIndex: clip.clip_index,
     section: clip.section || 'body_' + clip.clip_index,
@@ -350,20 +367,25 @@ const SECTION_ALIASES = {
   'decoded_insight': 'deep_dive',
 };
 const bodySegments = template.segments.filter(s => s.section !== 'hook' && s.section !== 'outro');
-// Build from actual body clips (not template segments) to avoid off-by-one
-// when template has segments without matching clips (e.g. screenshot)
-const clipMapping = bodyClips.map((clip, i) => {
-  const normalized = SECTION_ALIASES[clip.section] || clip.section;
-  const seg = bodySegments.find(s => s.section === normalized)
-           || bodySegments.find(s => s.section === clip.section)
-           || (i < bodySegments.length ? bodySegments[i] : null);
+// Match exactly 1 clip per template body segment (prevents duplicate clip explosion)
+// Template defines the video structure â€” we never include more clips than segments
+const usedClipIndices = new Set();
+const clipMapping = bodySegments.map(seg => {
+  const matchIdx = bodyClips.findIndex((clip, idx) => {
+    if (usedClipIndices.has(idx)) return false;
+    const normalized = SECTION_ALIASES[clip.section] || clip.section;
+    return normalized === seg.section || clip.section === seg.section;
+  });
+  if (matchIdx < 0) return null; // no clip for this segment â€” skip
+  usedClipIndices.add(matchIdx);
+  const clip = bodyClips[matchIdx];
   return {
     section: clip.section, // keep original name for caption matching in assemble
-    targetDuration: seg ? seg.duration : clip.duration || 3.0,
+    targetDuration: seg.duration,
     fileId: clip.fileId,
     actualDuration: clip.duration || 0,
   };
-});
+}).filter(Boolean);
 
 // Hook clip (for manual_clip type)
 const hookClips = clipRecords.filter(c => c.clip_type === 'hook_manual');
@@ -412,9 +434,14 @@ return [{
     hookKlingPrompt,
     outroKlingPrompt,
     hookKlingDuration,
-    // Image prompts for kie.ai generation (sub-concept overrides)
-    hookImagePrompt: selectedSubconcept ? (selectedSubconcept.hook_image_prompt || '') : '',
+    // Image prompts for kie.ai generation (mode-specific, sub-concept overrides)
+    hookImagePrompt: selectedSubconcept && selectedSubconcept.hook_image_prompt
+      ? selectedSubconcept.hook_image_prompt
+      : (effectiveHookType === 'speaking' ? hookImagePromptSpeaking : hookImagePromptReaction),
     outroImagePrompt: selectedSubconcept ? (selectedSubconcept.outro_image_prompt || '') : '',
+    // Sora 2 prompt templates (from Airtable â€” used by img-to-video.js)
+    sora2SpeakingPrompt,
+    sora2ReactionPrompt,
     // Outro category from Workflow 1 (organic, app_store, cta_lipsync)
     outroCategory,
     // Time of day for hook/outro image generation lighting

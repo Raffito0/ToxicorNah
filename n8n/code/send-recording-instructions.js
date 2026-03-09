@@ -3,7 +3,7 @@
 // Stores recording state in workflow static data (activeRecording)
 // Mode: Run Once for All Items
 //
-// WIRING: After Save to Supabase (approve branch) → this Code node → Telegram Send Message
+// WIRING: After Save to Supabase (approve branch) â†’ this Code node â†’ Telegram Send Message
 //         Also wire to: Airtable Update Scenario (set status = 'recording')
 //
 // The Telegram Send node should use {{ $json.message }} as text and {{ $json.chatId }} as chat ID.
@@ -11,7 +11,7 @@
 
 const staticData = $getWorkflowStaticData('global');
 
-// Helper: "toxic-sad-happy-girl-1771197483216" → "Toxic Sad Happy Girl"
+// Helper: "toxic-sad-happy-girl-1771197483216" â†’ "Toxic Sad Happy Girl"
 function formatName(raw) {
   if (!raw) return 'Scenario';
   return raw.replace(/-\d{10,}$/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -41,7 +41,7 @@ try {
   scenarioRecordId = scenarioRecord.id || '';
 } catch(e) {}
 
-// ─── Body segments (Standard template — covers most concepts) ───
+// â”€â”€â”€ Body segments (Standard template â€” covers most concepts) â”€â”€â”€
 // These describe what the user needs to record on their phone screen
 const bodySegments = [
   { section: 'screenshot', duration: 1, label: 'Screenshot della chat' },
@@ -62,17 +62,17 @@ staticData.activeRecording = {
 
 // Read timeOfDay from static data (stored during /produce flow)
 const timeOfDay = staticData.activeRecordingTimeOfDay || 'day';
-const timeLabel = timeOfDay === 'night' ? '🌙 Night' : '☀️ Day';
+const timeLabel = timeOfDay === 'night' ? 'ðŸŒ™ Night' : 'â˜€ï¸? Day';
 
 // Build Telegram message
 const displayName = formatName(scenarioName);
-let msg = '🎬 "' + displayName + '" approvato! ' + timeLabel + '\n\n';
+let msg = 'ðŸŽ¬ "' + displayName + '" approvato! ' + timeLabel + '\n\n';
 msg += 'Registra queste body clip in ordine:\n\n';
 bodySegments.forEach((seg, i) => {
   msg += '  ' + (i + 1) + '. ' + seg.label + ' (~' + seg.duration + 's)\n';
 });
 msg += '\nManda i video uno alla volta, senza caption.\n';
-msg += '👉 /done quando hai finito.';
+msg += 'ðŸ‘‰ /done quando hai finito.';
 
 return [{
   json: {

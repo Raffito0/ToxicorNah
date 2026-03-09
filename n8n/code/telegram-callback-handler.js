@@ -1,18 +1,20 @@
 // NODE: Handle Telegram Callback (Unified Pipeline)
 // Parses callback_data from inline keyboard button presses
-// Handles THREE types of callbacks:
+// Handles FOUR types of callbacks:
 //   1. Per-segment VO approval: "vpVoOk_{recordId}_{segIndex}", "vpVoRedo_{recordId}_{segIndex}"
 //      Approves individual VO segments. On redo: regenerates via Fish.audio, re-sends audio.
-//      When ALL segments approved → sets vo_approval to "approved" → pipeline continues.
+//      When ALL segments approved â†’ sets vo_approval to "approved" â†’ pipeline continues.
 //   2. Video pipeline asset approval: "vpApprove_{recordId}_{step}", "vpRedo_{recordId}_{step}"
 //      Steps: hook_img, outro_img (vo is now handled per-segment above)
-//   3. Scenario approval: "approve_scenarioName", "redo_scenarioName", "skip_scenarioName"
+//   3. Hook generator: "img_approve_{recId}", "img_redo_{recId}", "vid_skip_{recId}", "vid_all_{recId}"
+//      Instant button update + Airtable status change (replaces getUpdates polling)
+//   4. Scenario approval: "approve_scenarioName", "redo_scenarioName", "skip_scenarioName"
 // Mode: Run Once for All Items
 
 const fs = require('fs');
 const path = require('path');
 
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// â”€â”€â”€ fetch polyfill (n8n Code node sandbox lacks global fetch) â”€â”€â”€
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -58,7 +60,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── Multipart upload helper for Telegram sendAudio with inline_keyboard ───
+// â”€â”€â”€ Multipart upload helper for Telegram sendAudio with inline_keyboard â”€â”€â”€
 function sendTelegramAudio(botToken, chatId, audioBuffer, filename, caption, replyMarkup) {
   return new Promise((resolve, reject) => {
     const boundary = '----FormBoundary' + Date.now() + Math.random().toString(36).slice(2);
@@ -98,18 +100,18 @@ function sendTelegramAudio(botToken, chatId, audioBuffer, filename, caption, rep
   });
 }
 
-// ─── TTS Provider Toggle ───
+// â”€â”€â”€ TTS Provider Toggle â”€â”€â”€
 // 'elevenlabs' = ElevenLabs v3 (primary)
 // 'fish'       = Fish.audio s1 (backup)
 const TTS_PROVIDER = 'elevenlabs';
 
-// ─── ElevenLabs config ───
+// â”€â”€â”€ ElevenLabs config â”€â”€â”€
 const ELEVENLABS_API_KEY = 'sk_a645bb67bdb3fecc5604c41b18588e7b1d8a35092d0c28fc';
 const ELEVENLABS_VOICE_ID = 'cIZgE1zTtJx92OFuLtNz';
 const ELEVENLABS_MODEL = 'eleven_v3';
 const ELEVENLABS_OUTPUT_FORMAT = 'mp3_44100_128';
 
-// ─── Fish.audio config (backup) ───
+// â”€â”€â”€ Fish.audio config (backup) â”€â”€â”€
 const FISH_API_KEY = '145c958d4b194854b82e045f103472ee';
 const FISH_REFERENCE_ID = '0b48750248ea42b68366d62bf2117edb';
 const FISH_MODEL = 's1';
@@ -121,14 +123,14 @@ function stripEmojis(text) {
     .trim();
 }
 
-// ─── Strip ElevenLabs emotion tags (for Fish.audio which doesn't understand them) ───
+// â”€â”€â”€ Strip ElevenLabs emotion tags (for Fish.audio which doesn't understand them) â”€â”€â”€
 function stripEmotionTags(text) {
   return text.replace(/\[(gasps|sighs|laughs|whispers|sarcastic|frustrated|curious|excited)\]\s*/gi, '').trim();
 }
 
-// ─── ElevenLabs v3 TTS with native speed control ───
+// â”€â”€â”€ ElevenLabs v3 TTS with native speed control â”€â”€â”€
 // speed is passed at TOP LEVEL of request body (not in voice_settings)
-// ElevenLabs eleven_v3 natively adjusts voice cadence — sounds like real person speaking faster/slower
+// ElevenLabs eleven_v3 natively adjusts voice cadence â€” sounds like real person speaking faster/slower
 async function elevenLabsTTS(text, speed) {
   text = stripEmojis(text);
   const url = 'https://api.elevenlabs.io/v1/text-to-speech/' + ELEVENLABS_VOICE_ID + '?output_format=' + ELEVENLABS_OUTPUT_FORMAT;
@@ -148,7 +150,7 @@ async function elevenLabsTTS(text, speed) {
   return Buffer.from(audioBuffer);
 }
 
-// ─── Fish.audio TTS with speed control (backup) ───
+// â”€â”€â”€ Fish.audio TTS with speed control (backup) â”€â”€â”€
 async function fishTTS(text, speed) {
   text = stripEmotionTags(stripEmojis(text));
   const requestBody = { text, format: 'mp3' };
@@ -171,7 +173,7 @@ async function fishTTS(text, speed) {
   return Buffer.from(audioBuffer);
 }
 
-// ─── Unified TTS dispatcher ───
+// â”€â”€â”€ Unified TTS dispatcher â”€â”€â”€
 async function ttsGenerate(text, speed) {
   if (TTS_PROVIDER === 'elevenlabs') return elevenLabsTTS(text, speed);
   return fishTTS(text, speed);
@@ -187,6 +189,7 @@ const sectionLabels = {
 };
 
 const TELEGRAM_BOT_TOKEN = (typeof $env !== 'undefined' && $env.TELEGRAM_BOT_TOKEN) || '';
+const PREP01_BOT = '8389477139:AAFWFMhwVj7TLWBOtlX-3Pqz7pqK88fP4EU';
 const AIRTABLE_TOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
 const AIRTABLE_BASE = 'appsgjIdkpak2kaXq';
 const VIDEO_RUNS_TABLE = 'tbltCYcVXrLYvyIJL';
@@ -209,9 +212,9 @@ const messageId = update.callback_query
   ? update.callback_query.message.message_id
   : '';
 
-// ═══════════════════════════════════════
-// PER-SEGMENT VO APPROVAL — vpVoOk / vpVoRedo / vpVoFaster
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// PER-SEGMENT VO APPROVAL â€” vpVoOk / vpVoRedo / vpVoFaster
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') || callbackData.startsWith('vpVoFaster_') || callbackData.startsWith('vpVoSlower_')) {
   const isApprove = callbackData.startsWith('vpVoOk_');
   const isFaster = callbackData.startsWith('vpVoFaster_');
@@ -257,7 +260,7 @@ if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') |
   const label = sectionLabels[seg.section] || seg.section;
 
   if (isApprove) {
-    // ─── APPROVE: mark segment, check if all done ───
+    // â”€â”€â”€ APPROVE: mark segment, check if all done â”€â”€â”€
     seg.status = 'approved';
 
     if (messageId) {
@@ -308,9 +311,9 @@ if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') |
     return [{ json: { type: 'vo_segment', action: 'approve', segIndex, recordId, allApproved: pendingSegs.length === 0 } }];
 
   } else {
-    // ─── REDO / FASTER / SLOWER: regenerate via Fish.audio ───
+    // â”€â”€â”€ REDO / FASTER / SLOWER: regenerate via Fish.audio â”€â”€â”€
     // Faster: +0.15 speed. Slower: -0.15 speed. Redo: keep current speed.
-    // Fish.audio range: 0.5 – 2.0
+    // Fish.audio range: 0.5 â€“ 2.0
     const currentSpeed = seg.speed || 1.0;
     const newSpeed = isFaster
       ? Math.min(2.0, Math.round((currentSpeed + 0.15) * 100) / 100)
@@ -432,10 +435,10 @@ if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') |
   }
 }
 
-// ═══════════════════════════════════════
-// VIDEO PIPELINE APPROVAL — vpApprove_{recordId}_{step} / vpRedo_{recordId}_{step}
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// VIDEO PIPELINE APPROVAL â€” vpApprove_{recordId}_{step} / vpRedo_{recordId}_{step}
 // recordId = Airtable Video Runs record ID
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 if (callbackData.startsWith('vpApprove_') || callbackData.startsWith('vpRedo_')) {
   const isApprove = callbackData.startsWith('vpApprove_');
   const prefix = isApprove ? 'vpApprove_' : 'vpRedo_';
@@ -483,6 +486,22 @@ if (callbackData.startsWith('vpApprove_') || callbackData.startsWith('vpRedo_'))
         body: JSON.stringify({
           callback_query_id: callbackQueryId,
           text: isApprove ? '\u2705 ' + stepLabel + ' approved!' : '\uD83D\uDD04 Redoing ' + stepLabel + '...',
+        }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // Update button to show Approved/Redoing state
+  if (messageId && TELEGRAM_BOT_TOKEN) {
+    const btnText = isApprove ? '\u2705 Approved' : '\uD83D\uDD04 Redoing...';
+    try {
+      await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/editMessageReplyMarkup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: { inline_keyboard: [[{ text: btnText, callback_data: 'noop' }]] },
         }),
       });
     } catch (e) { /* non-fatal */ }
@@ -539,9 +558,677 @@ if (callbackData.startsWith('vpApprove_') || callbackData.startsWith('vpRedo_'))
   }];
 }
 
-// ═══════════════════════════════════════
-// SCENARIO APPROVAL — approve/redo/skip_{scenarioName}
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// AUTO-NEXT: load next approved scenario after LED/Day selection
+// Replicates start-next-scenario.js logic inline
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+const HOOK_QUEUE_TABLE = 'tblXpyxSLN2vSJ4i3';
+const SCENARIOS_TABLE = 'tblcQaMBBPcOAy0NF';
+const PHONES_TABLE = 'tblCvT47GpZv29jz9';
+const CONCEPTS_TABLE = 'tblhhTVI4EYofdY32';
+const SUPABASE_URL = 'https://iilqnbumccqxlyloerzd.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpbHFuYnVtY2NxeGx5bG9lcnpkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODcyMzAyOCwiZXhwIjoyMDg0Mjk5MDI4fQ.XUKQTfMrtg2gYwIiJX_dMBX6C4VSlKZS09cNC7h7yVQ';
+const APP_URL = 'https://toxicor-nah.vercel.app';
+const PROFILE_PICS = [
+  '/GUYS PROFILE PICS/openart-image_43m08NP7_1772054346917_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_767eF_NR_1772054370739_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_76WI-X36_1772054341562_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_CX2wvxHx_1772054327378_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_Igx9x5Tb_1772054336505_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_-Jv_st6o_1772054314707_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_k34F-chA_1772054331278_raw.jpg',
+  '/GUYS PROFILE PICS/openart-image_l7RhnYOF_1771785086054_raw.png',
+  '/GUYS PROFILE PICS/openart-image_q7qc-3aA_1772054349021_raw.jpg',
+];
+
+async function autoLoadNextScenario(botToken, targetChatId) {
+  const staticData = $getWorkflowStaticData('global');
+
+  // Already recording? Skip
+  if (staticData.activeRecording) {
+    console.log('[auto-next] Already recording â€” skipping');
+    return;
+  }
+
+  // 1. Find next approved scenario
+  const filter = encodeURIComponent("AND({status}='approved',{generated_hook_text}!='')");
+  const scenUrl = 'https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + SCENARIOS_TABLE +
+    '?filterByFormula=' + filter + '&maxRecords=1';
+  const scenRes = await fetch(scenUrl, { headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN } });
+  if (!scenRes.ok) {
+    const errBody = await scenRes.text();
+    console.log('[auto-next] Airtable error: ' + scenRes.status + ' ' + errBody);
+    try {
+      await fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: targetChatId, text: '\u26A0\uFE0F Auto-next error: Airtable ' + scenRes.status }),
+      });
+    } catch (e) { /* non-fatal */ }
+    return;
+  }
+  const scenData = await scenRes.json();
+  const nextScenario = (scenData.records && scenData.records[0]) || null;
+
+  if (!nextScenario) {
+    try {
+      await fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: targetChatId, text: '\uD83D\uDCCB Nessuno scenario approvato in coda.\nGenera nuovi scenari prima.' }),
+      });
+    } catch (e) { /* non-fatal */ }
+    return;
+  }
+
+  const nf = nextScenario.fields || {};
+  const scenarioName = nf.scenario_name || '';
+  const scenarioRecordId = nextScenario.id;
+  const screenshotUrl = nf.screenshot_url || '';
+
+  function formatName(raw) {
+    if (!raw) return 'Scenario';
+    return raw.replace(/-\d{10,}$/, '').split('-').map(function(w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(' ');
+  }
+  const displayName = formatName(scenarioName);
+
+  // 2. Parse scenario_json and save to Supabase
+  let scenarioJson = nf.scenario_json;
+  if (typeof scenarioJson === 'string') {
+    try { scenarioJson = JSON.parse(scenarioJson); } catch (e) { scenarioJson = null; }
+  }
+
+  let demoUrl = '';
+  if (scenarioJson) {
+    scenarioJson.personAvatar = PROFILE_PICS[Math.floor(Math.random() * PROFILE_PICS.length)];
+    if (!scenarioJson.personDisplayName && scenarioJson.chat && scenarioJson.chat.contactName) {
+      scenarioJson.personDisplayName = scenarioJson.chat.contactName;
+    }
+    try {
+      const supRes = await fetch(SUPABASE_URL + '/rest/v1/content_scenarios?on_conflict=scenario_id', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Prefer': 'return=representation,resolution=merge-duplicates',
+        },
+        body: JSON.stringify({ scenario_id: scenarioName, scenario_json: scenarioJson, status: 'approved' }),
+      });
+      if (supRes.ok) {
+        const [inserted] = await supRes.json();
+        demoUrl = APP_URL + '/?sid=' + inserted.id;
+      }
+    } catch (e) { console.log('[auto-next] Supabase error: ' + e.message); }
+  }
+
+  // 3. Set up recording state
+  const bodySegments = [
+    { section: 'screenshot', duration: 1, label: 'Screenshot della chat' },
+    { section: 'upload_chat', duration: 1, label: 'Upload chat (caricamento)' },
+    { section: 'toxic_score', duration: 3, label: 'Toxic score reveal' },
+    { section: 'soul_type', duration: 3, label: 'Soul type card' },
+    { section: 'deep_dive', duration: 3, label: 'Deep dive (categorie)' },
+  ];
+
+  staticData.activeRecording = {
+    scenarioName,
+    chatId: targetChatId,
+    scenarioRecordId,
+    expectedClips: bodySegments,
+    receivedCount: 0,
+  };
+
+  // 4. Determine which phone this scenario will go to + count
+  var phoneInfo = await assignPhoneSequential();
+  var phoneLabel = '';
+  if (phoneInfo) {
+    var pName = phoneInfo.phone.phoneId.replace('phone-', 'Phone ');
+    var nextNum = (phoneInfo.currentReady || 0) + 1;
+    phoneLabel = '\uD83D\uDCF1 ' + pName + ' \u2014 Scenario ' + nextNum + '/3';
+    if (nextNum === 1) {
+      phoneLabel += ' \u{1F195} Nuovo batch!';
+    }
+    phoneLabel += '\n\n';
+  }
+
+  // 5. Build caption
+  let caption = phoneLabel + '\uD83C\uDFAC Scenario: "' + displayName + '"\n\n';
+  caption += 'Registra queste body clip:\n\n';
+  bodySegments.forEach(function(seg, i) {
+    caption += '  ' + (i + 1) + '. ' + seg.label + ' (~' + seg.duration + 's)\n';
+  });
+  caption += '\nManda i video senza caption.\n';
+  caption += '\uD83D\uDC49 /done quando hai finito.';
+  if (demoUrl) {
+    caption += '\n\n\uD83D\uDCF1 App: ' + demoUrl;
+  }
+
+  // 5. Send screenshot photo or text message
+  try {
+    let photoSent = false;
+    if (screenshotUrl) {
+      const photoRes = await fetch('https://api.telegram.org/bot' + botToken + '/sendPhoto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: targetChatId, photo: screenshotUrl, caption: caption }),
+      });
+      const photoJson = await photoRes.json();
+      if (photoJson.ok) {
+        photoSent = true;
+      } else {
+        console.log('[auto-next] sendPhoto failed: ' + JSON.stringify(photoJson));
+      }
+    }
+    if (!photoSent) {
+      await fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: targetChatId, text: caption }),
+      });
+    }
+  } catch (e) { console.log('[auto-next] Telegram send error: ' + e.message); }
+
+  console.log('[auto-next] Loaded scenario: ' + scenarioName);
+}
+
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// HELPERS: concept lookup + round-robin phone + batch queue
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+
+// Fetch concept prompts by Airtable record ID (not text concept_id)
+async function fetchConceptData(conceptRecordId) {
+  if (!conceptRecordId) return { hookImagePrompt: '', sora2SpeakingPrompt: '', conceptIdStr: '' };
+  try {
+    const res = await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + CONCEPTS_TABLE + '/' + conceptRecordId, {
+      headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN },
+    });
+    if (!res.ok) return { hookImagePrompt: '', sora2SpeakingPrompt: '', conceptIdStr: '' };
+    const c = await res.json();
+    return {
+      hookImagePrompt: c.fields.hook_image_prompt_speaking || c.fields.hook_image_prompt || '',
+      sora2SpeakingPrompt: c.fields.sora2_speaking_prompt || '',
+      conceptIdStr: c.fields.concept_id || '',
+    };
+  } catch (e) {
+    return { hookImagePrompt: '', sora2SpeakingPrompt: '', conceptIdStr: '' };
+  }
+}
+
+// Load active phones and pick the first one that has < 3 ready scenarios (sequential fill)
+async function assignPhoneSequential() {
+  // 1. Load active phones (sorted by phone_id for consistent order)
+  const phonesUrl = 'https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + PHONES_TABLE +
+    '?filterByFormula=' + encodeURIComponent("{is_active}=TRUE()") +
+    '&sort%5B0%5D%5Bfield%5D=phone_id&sort%5B0%5D%5Bdirection%5D=asc';
+  const phonesRes = await fetch(phonesUrl, { headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN } });
+  if (!phonesRes.ok) return null;
+  const phonesData = await phonesRes.json();
+  const phones = (phonesData.records || []).map(function(r) {
+    return { phoneId: r.fields.phone_id, girlRefUrl: r.fields.girl_ref_url || '', recordId: r.id };
+  });
+  if (phones.length === 0) return null;
+
+  // 2. Count ready scenarios per phone
+  const counts = {};
+  for (var pi = 0; pi < phones.length; pi++) { counts[phones[pi].phoneId] = 0; }
+
+  const readyUrl = 'https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + SCENARIOS_TABLE +
+    '?filterByFormula=' + encodeURIComponent("{status}='ready'") + '&fields%5B%5D=phone_id';
+  const readyRes = await fetch(readyUrl, { headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN } });
+  if (readyRes.ok) {
+    var data = await readyRes.json();
+    for (var ri = 0; ri < (data.records || []).length; ri++) {
+      var pid = (data.records[ri].fields.phone_id || '');
+      if (counts[pid] !== undefined) counts[pid]++;
+    }
+  }
+
+  // 3. Pick first phone that has < 3 ready (sequential: fill phone-1 first, then phone-2, etc.)
+  for (var si = 0; si < phones.length; si++) {
+    if ((counts[phones[si].phoneId] || 0) < 3) {
+      return { phone: phones[si], currentReady: counts[phones[si].phoneId] || 0 };
+    }
+  }
+
+  // All phones have 3+ ready â€” pick first phone anyway (will batch immediately)
+  return { phone: phones[0], currentReady: counts[phones[0].phoneId] || 0 };
+}
+
+// Check if a phone has 3+ 'ready' scenarios with same time_of_day+led_color â†’ batch into 1 queue record
+async function checkAndCreateBatch(phone, hookImagePrompt, sora2SpeakingPrompt, conceptIdStr, timeOfDay, ledColor) {
+  var ledPart = ledColor ? ",{led_color}='" + ledColor + "'" : ",{led_color}=''";
+  var filter = encodeURIComponent("AND({status}='ready',{phone_id}='" + phone.phoneId + "',{time_of_day}='" + timeOfDay + "'" + ledPart + ")");
+  var readyUrl = 'https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + SCENARIOS_TABLE +
+    '?filterByFormula=' + filter + '&maxRecords=3';
+  var readyRes = await fetch(readyUrl, { headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN } });
+  if (!readyRes.ok) return { created: false, count: 0, phoneId: phone.phoneId };
+  var readyData = await readyRes.json();
+  var readyScenarios = readyData.records || [];
+
+  if (readyScenarios.length < 3) {
+    return { created: false, count: readyScenarios.length, phoneId: phone.phoneId };
+  }
+
+  var batch = readyScenarios.slice(0, 3);
+  var hookTexts = batch.map(function(r) {
+    // Use hookVO (what the girl SAYS) not hookText (caption overlay)
+    try {
+      var copyJson = typeof r.fields.generated_copy_json === 'string'
+        ? JSON.parse(r.fields.generated_copy_json) : r.fields.generated_copy_json;
+      if (copyJson && copyJson.hookVO) return copyJson.hookVO;
+    } catch (e) {}
+    return r.fields.generated_hook_text || '';
+  });
+  var scenarioIds = batch.map(function(r) { return r.id; });
+
+  // Create queue record with 3 hook texts
+  await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + HOOK_QUEUE_TABLE, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: {
+      concept_id: conceptIdStr,
+      concept_name: batch.map(function(r) { return r.fields.scenario_name || ''; }).join(', '),
+      hook_mode: 'speaking',
+      phone_id: phone.phoneId,
+      hook_texts_json: JSON.stringify(hookTexts),
+      scenario_ids_json: JSON.stringify(scenarioIds),
+      girl_ref_url: phone.girlRefUrl,
+      hook_image_prompt: hookImagePrompt,
+      sora2_speaking_prompt: sora2SpeakingPrompt,
+      time_of_day: timeOfDay,
+      led_color: ledColor,
+      status: 'image_pending',
+    } }),
+  });
+
+  // Mark all 3 scenarios as 'queued'
+  for (var si = 0; si < batch.length; si++) {
+    await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + SCENARIOS_TABLE + '/' + batch[si].id, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { status: 'queued' } }),
+    });
+  }
+
+  return { created: true, count: 3, phoneId: phone.phoneId, hookTexts: hookTexts };
+}
+
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// LED COLOR CALLBACK â€” led_{color}_{scenarioRecordId}
+// After /done â†’ night, user picks LED color. Marks scenario ready, batches 3 into queue.
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+
+const ledMatch = callbackData.match(/^led_(red|purple|green|blue|none)_(.+)$/);
+if (ledMatch) {
+  const ledColor = ledMatch[1] === 'none' ? '' : ledMatch[1];
+  const scenarioRecordId = ledMatch[2];
+
+  // Answer callback
+  if (callbackQueryId) {
+    const label = ledColor ? ('ðŸ’¡ ' + ledColor.charAt(0).toUpperCase() + ledColor.slice(1) + ' LED') : 'âš« No LED';
+    try {
+      await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/answerCallbackQuery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callback_query_id: callbackQueryId, text: label + ' â€” generating hook...' }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // Update button
+  if (messageId) {
+    const btnLabel = ledColor ? ('ðŸ’¡ ' + ledColor.charAt(0).toUpperCase() + ledColor.slice(1) + ' LED') : 'âš« No LED';
+    try {
+      await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/editMessageReplyMarkup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: { inline_keyboard: [[{ text: '\u2705 ' + btnLabel, callback_data: 'noop' }]] },
+        }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // Fetch scenario, update to ready, check batch
+  let hookRequestError = '';
+  let batchResult = { created: false, count: 0 };
+  try {
+    // 1. Fetch scenario record
+    const scenRes = await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + SCENARIOS_TABLE + '/' + scenarioRecordId, {
+      headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN },
+    });
+    const scenario = await scenRes.json();
+    const sf = scenario.fields || {};
+    const conceptRecIds = sf.concept_id || [];
+    const conceptRecordId = Array.isArray(conceptRecIds) ? conceptRecIds[0] : (conceptRecIds || '');
+
+    // 2. Round-robin phone assignment
+    const phoneAssign = await assignPhoneSequential();
+    if (!phoneAssign) throw new Error('No active phones found');
+    const assignedPhone = phoneAssign.phone;
+
+    // 3. Fetch concept prompts (by record ID directly)
+    const { hookImagePrompt, sora2SpeakingPrompt, conceptIdStr } = await fetchConceptData(conceptRecordId);
+
+    // 4. Update scenario with time_of_day + led_color + phone_id + status=ready
+    await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + SCENARIOS_TABLE + '/' + scenarioRecordId, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { time_of_day: 'night', led_color: ledColor, phone_id: assignedPhone.phoneId, status: 'ready' } }),
+    });
+
+    // 5. Check batch â€” creates queue record if this phone has 3+ ready scenarios
+    batchResult = await checkAndCreateBatch(assignedPhone, hookImagePrompt, sora2SpeakingPrompt, conceptIdStr, 'night', ledColor);
+  } catch (e) {
+    hookRequestError = e.message;
+  }
+
+  // 6. Send confirmation
+  const ledLabel = ledColor ? (' + ' + ledColor + ' LED') : '';
+  let confirmMsg;
+  if (hookRequestError) {
+    confirmMsg = '\u26A0\uFE0F Hook request failed: ' + hookRequestError;
+  } else if (batchResult.created) {
+    confirmMsg = '\u2705 Night' + ledLabel + ' \u2014 batch 3 hook (' + batchResult.phoneId + ') in coda!';
+  } else {
+    confirmMsg = '\u2705 Night' + ledLabel + ' \u2014 ' + (batchResult.phoneId || '?') + ': ' + batchResult.count + '/3 scenari pronti.';
+  }
+  try {
+    await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: confirmMsg }),
+    });
+  } catch (e) { /* non-fatal */ }
+
+  // 7. Auto-load next scenario
+  try {
+    await autoLoadNextScenario(PREP01_BOT, chatId);
+  } catch (e) {
+    console.log('[led] auto-next error: ' + e.message);
+    try {
+      await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendMessage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: '\u26A0\uFE0F Auto-next error: ' + e.message }),
+      });
+    } catch (e2) { /* non-fatal */ }
+  }
+
+  return [{ json: { type: 'led_selection', scenarioRecordId, timeOfDay: 'night', ledColor, chatId } }];
+}
+
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// DAY/NIGHT CALLBACK â€” tod_day_{scenarioRecordId} / tod_night_{scenarioRecordId}
+// Replaces /day and /night text commands with inline keyboard
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+const todMatch = callbackData.match(/^tod_(day|night)_(.+)$/);
+if (todMatch) {
+  const timeOfDay = todMatch[1];
+  const scenarioRecordId = todMatch[2];
+
+  // Answer callback
+  if (callbackQueryId) {
+    const label = timeOfDay === 'night' ? '\uD83C\uDF19 Night' : '\u2600\uFE0F Day';
+    try {
+      await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/answerCallbackQuery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callback_query_id: callbackQueryId, text: label }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  if (timeOfDay === 'night') {
+    // Update button to show Night selected, then ask LED color
+    if (messageId) {
+      try {
+        await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/editMessageReplyMarkup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            message_id: messageId,
+            reply_markup: { inline_keyboard: [[{ text: '\u2705 \uD83C\uDF19 Night', callback_data: 'noop' }]] },
+          }),
+        });
+      } catch (e) { /* non-fatal */ }
+    }
+
+    // Send LED question
+    try {
+      await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendMessage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: '\uD83C\uDF19 Night \u2014 che LED hai usato?',
+          reply_markup: { inline_keyboard: [
+            [
+              { text: '\uD83D\uDD34 Red', callback_data: 'led_red_' + scenarioRecordId },
+              { text: '\uD83D\uDFE3 Purple', callback_data: 'led_purple_' + scenarioRecordId },
+            ],
+            [
+              { text: '\uD83D\uDFE2 Green', callback_data: 'led_green_' + scenarioRecordId },
+              { text: '\uD83D\uDD35 Blue', callback_data: 'led_blue_' + scenarioRecordId },
+            ],
+            [
+              { text: '\u26AB No LED', callback_data: 'led_none_' + scenarioRecordId },
+            ],
+          ] },
+        }),
+      });
+    } catch (e) { /* non-fatal */ }
+
+    return [{ json: { type: 'tod_night_asking_led', scenarioRecordId, chatId, callbackQueryId } }];
+  }
+
+  // DAY â€” update button, create hook request inline, confirm
+  if (messageId) {
+    try {
+      await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/editMessageReplyMarkup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: { inline_keyboard: [[{ text: '\u2705 \u2600\uFE0F Day', callback_data: 'noop' }]] },
+        }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  let dayError = '';
+  let dayBatchResult = { created: false, count: 0 };
+  try {
+    // 1. Fetch scenario record
+    const scenRes = await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + SCENARIOS_TABLE + '/' + scenarioRecordId, {
+      headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN },
+    });
+    const scenario = await scenRes.json();
+    const sf = scenario.fields || {};
+    const conceptRecIds = sf.concept_id || [];
+    const conceptRecordId = Array.isArray(conceptRecIds) ? conceptRecIds[0] : (conceptRecIds || '');
+
+    // 2. Round-robin phone assignment
+    const dayPhoneAssign = await assignPhoneSequential();
+    if (!dayPhoneAssign) throw new Error('No active phones found');
+    const dayAssignedPhone = dayPhoneAssign.phone;
+
+    // 3. Fetch concept prompts (by record ID directly)
+    const { hookImagePrompt, sora2SpeakingPrompt, conceptIdStr } = await fetchConceptData(conceptRecordId);
+
+    // 4. Update scenario with time_of_day + phone_id + status=ready
+    await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + SCENARIOS_TABLE + '/' + scenarioRecordId, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { time_of_day: 'day', led_color: '', phone_id: dayAssignedPhone.phoneId, status: 'ready' } }),
+    });
+
+    // 5. Check batch â€” creates queue record if this phone has 3+ ready scenarios
+    dayBatchResult = await checkAndCreateBatch(dayAssignedPhone, hookImagePrompt, sora2SpeakingPrompt, conceptIdStr, 'day', '');
+  } catch (e) {
+    dayError = e.message;
+  }
+
+  let dayMsg;
+  if (dayError) {
+    dayMsg = '\u26A0\uFE0F Hook request failed: ' + dayError;
+  } else if (dayBatchResult.created) {
+    dayMsg = '\u2705 Day \u2014 batch 3 hook (' + dayBatchResult.phoneId + ') in coda!';
+  } else {
+    dayMsg = '\u2705 Day \u2014 ' + (dayBatchResult.phoneId || '?') + ': ' + dayBatchResult.count + '/3 scenari pronti.';
+  }
+  try {
+    await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: dayMsg }),
+    });
+  } catch (e) { /* non-fatal */ }
+
+  // Auto-load next scenario
+  try {
+    await autoLoadNextScenario(PREP01_BOT, chatId);
+  } catch (e) {
+    console.log('[day] auto-next error: ' + e.message);
+    try {
+      await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendMessage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: '\u26A0\uFE0F Auto-next error: ' + e.message }),
+      });
+    } catch (e2) { /* non-fatal */ }
+  }
+
+  return [{ json: { type: 'led_selection', scenarioRecordId, timeOfDay: 'day', ledColor: '', chatId } }];
+}
+
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// HOOK GENERATOR CALLBACKS â€” img_approve/img_redo/vid_skip/vid_all
+// Handled here (webhook) so buttons update INSTANTLY
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+
+if (callbackData.startsWith('img_approve_') || callbackData.startsWith('img_redo_')) {
+  const isApprove = callbackData.startsWith('img_approve_');
+  const recordId = callbackData.replace(/^img_(approve|redo)_/, '');
+  const newStatus = isApprove ? 'image_approved' : 'image_redo';
+
+  // Answer callback
+  if (callbackQueryId) {
+    try {
+      await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/answerCallbackQuery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callback_query_id: callbackQueryId, text: isApprove ? 'Approved!' : 'Will regenerate!' }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // Update button
+  if (messageId) {
+    try {
+      await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/editMessageReplyMarkup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: { inline_keyboard: [[{ text: isApprove ? '\u2705 Approved' : '\uD83D\uDD04 Redo Requested', callback_data: 'noop' }]] },
+        }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // Update Airtable
+  if (AIRTABLE_TOKEN) {
+    try {
+      await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + HOOK_QUEUE_TABLE + '/' + recordId, {
+        method: 'PATCH',
+        headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { status: newStatus } }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  return [{ json: { type: 'hook_generator', action: isApprove ? 'img_approve' : 'img_redo', recordId, chatId, callbackQueryId } }];
+}
+
+if (callbackData.startsWith('vid_skip_') || callbackData.startsWith('vid_all_')) {
+  const isSkip = callbackData.startsWith('vid_skip_');
+  const recordId = callbackData.replace(/^vid_(skip|all)_/, '');
+
+  // Answer callback
+  if (callbackQueryId) {
+    try {
+      await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/answerCallbackQuery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callback_query_id: callbackQueryId, text: isSkip ? 'Skipped' : 'Auto-trimming 0s, 5s, 10s' }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // Update button
+  if (messageId) {
+    try {
+      await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/editMessageReplyMarkup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: { inline_keyboard: [[{ text: isSkip ? '\u274C Skipped' : '\u2702\uFE0F Auto-trimming...', callback_data: 'noop' }]] },
+        }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  if (isSkip && AIRTABLE_TOKEN) {
+    // Mark as failed
+    try {
+      await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + HOOK_QUEUE_TABLE + '/' + recordId, {
+        method: 'PATCH',
+        headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { status: 'failed', error_message: 'Skipped by user' } }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  if (!isSkip) {
+    // vid_all: store trim timestamps in Airtable as a field the batch generator can read
+    try {
+      await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + HOOK_QUEUE_TABLE + '/' + recordId, {
+        method: 'PATCH',
+        headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { trim_timestamps: '0,5,10', status: 'video_trimming' } }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  return [{ json: { type: 'hook_generator', action: isSkip ? 'vid_skip' : 'vid_all', recordId, chatId, callbackQueryId } }];
+}
+
+if (callbackData === 'noop') {
+  // Already-processed button click, just answer silently
+  if (callbackQueryId) {
+    try {
+      await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/answerCallbackQuery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callback_query_id: callbackQueryId }),
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+  return [{ json: { type: 'noop', chatId, callbackQueryId } }];
+}
+
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// SCENARIO APPROVAL â€” approve/redo/skip_{scenarioName}
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 const parts = callbackData.split('_');
 const action = parts[0];
 const scenarioName = parts.slice(1).join('_');

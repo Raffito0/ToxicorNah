@@ -4,12 +4,12 @@
 // Self-healing: retries downloads 2x with 3s delay, continues with partial assets
 // Mode: Run Once for All Items
 //
-// WIRING: After VO approved → this Code node → Assemble Video
+// WIRING: After VO approved â†’ this Code node â†’ Assemble Video
 
 const fs = require('fs');
 const path = require('path');
 
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// â”€â”€â”€ fetch polyfill (n8n Code node sandbox lacks global fetch) â”€â”€â”€
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -69,7 +69,7 @@ if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
-// ─── retry helper ───
+// â”€â”€â”€ retry helper â”€â”€â”€
 async function withRetry(fn, retries = MAX_RETRIES) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -81,7 +81,7 @@ async function withRetry(fn, retries = MAX_RETRIES) {
   }
 }
 
-// ─── Telegram file download helper (with retry) ───
+// â”€â”€â”€ Telegram file download helper (with retry) â”€â”€â”€
 async function downloadTgFile(fileId, outputPath, token) {
   const t = token || BOT_TOKEN;
   return withRetry(async () => {
@@ -98,7 +98,7 @@ async function downloadTgFile(fileId, outputPath, token) {
   });
 }
 
-// ─── URL download helper (with retry) ───
+// â”€â”€â”€ URL download helper (with retry) â”€â”€â”€
 async function downloadUrl(url, outputPath) {
   return withRetry(async () => {
     const res = await fetch(url);
@@ -112,13 +112,13 @@ async function downloadUrl(url, outputPath) {
 const chatId = production.chatId;
 const warnings = [];
 
-// ─── Download hook ───
+// â”€â”€â”€ Download hook â”€â”€â”€
 let hookFile = null;
 try {
   const hookData = $('Generate Hook').first().json;
 
   if (hookData.hookSource === 'fallback_blank') {
-    // Self-healing: hook AI failed → create a blank black frame as placeholder
+    // Self-healing: hook AI failed â†’ create a blank black frame as placeholder
     const { execSync } = require('child_process');
     hookFile = path.join(outputDir, 'hook_blank.png');
     execSync('ffmpeg -y -f lavfi -i color=black:s=1080x1920:d=1 -frames:v 1 "' + hookFile + '"', { timeout: 10000 });
@@ -157,8 +157,8 @@ try {
   } catch (e2) { warnings.push('Hook blank fallback also failed: ' + e2.message); }
 }
 
-// ─── Download body clips ───
-// Use clipMapping (template-mapped clips) — NOT bodyClips (all clips)
+// â”€â”€â”€ Download body clips â”€â”€â”€
+// Use clipMapping (template-mapped clips) â€” NOT bodyClips (all clips)
 // clipMapping has exactly 1 clip per template body segment (5 for Standard template)
 const mappedClips = production.clipMapping || [];
 const clipMapping = [];
@@ -188,16 +188,16 @@ for (let i = 0; i < mappedClips.length; i++) {
   }
 }
 
-// ─── Download outro ───
+// â”€â”€â”€ Download outro â”€â”€â”€
 let outroFile = null;
 try {
   const outroData = $('Generate Outro').first().json;
   if (outroData.outroSkipped) {
-    // No outro — fine
+    // No outro â€” fine
   } else if (outroData.outroSource === 'manual_clip' && outroData.outroFileId) {
     outroFile = await downloadTgFile(outroData.outroFileId, path.join(outputDir, 'outro.mp4'));
   } else if (outroData.outroSource === 'app_store_clip') {
-    // Airtable attachment URLs expire after ~2h — re-fetch fresh URL from record
+    // Airtable attachment URLs expire after ~2h â€” re-fetch fresh URL from record
     let freshUrl = outroData.outroFileUrl || '';
     if (outroData.appStoreClipRecordId) {
       try {
@@ -221,7 +221,7 @@ try {
       warnings.push('App store clip: no URL available');
     }
   } else if (outroData.outroSource === 'fallback_skip' || outroData.outroSource === 'app_store_fallback_skip') {
-    // AI/app store failed, outro was skipped — fine
+    // AI/app store failed, outro was skipped â€” fine
     warnings.push('Outro skipped (fallback)');
   } else {
     // Try Img2Vid Outro video first (2-step approval), then Generate Outro binary
@@ -246,7 +246,7 @@ try {
   // Self-healing: outro is optional, just skip it
 }
 
-// ─── Collect VO segment files from disk ───
+// â”€â”€â”€ Collect VO segment files from disk â”€â”€â”€
 // Send VO Segments saves files to /tmp/toxicornah_vo/{recordId}/vo_{index}.mp3
 // Callback handler may overwrite individual files on redo (latest approved version)
 // We read from disk instead of Generate VO binary to get the freshest files
@@ -304,7 +304,7 @@ try {
   // Self-healing: video works without VO
 }
 
-// ─── Download music ───
+// â”€â”€â”€ Download music â”€â”€â”€
 let musicFile = null;
 try {
   if (production.musicTrack) {

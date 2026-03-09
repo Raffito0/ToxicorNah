@@ -1,21 +1,61 @@
 // NODE: Generate Hook (Self-Contained + Env Frame Extraction)
 // Routes by hook type from concept config:
-//   - manual_clip → pass through the already-uploaded hook clip file_id
-//   - ai_image / ai_single_girl → extract env frame from 1st body clip → fal.ai
-//   - ai_multi_image → fal.ai x3 images
-//   - chat_screenshot → Puppeteer screenshot
+//   - manual_clip â†’ pass through the already-uploaded hook clip file_id
+//   - ai_image / ai_single_girl â†’ extract env frame from 1st body clip â†’ fal.ai
+//   - ai_multi_image â†’ fal.ai x3 images
+//   - chat_screenshot â†’ Puppeteer screenshot
 //
 // Self-contained: downloads first body clip from Telegram, extracts env frame,
 // uploads to temp host, then uses [girl_ref, env_frame] as fal.ai references.
-// Prompt NEVER describes the girl — only "same exact girl in reference image".
+// Prompt NEVER describes the girl â€” only "same exact girl in reference image".
 // Mode: Run Once for All Items
 
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// â”€â”€â”€ fetch polyfill (n8n Code node sandbox lacks global fetch) â”€â”€â”€
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
 const fs = require('fs');
 const { execSync } = require('child_process');
+
+// â”€â”€â”€ Pose reference images (R2 permanent URLs) â”€â”€â”€
+const POSE_URLS = [
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/015dac25caed6a16d2550f19cf0a20c2.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/1531713189d33f0118d255944d4d4831.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/16cec1230c4955f02a09897215b0f21e.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/19b1e6458bc8b88354eff8ac61fef254.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/2091a8729bc807df5bd7c35d3492b1d4.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/26467a69842872e85772411fc2830698.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/32b72f71a5fe2dda816544dc9af590b5.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/3a6b9e9a4e2d48ec8ea1681a6b84549a.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/3c94dd4f6686f8b8c2edffa237aa1f6a.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/4095715ae837645d442fe85d38d9bb4d.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/43389bcb274d7361e3795c90392aa618.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/4a8eef5d2207d73a60285310d52e7212.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/4bed58d5bf4a02d4edd3aaa8bfdb8288.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/5c2b4ca51dbb905bcf372889bf371825.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/5e8aad81e881cd225b7fa56c8ec76204.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/6a6c552d4c9c08f89656c05f2048af18.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/70zl40bh40451.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/76e9049263a18130a421eb1053820c95.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/7f4d2417edfafda832a607d2bfa28103.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/90165a53593a343e3209eec90c99ce1d.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/9501a693921139cff7b26918bd28368d.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/9b71be19c750aa373ab184085cc2e395.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/9c2c37928678d4b2811ff8e5dcbf4dd6.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/a109cb5d-1edf-4c0c-aaab-c5d397a0ea96_0.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/a109da5a-96f0-41c3-a50f-f942e74179c7_0.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/b353eca72d023df27ec68a094c5b3765.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/bd868982fcabd1646e5c8362658b2343.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/c40b14e465067403d51a18940b4568e5.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/ca2cfb7f693c7c23fc57fa29e89ca3e4.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/cf3497e32e868a267b44ae3ccd018886.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/db40e1c25e98203ae12d9d233e39f6b7.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/dcb67e92ae459248e5488acd42141db5.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/dcfa4f0a25822ca7b2f23235c1f5be7f.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/e5b48c82d16ad94c3af6efe8189cd001.jpg',
+  'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev/poses/f3ef337f3f49a95fa08cc0bac8ae71a9.jpg',
+];
+function randomPoseUrl() { return POSE_URLS[Math.floor(Math.random() * POSE_URLS.length)]; }
 
 function fetch(url, opts = {}, _redirectCount = 0) {
   return new Promise((resolve, reject) => {
@@ -59,7 +99,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── Temp image upload (0x0.st — no API key, 30+ day retention) ───
+// â”€â”€â”€ Temp image upload (0x0.st â€” no API key, 30+ day retention) â”€â”€â”€
 function uploadToTempHost(buffer, filename) {
   return new Promise((resolve, reject) => {
     const boundary = '----FormBoundary' + Date.now();
@@ -103,65 +143,65 @@ const SCREENSHOT_URL = 'http://host.docker.internal:3456/screenshot';
 const MAX_RETRIES = 1;
 const RETRY_DELAY_MS = 5000;
 
-// ─── Hook Girls Pose/Style Reference Catalog ───
-// 35 reference photos categorized by mood — passed as 2nd image_input to kie.ai
+// â”€â”€â”€ Hook Girls Pose/Style Reference Catalog â”€â”€â”€
+// 35 reference photos categorized by mood â€” passed as 2nd image_input to kie.ai
 // so the AI matches pose/vibe/setting while keeping the girl's face from ref #1
 const HOOK_GIRLS = {
   // Sad, looking down, soft/vulnerable expression
   vulnerable: [
-    'https://files.catbox.moe/wzyi1d.jpg', // dcb67e92 — lying on pillow, looking down, melancholic
-    'https://files.catbox.moe/dxg8hn.jpg', // bd868982 — lying on pillow, looking up, vulnerable
-    'https://files.catbox.moe/j02ssk.jpg', // 5c2b4ca5 — lying on pillow, eyes looking away, soft
-    'https://files.catbox.moe/3xvja6.jpg', // 4bed58d5 — lying on bed, side angle, dim light
+    'https://files.catbox.moe/wzyi1d.jpg', // dcb67e92 â€” lying on pillow, looking down, melancholic
+    'https://files.catbox.moe/dxg8hn.jpg', // bd868982 â€” lying on pillow, looking up, vulnerable
+    'https://files.catbox.moe/j02ssk.jpg', // 5c2b4ca5 â€” lying on pillow, eyes looking away, soft
+    'https://files.catbox.moe/3xvja6.jpg', // 4bed58d5 â€” lying on bed, side angle, dim light
   ],
   // Thoughtful, hand on chin, looking away
   pensive: [
-    'https://files.catbox.moe/i5oqts.jpg', // 7f4d2417 — sitting on couch, hand to face, pensive
-    'https://files.catbox.moe/n4j85d.jpg', // 9b71be19 — sitting, looking down, natural light
-    'https://files.catbox.moe/qyslwz.jpg', // 9c2c3792 — sitting on bed, hand on chin, reflective
-    'https://files.catbox.moe/8k26yp.jpg', // dcfa4f0a — lying down close-up, natural light, pensive
-    'https://files.catbox.moe/j1m03k.jpg', // 3a6b9e9a — sitting on bed, hand on face, neutral
-    'https://files.catbox.moe/va26lo.jpg', // b353eca7 — lying on bed, hand to face, contemplative
-    'https://files.catbox.moe/elqv0d.jpg', // ca2cfb7f — sitting on bed, hand to chin, contemplative
-    'https://files.catbox.moe/txb4fr.jpg', // 015dac25 — sitting, hand on face, bored/unimpressed
-    'https://files.catbox.moe/h1ujow.jpg', // a109cb5d — lying on bed, hand on chin, sultry
+    'https://files.catbox.moe/i5oqts.jpg', // 7f4d2417 â€” sitting on couch, hand to face, pensive
+    'https://files.catbox.moe/n4j85d.jpg', // 9b71be19 â€” sitting, looking down, natural light
+    'https://files.catbox.moe/qyslwz.jpg', // 9c2c3792 â€” sitting on bed, hand on chin, reflective
+    'https://files.catbox.moe/8k26yp.jpg', // dcfa4f0a â€” lying down close-up, natural light, pensive
+    'https://files.catbox.moe/j1m03k.jpg', // 3a6b9e9a â€” sitting on bed, hand on face, neutral
+    'https://files.catbox.moe/va26lo.jpg', // b353eca7 â€” lying on bed, hand to face, contemplative
+    'https://files.catbox.moe/elqv0d.jpg', // ca2cfb7f â€” sitting on bed, hand to chin, contemplative
+    'https://files.catbox.moe/txb4fr.jpg', // 015dac25 â€” sitting, hand on face, bored/unimpressed
+    'https://files.catbox.moe/h1ujow.jpg', // a109cb5d â€” lying on bed, hand on chin, sultry
   ],
   // Intense gaze, slightly pouty, sultry
   pouty: [
-    'https://files.catbox.moe/u80lq7.jpg', // 19b1e645 — lying on pillow, head tilted, sleepy
-    'https://files.catbox.moe/rrw6jx.jpg', // f3ef337f — lying on pillow with glasses, sultry
-    'https://files.catbox.moe/mmtkks.jpg', // db40e1c2 — lying on bed, face close-up, intimate
-    'https://files.catbox.moe/cih8oa.jpg', // 32b72f71 — lying on bed, pink/purple lighting, seductive
-    'https://files.catbox.moe/7492ey.jpg', // 15317131 — bedroom with decor, hand to chin, sultry gaze
-    'https://files.catbox.moe/uj0rmj.jpg', // 90165a53 — lying down, very close up, intimate
-    'https://files.catbox.moe/595i5z.jpg', // 9501a693 — dark background, intense gaze
+    'https://files.catbox.moe/u80lq7.jpg', // 19b1e645 â€” lying on pillow, head tilted, sleepy
+    'https://files.catbox.moe/rrw6jx.jpg', // f3ef337f â€” lying on pillow with glasses, sultry
+    'https://files.catbox.moe/mmtkks.jpg', // db40e1c2 â€” lying on bed, face close-up, intimate
+    'https://files.catbox.moe/cih8oa.jpg', // 32b72f71 â€” lying on bed, pink/purple lighting, seductive
+    'https://files.catbox.moe/7492ey.jpg', // 15317131 â€” bedroom with decor, hand to chin, sultry gaze
+    'https://files.catbox.moe/uj0rmj.jpg', // 90165a53 â€” lying down, very close up, intimate
+    'https://files.catbox.moe/595i5z.jpg', // 9501a693 â€” dark background, intense gaze
   ],
   // Direct camera gaze, assertive posture
   confident: [
-    'https://files.catbox.moe/q5tnuo.jpg', // 3c94dd4f — sitting on bed, leaning forward, confident
-    'https://files.catbox.moe/onj7r0.jpg', // cf3497e3 — sitting on bed, hand on chin, thoughtful
-    'https://files.catbox.moe/fc189o.jpg', // 4095715a — sitting with arm raised, confident pose
-    'https://files.catbox.moe/pvh9pt.jpg', // 76e90492 — lying on bed, looking over shoulder, confident
-    'https://files.catbox.moe/lekpnf.jpg', // 5e8aad81 — direct look
+    'https://files.catbox.moe/q5tnuo.jpg', // 3c94dd4f â€” sitting on bed, leaning forward, confident
+    'https://files.catbox.moe/onj7r0.jpg', // cf3497e3 â€” sitting on bed, hand on chin, thoughtful
+    'https://files.catbox.moe/fc189o.jpg', // 4095715a â€” sitting with arm raised, confident pose
+    'https://files.catbox.moe/pvh9pt.jpg', // 76e90492 â€” lying on bed, looking over shoulder, confident
+    'https://files.catbox.moe/lekpnf.jpg', // 5e8aad81 â€” direct look
   ],
   // Finger gestures, slight smile, playful
   playful: [
-    'https://files.catbox.moe/ftuxf2.jpg', // 43389bcb — lying on bed, finger gesture, playful
-    'https://files.catbox.moe/rd2tsn.jpg', // 70zl40bh — lying on bed, flirty
-    'https://files.catbox.moe/hb5fo1.jpg', // 26467a69 — lying on floor, edgy
-    'https://files.catbox.moe/vb8gu0.jpg', // 16cec123 — lying on couch, playful smile
+    'https://files.catbox.moe/ftuxf2.jpg', // 43389bcb â€” lying on bed, finger gesture, playful
+    'https://files.catbox.moe/rd2tsn.jpg', // 70zl40bh â€” lying on bed, flirty
+    'https://files.catbox.moe/hb5fo1.jpg', // 26467a69 â€” lying on floor, edgy
+    'https://files.catbox.moe/vb8gu0.jpg', // 16cec123 â€” lying on couch, playful smile
   ],
   // Tired, looking away, bored expression
   bored: [
-    'https://files.catbox.moe/6l76qo.jpg', // c40b14e4 — leaning on couch, looking away, tired
-    'https://files.catbox.moe/1gcb8l.jpg', // e5b48c82 — sitting on bed, looking up, dim
+    'https://files.catbox.moe/6l76qo.jpg', // c40b14e4 â€” leaning on couch, looking away, tired
+    'https://files.catbox.moe/1gcb8l.jpg', // e5b48c82 â€” sitting on bed, looking up, dim
   ],
   // Lying back, comfortable, natural vibe
   relaxed: [
-    'https://files.catbox.moe/gbgcm4.jpg', // 2091a872 — sitting at table, relaxed
-    'https://files.catbox.moe/zrfvwm.jpg', // 6a6c552d — lying on bed, arm up, relaxed
-    'https://files.catbox.moe/pppe0f.jpg', // 4a8eef5d — lying on side, intimate angle
-    'https://files.catbox.moe/vkrmtc.jpg', // a109da5a — mirror selfie, standing
+    'https://files.catbox.moe/gbgcm4.jpg', // 2091a872 â€” sitting at table, relaxed
+    'https://files.catbox.moe/zrfvwm.jpg', // 6a6c552d â€” lying on bed, arm up, relaxed
+    'https://files.catbox.moe/pppe0f.jpg', // 4a8eef5d â€” lying on side, intimate angle
+    'https://files.catbox.moe/vkrmtc.jpg', // a109da5a â€” mirror selfie, standing
   ],
 };
 
@@ -172,17 +212,17 @@ function selectPoseCategory(production) {
   const score = production.scenarioJson
     ? (production.scenarioJson.overallScore || production.scenarioJson.toxicityScore || 15)
     : 15;
-  // Tier B = displayed toxicity 85–99 (overallScore 0–15): glacial, cold, frozen
-  // Tier A = displayed toxicity 70–84 (overallScore 16–30): explosive, visible energy
+  // Tier B = displayed toxicity 85â€“99 (overallScore 0â€“15): glacial, cold, frozen
+  // Tier A = displayed toxicity 70â€“84 (overallScore 16â€“30): explosive, visible energy
   return score <= 15 ? 'cold_calculated' : 'explosive_control';
 }
 
-// Get a text description of the expression — emotion only, no furniture/position.
-// TikTok viral formula: the girl doesn't look destroyed — she looks like she's about to say something.
+// Get a text description of the expression â€” emotion only, no furniture/position.
+// TikTok viral formula: the girl doesn't look destroyed â€” she looks like she's about to say something.
 // V2.0: separate pools for selfie (speaking) vs candid (reaction) energy.
 // 80% pre-speech suffix, 20% micro-breath alternative to break pattern repetition.
 function getPoseDescription(category, hookType) {
-  // 80% pre-speech / 20% micro-breath variation — prevents "always lips parting" pattern
+  // 80% pre-speech / 20% micro-breath variation â€” prevents "always lips parting" pattern
   const microBreathAlts = [
     'inhales slightly through nose',
     'tongue briefly presses against inner lip',
@@ -196,10 +236,10 @@ function getPoseDescription(category, hookType) {
   const isSelfie = hookType === 'speaking';
 
   const pools = {
-    // Tier B — Glacial / Cold Calculated (displayed toxicity 85–99)
+    // Tier B â€” Glacial / Cold Calculated (displayed toxicity 85â€“99)
     cold_calculated: {
       selfie: [
-        // Core — frozen energy, direct eye contact into camera
+        // Core â€” frozen energy, direct eye contact into camera
         'frozen stare, direct eye contact, completely still, eyes cold and intense, slight lean toward camera, ' + breathSuffix,
         'slow controlled expression, slight deadpan smirk forming, direct gaze into camera, like she already knows exactly what to say, ' + breathSuffix,
         'eyes locked directly at camera, micro head tilt, emotionless except for jaw slightly set, ' + breathSuffix,
@@ -211,7 +251,7 @@ function getPoseDescription(category, hookType) {
         'quiet, almost amused realization, eyes narrowing slightly while looking directly at camera, like she already knew',
       ],
       candid: [
-        // Core — internal energy, eyes slightly off-camera
+        // Core â€” internal energy, eyes slightly off-camera
         'frozen expression, eyes slightly off-camera, completely still, reacting internally to what she just read, ' + breathSuffix,
         'slow controlled expression, slight deadpan smirk, looking past the phone, like she already knows exactly what to say, ' + breathSuffix,
         'eyes slightly past camera, micro head tilt, emotionless except for jaw slightly set, processing internally, ' + breathSuffix,
@@ -223,10 +263,10 @@ function getPoseDescription(category, hookType) {
         'quiet, almost amused realization, eyes narrowing slightly, looking past the phone, like she already knew',
       ],
     },
-    // Tier A — Explosive Control (displayed toxicity 70–84)
+    // Tier A â€” Explosive Control (displayed toxicity 70â€“84)
     explosive_control: {
       selfie: [
-        // Core — visible energy, direct camera
+        // Core â€” visible energy, direct camera
         'jaw tight, direct eye contact, short sharp exhale visible, barely containing it, ' + breathSuffix,
         'eyebrow raised with a micro head tilt, looking directly at camera, "really?" sarcastic energy, ' + breathSuffix,
         'quick disbelief blink, direct gaze into camera, lips pressed then parting, "I cannot believe this" expression, ' + breathSuffix,
@@ -238,7 +278,7 @@ function getPoseDescription(category, hookType) {
         'confused hurt expression, brows furrowed, looking directly at camera, taken aback, not yet ready to react',
       ],
       candid: [
-        // Core — contained energy, eyes off-camera
+        // Core â€” contained energy, eyes off-camera
         'jaw tight, eyes slightly off-camera, short sharp exhale visible, barely containing it, ' + breathSuffix,
         'eyebrow raised with a micro head tilt, looking past the phone, "really?" energy, ' + breathSuffix,
         'quick disbelief blink, eyes looking away briefly then back, "I cannot believe this" expression, ' + breathSuffix,
@@ -262,7 +302,7 @@ const TELEGRAM_BOT_TOKEN = (typeof $env !== 'undefined' && $env.TELEGRAM_BOT_TOK
 // AI-generated prompt from Hook Prompt Agent (upstream AI Agent node)
 const AI_GENERATED_PROMPT = $input.first().json.output || '';
 
-// ─── retry helper ───
+// â”€â”€â”€ retry helper â”€â”€â”€
 async function withRetry(fn, label = 'API call') {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -274,7 +314,7 @@ async function withRetry(fn, label = 'API call') {
   }
 }
 
-// ─── kie.ai nano-banana-2 (async: createTask → poll) ───
+// â”€â”€â”€ kie.ai nano-banana-2 (async: createTask â†’ poll) â”€â”€â”€
 async function kieGenerate(prompt, imageRefs, options = {}) {
   const { aspectRatio = '9:16', resolution = '2K', timeOfDay = 'day', isSelfie = false } = options;
   const lighting = timeOfDay === 'night' ? 'nighttime' : 'daytime';
@@ -292,7 +332,7 @@ async function kieGenerate(prompt, imageRefs, options = {}) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + KIE_API_KEY },
     body: JSON.stringify({
-      model: 'nano-banana-2',
+      model: 'nano-banana-pro',
       input: { prompt: finalPrompt, image_input: imageRefs, aspect_ratio: aspectRatio, resolution, output_format: 'png' },
     }),
   });
@@ -326,7 +366,7 @@ async function kiePoll(taskId) {
   throw new Error('kie.ai poll timeout after 120s');
 }
 
-// ─── fal.ai nano-banana-2 (synchronous — no polling needed) ───
+// â”€â”€â”€ fal.ai nano-banana-2 (synchronous â€” no polling needed) â”€â”€â”€
 async function falGenerate(prompt, imageRefs, options = {}) {
   const { aspectRatio = '9:16', resolution = '2K', timeOfDay = 'day', isSelfie = false } = options;
   const lighting = timeOfDay === 'night'
@@ -357,7 +397,7 @@ async function falGenerate(prompt, imageRefs, options = {}) {
   return data.images[0].url;
 }
 
-// ─── generateImage: kie.ai primary → fal.ai fallback ───
+// â”€â”€â”€ generateImage: kie.ai primary â†’ fal.ai fallback â”€â”€â”€
 async function generateImage(prompt, imageRefs, options = {}) {
   try {
     console.log('[imageGen] Trying kie.ai...');
@@ -367,14 +407,14 @@ async function generateImage(prompt, imageRefs, options = {}) {
     console.log('[imageGen] kie.ai OK: ' + url);
     return url;
   } catch (kieErr) {
-    console.log('[imageGen] kie.ai failed: ' + kieErr.message + ' — falling back to fal.ai');
+    console.log('[imageGen] kie.ai failed: ' + kieErr.message + ' â€” falling back to fal.ai');
     const url = await falGenerate(prompt, imageRefs, options);
     console.log('[imageGen] fal.ai fallback OK: ' + url);
     return url;
   }
 }
 
-// ─── Extract env frame from first body clip ───
+// â”€â”€â”€ Extract env frame from first body clip â”€â”€â”€
 async function extractEnvFrame(bodyClips) {
   if (!TELEGRAM_BOT_TOKEN) return null;
   if (!bodyClips || bodyClips.length === 0) return null;
@@ -420,7 +460,7 @@ async function extractEnvFrame(bodyClips) {
   }
 }
 
-// ─── Fallback template prompt builder (used when AI Agent output is empty) ───
+// â”€â”€â”€ Fallback template prompt builder (used when AI Agent output is empty) â”€â”€â”€
 function buildHookPromptFallback(production, hasEnvFrame, poseDesc, timeOfDay, hookTypeHint) {
   let emotion = 'concerned';
   const scenarioJson = production.scenarioJson;
@@ -441,7 +481,7 @@ function buildHookPromptFallback(production, hasEnvFrame, poseDesc, timeOfDay, h
     ? 'in the same room as the environment frame'
     : (production.environmentDescription || defaultEnv);
 
-  // Angle logic tied to hookType — never use wide shot (reduces hook intensity)
+  // Angle logic tied to hookType â€” never use wide shot (reduces hook intensity)
   let angles;
   if (hookTypeHint === 'speaking') {
     // Selfie = close-up only
@@ -465,26 +505,29 @@ function buildHookPromptFallback(production, hasEnvFrame, poseDesc, timeOfDay, h
     '. She is hunched forward over her phone,' + poseText + ' ' + emotion +
     ' expression. Realistic, candid, shot on iPhone 13 Pro, 9:16 vertical';
 }
-// ─── Hook Pool helpers (pre-generated Sora 2 hooks for instant /produce) ───
+// â”€â”€â”€ Hook Pool helpers (pre-generated Sora 2 hooks for instant /produce) â”€â”€â”€
 const HOOK_POOL_TABLE = 'tbl3q91o3l0isSX9w';
 
-async function checkHookPool(scenarioRecordId, phoneId, conceptId) {
+async function checkHookPool(scenarioRecordId, phoneId, conceptId, timeOfDay) {
   const ATOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
   if (!ATOKEN || (!scenarioRecordId && !conceptId)) return null;
 
   const ABASE = 'appsgjIdkpak2kaXq';
-  // Try concept_id first (batch generator), fallback to scenario_id (legacy)
+  // Query by concept_id + phone_id (new batch system stores individual clips per concept)
   const idFilter = conceptId
     ? "{concept_id}='" + conceptId + "'"
     : "{scenario_id}='" + scenarioRecordId + "'";
-  // Search with phone_id first, then fallback to shared clips (no phone_id)
+  const todFilter = timeOfDay ? ",{time_of_day}='" + timeOfDay + "'" : '';
+  // Search with phone_id + time_of_day first, then relax constraints
   const queries = [];
+  if (phoneId) {
+    queries.push("{status}='ready'," + idFilter + ",{phone_id}='" + phoneId + "'" + todFilter);
+  }
+  queries.push("{status}='ready'," + idFilter + todFilter);
+  // Fallback: any time_of_day (better to have a mismatched hook than none)
   if (phoneId) {
     queries.push("{status}='ready'," + idFilter + ",{phone_id}='" + phoneId + "'");
   }
-  // Also try clips without phone_id (shared pool from batch generator)
-  queries.push("{status}='ready'," + idFilter + ",{phone_id}=BLANK()");
-  // Legacy: clips without phone_id field at all
   queries.push("{status}='ready'," + idFilter);
 
   try {
@@ -503,15 +546,24 @@ async function checkHookPool(scenarioRecordId, phoneId, conceptId) {
 
     const record = data.records[0];
     const fields = record.fields;
+
+    // New format: source_video_url + clip_start_sec + clip_duration_sec (needs FFmpeg trim)
+    // Legacy format: video_file attachment (pre-trimmed clip)
+    const sourceVideoUrl = fields.source_video_url || '';
     const videoFiles = fields.video_file;
-    if (!Array.isArray(videoFiles) || videoFiles.length === 0) return null;
+    const hasLegacyClip = Array.isArray(videoFiles) && videoFiles.length > 0;
+
+    if (!sourceVideoUrl && !hasLegacyClip) return null;
 
     return {
       recordId: record.id,
-      videoUrl: videoFiles[0].url,
+      videoUrl: hasLegacyClip ? videoFiles[0].url : '',
+      sourceVideoUrl: sourceVideoUrl,
+      clipStartSec: Number(fields.clip_start_sec) || 0,
+      clipDurationSec: Number(fields.clip_duration_sec) || 4,
       hookText: fields.hook_text || '',
       sourceImageUrl: fields.source_image_url || '',
-      hookType: fields.hook_type || 'speaking', // 'speaking' or 'reaction'
+      hookType: fields.hook_type || 'speaking',
     };
   } catch(e) {
     console.log('[Hook Pool] Check error: ' + e.message);
@@ -541,19 +593,19 @@ async function markPoolUsed(recordId, usedByRunId) {
   }
 }
 
-// ─── End helpers ───
+// â”€â”€â”€ End helpers â”€â”€â”€
 
 const production = $('Prepare Production').first().json;
 const hookType = production.effectiveHookType || production.hookType;
 const chatId = production.chatId;
 const scenarioName = production.scenarioName;
-const timeOfDay = production.timeOfDay || 'day'; // 'night' | 'day' — from /produce command
+const timeOfDay = production.timeOfDay || 'day'; // 'night' | 'day' â€” from /produce command
 
-// ═══════════════════════════════════════
-// DEBUG MODE — skip AI generation, return dummy image instantly
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// DEBUG MODE â€” skip AI generation, return dummy image instantly
 // Set to true for fast testing of approval flow, false for production
-// ═══════════════════════════════════════
-const DEBUG_FAST = false;  // ← SET TO true FOR FAST TESTING
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+const DEBUG_FAST = false;  // â†? SET TO true FOR FAST TESTING
 if (DEBUG_FAST && hookType !== 'manual_clip') {
   // Generate a 200x200 debug PNG (Telegram rejects tiny images)
   const zlib = require('zlib');
@@ -604,9 +656,9 @@ if (DEBUG_FAST && hookType !== 'manual_clip') {
   }];
 }
 
-// ═══════════════════════════════════════
-// MANUAL CLIP — already uploaded via #hook
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// MANUAL CLIP â€” already uploaded via #hook
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 if (hookType === 'manual_clip') {
   if (!production.hookClipFileId) {
     return [{ json: { error: true, chatId, message: '\u274C No hook clip uploaded. Send: #hook ' + scenarioName + ' + video' } }];
@@ -623,10 +675,10 @@ if (hookType === 'manual_clip') {
   }];
 }
 
-// ═══════════════════════════════════════
-// AI SINGLE IMAGE — ai_image OR ai_single_girl
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// AI SINGLE IMAGE â€” ai_image OR ai_single_girl
 // Extracts env frame from first body clip, generates girl in that environment
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 if (hookType === 'ai_image' || hookType === 'ai_single_girl') {
   if (!KIE_API_KEY && !FAL_KEY) {
     return [{ json: { error: true, chatId, message: 'No image gen API key configured' } }];
@@ -637,7 +689,7 @@ if (hookType === 'ai_image' || hookType === 'ai_single_girl') {
     return [{ json: { error: true, chatId, message: 'No girl_ref_url configured on concept.' } }];
   }
 
-  // Pose/style reference — text description (image refs cause kie.ai 422 from catbox.moe)
+  // Pose/style reference â€” text description (image refs cause kie.ai 422 from catbox.moe)
   const poseCategory = selectPoseCategory(production);
   const poseDesc = getPoseDescription(poseCategory, hookType);
 
@@ -700,9 +752,9 @@ if (hookType === 'ai_image' || hookType === 'ai_single_girl') {
   }
 }
 
-// ═══════════════════════════════════════
-// AI MULTI IMAGE — 3 images for before_after
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// AI MULTI IMAGE â€” 3 images for before_after
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 if (hookType === 'ai_multi_image') {
   if (!KIE_API_KEY && !FAL_KEY) {
     return [{ json: { error: true, chatId, message: 'No image gen API key configured' } }];
@@ -710,7 +762,7 @@ if (hookType === 'ai_multi_image') {
 
   const girlRefUrl = production.phoneGirlRefUrl || production.girlRefUrl || '';
 
-  // Pose/style reference — text description (same for all 3 scenes for consistency)
+  // Pose/style reference â€” text description (same for all 3 scenes for consistency)
   const poseCategory = selectPoseCategory(production);
   const poseDesc = getPoseDescription(poseCategory, hookType);
 
@@ -781,9 +833,9 @@ if (hookType === 'ai_multi_image') {
   }
 }
 
-// ═══════════════════════════════════════
-// CHAT SCREENSHOT — Puppeteer screenshot of the chat conversation
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// CHAT SCREENSHOT â€” Puppeteer screenshot of the chat conversation
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 if (hookType === 'chat_screenshot') {
   const scenarioJson = production.scenarioJson;
   if (!scenarioJson || !scenarioJson.chat) {
@@ -836,130 +888,135 @@ if (hookType === 'chat_screenshot') {
   }
 }
 
-// ═══════════════════════════════════════
-// HOOK POOL CHECK — instant hook from pre-generated pool (no AI calls needed)
-// V3: clips are pre-trimmed 3s with baked ElevenLabs VO audio. No FFmpeg needed.
-// Query by scenario_id (each clip is linked to a specific scenario's hookText).
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// HOOK POOL CHECK â€” instant hook from pre-generated pool (no AI calls needed)
+// V4: Pool clips have baked Sora 2 audio (speaking). Each clip = 1 record with
+// source_video_url + clip_start_sec + clip_duration_sec. FFmpeg trims on pickup.
+// Query by concept_id + phone_id (clips are generic per concept, not per scenario).
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 if (hookType === 'reaction' || hookType === 'speaking') {
   const scenarioRecordId = production.scenarioRecordId || '';
 
-  if (scenarioRecordId) {
-    const poolResult = await checkHookPool(scenarioRecordId, production.phoneId || '', production.conceptId || '');
-    if (poolResult) {
-      console.log('[Hook Pool] Found pre-generated clip for scenario ' + scenarioRecordId + ': ' + poolResult.recordId);
+  const poolResult = await checkHookPool(scenarioRecordId, production.phoneId || '', production.conceptId || '', timeOfDay);
+  if (poolResult) {
+    console.log('[Hook Pool] Found clip: ' + poolResult.recordId + ' (text: "' + (poolResult.hookText || '').slice(0, 40) + '...")');
 
-      try {
-        // Download 3s clip directly (already trimmed)
-        // Speaking clips have audio baked in; reaction clips are silent
+    try {
+      let videoBuffer;
+
+      if (poolResult.sourceVideoUrl && poolResult.clipStartSec !== undefined) {
+        // New format: download 15s source video, FFmpeg trim to segment
+        console.log('[Hook Pool] Trimming from source video: start=' + poolResult.clipStartSec + 's, duration=' + poolResult.clipDurationSec + 's');
+        const vidRes = await fetch(poolResult.sourceVideoUrl);
+        if (!vidRes.ok) throw new Error('Source video download failed: ' + vidRes.status);
+        const fullBuffer = Buffer.from(await vidRes.arrayBuffer());
+
+        const tmpDir = '/tmp/hookpool_' + Date.now();
+        fs.mkdirSync(tmpDir, { recursive: true });
+        const srcPath = tmpDir + '/source.mp4';
+        const outPath = tmpDir + '/clip.mp4';
+        fs.writeFileSync(srcPath, fullBuffer);
+
+        // Trim with audio (speaking hooks have baked Sora 2 speech)
+        execSync('ffmpeg -y -ss ' + poolResult.clipStartSec + ' -t ' + poolResult.clipDurationSec +
+          ' -i "' + srcPath + '" -c:v libx264 -c:a aac -preset ultrafast "' + outPath + '"', { timeout: 30000 });
+
+        videoBuffer = fs.readFileSync(outPath);
+
+        // Cleanup
+        try { fs.rmSync(tmpDir, { recursive: true }); } catch(e) {}
+      } else if (poolResult.videoUrl) {
+        // Legacy format: pre-trimmed clip attachment
         const vidRes = await fetch(poolResult.videoUrl);
         if (!vidRes.ok) throw new Error('Video download failed: ' + vidRes.status);
-        const videoBuffer = Buffer.from(await vidRes.arrayBuffer());
-
-        // Determine hookSource based on pool clip's hook_type
-        // 'pool' = speaking (has baked audio) → VO skipped, assemble uses embedded audio
-        // 'pool_reaction' = reaction (silent) → VO still needed, assemble overlays VO
-        const poolHookSource = poolResult.hookType === 'speaking' ? 'pool' : 'pool_reaction';
-
-        // Mark clip as used
-        const runRecordId = (() => { try { return $('Create Video Run').first().json.id; } catch(e) { return 'unknown'; } })();
-        await markPoolUsed(poolResult.recordId, runRecordId);
-
-        // Auto-approve hook in Video Run (skip Telegram approval flow)
-        const ATOKEN_POOL = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
-        if (ATOKEN_POOL && runRecordId !== 'unknown') {
-          try {
-            await fetch('https://api.airtable.com/v0/appsgjIdkpak2kaXq/tbltCYcVXrLYvyIJL/' + runRecordId, {
-              method: 'PATCH',
-              headers: { 'Authorization': 'Bearer ' + ATOKEN_POOL, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fields: { hook_approval: 'approved', hook_vid_approval: 'approved' } }),
-            });
-          } catch(e) { /* non-fatal */ }
-        }
-
-        // Notify user
-        const poolLabel = poolResult.hookType === 'speaking' ? '(speaking, audio baked)' : '(reaction, silent)';
-        if (TELEGRAM_BOT_TOKEN && chatId) {
-          try {
-            await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chat_id: chatId, text: '\u26A1 Hook from pool ' + poolLabel + ' \u2014 instant, no AI wait!' }),
-            });
-          } catch(e) { /* non-fatal */ }
-        }
-
-        return [{
-          json: {
-            hookReady: true,
-            hookSource: poolHookSource,
-            hookPoolRecordId: poolResult.recordId,
-            hookImageUrl: poolResult.sourceImageUrl,
-            chatId,
-            scenarioName,
-          },
-          binary: {
-            hookVideo: {
-              data: videoBuffer.toString('base64'),
-              mimeType: 'video/mp4',
-              fileName: 'hook_pool.mp4',
-            }
-          }
-        }];
-      } catch (poolErr) {
-        console.log('[Hook Pool] Error consuming pool hook: ' + poolErr.message + ' \u2014 falling through to normal generation');
+        videoBuffer = Buffer.from(await vidRes.arrayBuffer());
+      } else {
+        throw new Error('No video source available');
       }
-    } else {
-      console.log('[Hook Pool] No pool clip for scenario ' + scenarioRecordId + ' \u2014 generating on-demand');
+
+      // All pool clips are speaking (audio baked by Sora 2)
+      const poolHookSource = poolResult.hookType === 'speaking' ? 'pool' : 'pool_reaction';
+
+      // Mark clip as used
+      const runRecordId = (() => { try { return $('Create Video Run').first().json.id; } catch(e) { return 'unknown'; } })();
+      await markPoolUsed(poolResult.recordId, runRecordId);
+
+      // Auto-approve hook in Video Run (skip Telegram approval flow)
+      const ATOKEN_POOL = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
+      if (ATOKEN_POOL && runRecordId !== 'unknown') {
+        try {
+          await fetch('https://api.airtable.com/v0/appsgjIdkpak2kaXq/tbltCYcVXrLYvyIJL/' + runRecordId, {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + ATOKEN_POOL, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: { hook_approval: 'approved', hook_vid_approval: 'approved' } }),
+          });
+        } catch(e) { /* non-fatal */ }
+      }
+
+      // Notify user
+      const hookTextPreview = poolResult.hookText ? ': "' + poolResult.hookText.slice(0, 40) + '"' : '';
+      if (TELEGRAM_BOT_TOKEN && chatId) {
+        try {
+          await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: '\u26A1 Hook from pool (speaking, audio baked)' + hookTextPreview + ' \u2014 instant!' }),
+          });
+        } catch(e) { /* non-fatal */ }
+      }
+
+      return [{
+        json: {
+          hookReady: true,
+          hookSource: poolHookSource,
+          hookPoolRecordId: poolResult.recordId,
+          hookImageUrl: poolResult.sourceImageUrl,
+          hookText: poolResult.hookText,
+          chatId,
+          scenarioName,
+        },
+        binary: {
+          hookVideo: {
+            data: videoBuffer.toString('base64'),
+            mimeType: 'video/mp4',
+            fileName: 'hook_pool.mp4',
+          }
+        }
+      }];
+    } catch (poolErr) {
+      console.log('[Hook Pool] Error consuming pool hook: ' + poolErr.message + ' \u2014 falling through to normal generation');
     }
+  } else {
+    console.log('[Hook Pool] No pool clip available \u2014 generating on-demand');
   }
-  // No pool available or pool error → fall through to normal on-demand generation below
+  // No pool available or pool error -> fall through to normal on-demand generation below
 }
 
-// ═══════════════════════════════════════
-// SPEAKING HOOK — Step 1: Generate original image with fal.ai
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// SPEAKING HOOK â€” Step 1: Generate original image with fal.ai
 // Image gets approved on Telegram, then Img2Vid node converts via Sora 2 (speaking)
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 if (hookType === 'speaking') {
   if (!KIE_API_KEY && !FAL_KEY) {
-    return [{ json: { error: true, chatId, message: '❌ No image gen API key configured' } }];
+    return [{ json: { error: true, chatId, message: 'â?Œ No image gen API key configured' } }];
   }
 
   const girlRefUrl = production.phoneGirlRefUrl || production.girlRefUrl || '';
   if (!girlRefUrl) {
-    return [{ json: { error: true, chatId, message: '❌ No girl_ref_url configured on concept.' } }];
+    return [{ json: { error: true, chatId, message: 'â?Œ No girl_ref_url configured on concept.' } }];
   }
 
-  // Pose/style reference — selfie energy (direct eye contact, slight lean toward camera)
-  const poseCategory = selectPoseCategory(production);
-  const poseDesc = getPoseDescription(poseCategory, 'speaking');
+  // Pose reference image â€” random from pool
+  const poseRefUrl = randomPoseUrl();
 
   try {
     let imagePrompt = production.hookImagePrompt || '';
     if (!imagePrompt || imagePrompt.length < 10) {
-      // Lipsync hook = casual iPhone SELFIE, close-up face, direct camera gaze
-      const selfieScenes = [
-        'iPhone 13 Pro selfie of a girl lying in bed, close-up face from slightly above, direct eye contact with camera, natural room lighting',
-        'iPhone 13 Pro selfie of a girl on the couch, close-up face, straight on, direct camera gaze, natural indoor lighting',
-        'iPhone 13 Pro selfie of a girl lying on pillows, close-up face from slightly above, slight lean toward camera, neutral lighting',
-        'iPhone 13 Pro selfie of a girl sitting at her desk, close-up face, subtle laptop glow, looking directly into camera',
-      ];
-      const scene = selfieScenes[Math.floor(Math.random() * selfieScenes.length)];
-      imagePrompt = scene + ', ' + poseDesc + ', taken by herself, realistic candid photo, 9:16 vertical';
-    } else {
-      imagePrompt = imagePrompt + ', ' + poseDesc;
+      imagePrompt = 'POV selfie on an iPhone 13 Pro of the girl from the FIRST REFERENCE IMAGE in a similar position as the girl from the SECOND REFERENCE IMAGE, she has a natural frustrated expression, no revealing clothing, no cleavage, no exposed midriff, close-up face from slightly above, direct eye contact with camera, taken by herself, realistic candid photo, 9:16 vertical';
     }
 
-    // Context anchor phrase — always appended, anchors the scene narratively
-    const contextAnchors = [
-      'after reading a shocking message',
-      'right after seeing the text',
-      'in the moment she realizes what it says',
-    ];
-    imagePrompt = imagePrompt + ', ' + contextAnchors[Math.floor(Math.random() * contextAnchors.length)];
-
-    // Image references: girl face ref only
-    const imageRefs = [girlRefUrl];
+    // Image references: [girl face ref, pose ref]
+    const imageRefs = [girlRefUrl, poseRefUrl];
 
     const generatedImageUrl = await withRetry(async () => {
       const url = await generateImage(imagePrompt, imageRefs, { timeOfDay, isSelfie: true });
@@ -972,13 +1029,12 @@ if (hookType === 'speaking') {
 
     return [{
       json: {
-        hookReady: false, // needs Telegram approval → then Img2Vid (Sora 2)
+        hookReady: false, // needs Telegram approval â†’ then Img2Vid (Sora 2)
         hookSource: 'speaking',
         hookImageUrl: generatedImageUrl,
         hookPromptUsed: imagePrompt,
         hookPromptSource: 'fal_ai',
-        hookPoseCategory: poseCategory,
-        hookPoseDesc: poseDesc,
+        hookPoseRefUrl: poseRefUrl,
         envFrameUsed: false,
         chatId,
         scenarioName,
@@ -1000,57 +1056,37 @@ if (hookType === 'speaking') {
         hookError: err.message,
         chatId,
         scenarioName,
-        warning: '⚠️ Speaking hook image failed: ' + err.message + '. Skipping hook.',
+        warning: 'âš ï¸? Speaking hook image failed: ' + err.message + '. Skipping hook.',
       }
     }];
   }
 }
 
-// ═══════════════════════════════════════
-// REACTION HOOK — Step 1: Generate original image with fal.ai
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// REACTION HOOK â€” Step 1: Generate original image with fal.ai
 // Image gets approved on Telegram, then Img2Vid node converts via Sora 2 (reaction)
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 if (hookType === 'reaction') {
   if (!KIE_API_KEY && !FAL_KEY) {
-    return [{ json: { error: true, chatId, message: '❌ No image gen API key configured' } }];
+    return [{ json: { error: true, chatId, message: 'â?Œ No image gen API key configured' } }];
   }
 
   const girlRefUrl = production.phoneGirlRefUrl || production.girlRefUrl || '';
   if (!girlRefUrl) {
-    return [{ json: { error: true, chatId, message: '❌ No girl_ref_url configured on concept.' } }];
+    return [{ json: { error: true, chatId, message: 'â?Œ No girl_ref_url configured on concept.' } }];
   }
 
-  // Pose/style reference — candid energy (eyes slightly off-camera, internal reaction)
-  const poseCategory = selectPoseCategory(production);
-  const poseDesc = getPoseDescription(poseCategory, 'reaction');
+  // Pose reference image â€” random from pool
+  const poseRefUrl = randomPoseUrl();
 
   try {
     let imagePrompt = production.hookImagePrompt || '';
     if (!imagePrompt || imagePrompt.length < 10) {
-      // Motion hook = candid photo, side/45-degree angle, NOT a selfie — no wide shots
-      const candidScenes = [
-        'Candid iPhone 13 Pro photo of a girl sitting on bed, side angle, phone held up after reading a message, screen not visible, mid shot',
-        'Candid photo of a girl on the couch, 45 degree angle, leaning slightly forward over her phone, screen not visible',
-        'Candid iPhone 13 Pro photo of a girl sitting on the floor against the wall, side profile angle, phone light on her face, screen not visible',
-        'Candid iPhone 13 Pro photo of a girl sitting cross-legged on bed, shot from the side, phone just lowered after reading, screen not visible',
-        'Candid photo of a girl lying sideways on couch, 45 degree shot from front, phone in hand, just finished reading, screen not visible, dim room',
-      ];
-      const scene = candidScenes[Math.floor(Math.random() * candidScenes.length)];
-      imagePrompt = scene + ', ' + poseDesc + ', not a selfie, photo taken by someone else, realistic, natural indoor lighting, 9:16 vertical';
-    } else {
-      imagePrompt = imagePrompt + ', ' + poseDesc;
+      imagePrompt = 'Candid iPhone 13 Pro photo taken by someone nearby of the girl from the FIRST REFERENCE IMAGE in a similar body pose as the girl from the SECOND REFERENCE IMAGE, but NOT a selfie, shot from a third-person side angle as if someone else took the photo, she has a natural concerned expression, no revealing clothing, no cleavage, no exposed midriff, looking at her phone screen, realistic candid photo, 9:16 vertical';
     }
 
-    // Context anchor phrase — always appended, anchors the scene narratively
-    const contextAnchors = [
-      'after reading a shocking message',
-      'right after seeing the text',
-      'in the moment she realizes what it says',
-    ];
-    imagePrompt = imagePrompt + ', ' + contextAnchors[Math.floor(Math.random() * contextAnchors.length)];
-
-    // Image references: girl face ref only
-    const imageRefs = [girlRefUrl];
+    // Image references: [girl face ref, pose ref]
+    const imageRefs = [girlRefUrl, poseRefUrl];
 
     const generatedImageUrl = await withRetry(async () => {
       const url = await generateImage(imagePrompt, imageRefs, { timeOfDay });
@@ -1063,13 +1099,12 @@ if (hookType === 'reaction') {
 
     return [{
       json: {
-        hookReady: false, // needs Telegram approval → then Img2Vid (Seedance)
+        hookReady: false, // needs Telegram approval â†’ then Img2Vid (Sora 2)
         hookSource: 'reaction',
         hookImageUrl: generatedImageUrl,
         hookPromptUsed: imagePrompt,
         hookPromptSource: 'fal_ai',
-        hookPoseCategory: poseCategory,
-        hookPoseDesc: poseDesc,
+        hookPoseRefUrl: poseRefUrl,
         envFrameUsed: false,
         chatId,
         scenarioName,
@@ -1091,7 +1126,7 @@ if (hookType === 'reaction') {
         hookError: err.message,
         chatId,
         scenarioName,
-        warning: '⚠️ Reaction hook image failed: ' + err.message + '. Skipping hook.',
+        warning: 'âš ï¸? Reaction hook image failed: ' + err.message + '. Skipping hook.',
       }
     }];
   }

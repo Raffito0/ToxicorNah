@@ -3,11 +3,11 @@
 // to Airtable Content Library for ADB software to consume.
 // Mode: Run Once for All Items
 //
-// WIRING: Send Final Video → this Code node (parallel with Update Run Complete)
+// WIRING: Send Final Video â†’ this Code node (parallel with Update Run Complete)
 // References: $('Assemble Video'), $('Prepare Production'), $('Create Video Run'),
 //             $('Find Concept'), $('Send Final Video')
 
-// ─── polyfills (n8n Code node sandbox) ───
+// â”€â”€â”€ polyfills (n8n Code node sandbox) â”€â”€â”€
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -50,7 +50,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── R2 upload via S3 API (AWS Signature V4) ───
+// â”€â”€â”€ R2 upload via S3 API (AWS Signature V4) â”€â”€â”€
 function hmac(key, data, encoding) {
   return crypto.createHmac('sha256', key).update(data).digest(encoding);
 }
@@ -117,7 +117,7 @@ function uploadToR2(bucket, key, bodyBuffer, contentType) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve({ ok: true, status: res.statusCode });
         } else {
-          reject(new Error('R2 upload failed: HTTP ' + res.statusCode + ' — ' + Buffer.concat(chunks).toString().slice(0, 200)));
+          reject(new Error('R2 upload failed: HTTP ' + res.statusCode + ' â€” ' + Buffer.concat(chunks).toString().slice(0, 200)));
         }
       });
     });
@@ -127,7 +127,7 @@ function uploadToR2(bucket, key, bodyBuffer, contentType) {
   });
 }
 
-// ─── main ───
+// â”€â”€â”€ main â”€â”€â”€
 const ATOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
 const BOT_TOKEN = (typeof $env !== 'undefined' && $env.TELEGRAM_BOT_TOKEN) || '';
 const ABASE = 'https://api.airtable.com/v0/appsgjIdkpak2kaXq';
@@ -153,10 +153,12 @@ try {
   let conceptRecordId = '';
   try { conceptRecordId = $('Find Concept').first().json.id || ''; } catch (e) {}
 
-  // Download video from Telegram → upload to R2 → permanent URL
+  // Download video from Telegram â†’ upload to R2 â†’ permanent URL
   let videoPublicUrl = '';
   try {
-    const tgResult = $('Send Final Video').first().json;
+    const tgRaw = $('Send Final Video').first().json;
+    // Telegram node may wrap response in { ok, result } or return result directly
+    const tgResult = tgRaw.result || tgRaw;
     const fileId = (tgResult.video || tgResult.document || tgResult.animation || {}).file_id;
     if (fileId && BOT_TOKEN) {
       const gfRes = await fetch(
@@ -187,8 +189,9 @@ try {
     console.log('[ContentLib] R2 upload failed: ' + e.message);
     // Fallback: try Telegram URL directly (may expire)
     try {
-      const tgResult = $('Send Final Video').first().json;
-      const fileId = (tgResult.video || tgResult.document || tgResult.animation || {}).file_id;
+      const tgRaw2 = $('Send Final Video').first().json;
+      const tgResult2 = tgRaw2.result || tgRaw2;
+      const fileId = (tgResult2.video || tgResult2.document || tgResult2.animation || {}).file_id;
       if (fileId && BOT_TOKEN) {
         const gfRes = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + fileId);
         const gfData = await gfRes.json();
@@ -201,7 +204,7 @@ try {
   }
 
   if (!ATOKEN) {
-    console.log('[ContentLib] No AIRTABLE_API_KEY — skipping');
+    console.log('[ContentLib] No AIRTABLE_API_KEY â€” skipping');
     return [{ json: { success: false, error: 'no_api_key' } }];
   }
 

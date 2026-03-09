@@ -2,13 +2,13 @@
 // Sends each VO segment as a separate audio message with individual Approve/Redo buttons.
 // Saves audio files to /tmp/toxicornah_vo/{recordId}/ for later use by Download Assets.
 // Writes vo_segments_json to Airtable for callback handler to use on redo.
-// When ALL segments approved (via callback handler), vo_approval → "approved" → pipeline continues.
+// When ALL segments approved (via callback handler), vo_approval â†’ "approved" â†’ pipeline continues.
 // Mode: Run Once for All Items
 
 const fs = require('fs');
 const path = require('path');
 
-// ─── fetch polyfill ───
+// â”€â”€â”€ fetch polyfill â”€â”€â”€
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -53,7 +53,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── Multipart upload helper for Telegram sendAudio with inline_keyboard ───
+// â”€â”€â”€ Multipart upload helper for Telegram sendAudio with inline_keyboard â”€â”€â”€
 function sendTelegramAudio(botToken, chatId, audioBuffer, filename, caption, replyMarkup) {
   return new Promise((resolve, reject) => {
     const boundary = '----FormBoundary' + Date.now() + Math.random().toString(36).slice(2);
@@ -122,7 +122,7 @@ const sectionLabels = {
   'outro': '\uD83D\uDC4B Outro',
 };
 
-// ─── Save VO files to disk for later use ───
+// â”€â”€â”€ Save VO files to disk for later use â”€â”€â”€
 const voDir = '/tmp/toxicornah_vo/' + recordId;
 if (!fs.existsSync(voDir)) {
   fs.mkdirSync(voDir, { recursive: true });
@@ -135,7 +135,7 @@ const segmentsData = [];
 let sentCount = 0;
 for (const seg of voSegments) {
   if (!seg.hasAudio) {
-    // No audio for this section — track but skip sending
+    // No audio for this section â€” track but skip sending
     segmentsData.push({
       index: seg.index,
       section: seg.section,
@@ -200,7 +200,7 @@ for (const seg of voSegments) {
   }
 }
 
-// ─── Write vo_segments_json to Airtable ───
+// â”€â”€â”€ Write vo_segments_json to Airtable â”€â”€â”€
 if (AIRTABLE_TOKEN && recordId && recordId !== 'unknown') {
   try {
     await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + VIDEO_RUNS_TABLE + '/' + recordId, {

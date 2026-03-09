@@ -1,19 +1,19 @@
-// NODE: Image to Video (kie.ai primary + PoYo secondary — escalating dual-provider)
+// NODE: Image to Video (kie.ai primary + PoYo secondary â€” escalating dual-provider)
 // Converts an approved hook/outro image into an animated video clip.
 // Three paths:
-//   1. outro + speaking → Kling Avatar V2 via fal.ai (native lipsync, no FFmpeg overlay)
-//   2. hook + speaking → escalatingGenerate (kie.ai primary, PoYo after 3 min)
-//   3. reaction → escalatingGenerate motion (kie.ai primary, PoYo after 3 min)
+//   1. outro + speaking â†’ Kling Avatar V2 via fal.ai (native lipsync, no FFmpeg overlay)
+//   2. hook + speaking â†’ escalatingGenerate (kie.ai primary, PoYo after 3 min)
+//   3. reaction â†’ escalatingGenerate motion (kie.ai primary, PoYo after 3 min)
 // Self-healing: on failure, returns the original image as fallback (FFmpeg will loop).
 // Mode: Run Once for All Items
 //
-// WIRING: After hook/outro image approved → this Code node → Send Video Preview (Telegram)
+// WIRING: After hook/outro image approved â†’ this Code node â†’ Send Video Preview (Telegram)
 
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// â”€â”€â”€ fetch polyfill (n8n Code node sandbox lacks global fetch) â”€â”€â”€
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -62,7 +62,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── Multipart video upload helper for Telegram sendVideo ───
+// â”€â”€â”€ Multipart video upload helper for Telegram sendVideo â”€â”€â”€
 function sendTelegramVideo(botToken, chatId, videoBuffer, filename, caption, replyMarkup) {
   return new Promise((resolve, reject) => {
     const boundary = '----FormBoundary' + Date.now() + Math.random().toString(36).slice(2);
@@ -102,7 +102,7 @@ function sendTelegramVideo(botToken, chatId, videoBuffer, filename, caption, rep
   });
 }
 
-// ─── Temp image upload (0x0.st — no API key, widely accessible by AI APIs) ───
+// â”€â”€â”€ Temp image upload (0x0.st â€” no API key, widely accessible by AI APIs) â”€â”€â”€
 function uploadToTempHost(buffer, filename, mimeType = 'image/png') {
   return new Promise((resolve, reject) => {
     const boundary = '----FormBoundary' + Date.now();
@@ -138,7 +138,7 @@ function uploadToTempHost(buffer, filename, mimeType = 'image/png') {
   });
 }
 
-// ─── fal.ai shared polling helper ───
+// â”€â”€â”€ fal.ai shared polling helper â”€â”€â”€
 async function falSubmitAndPoll(falKey, endpoint, payload, timeoutMs = 600000) {
   const FAL_BASE = 'https://queue.fal.run';
 
@@ -193,12 +193,12 @@ async function falSubmitAndPoll(falKey, endpoint, payload, timeoutMs = 600000) {
   throw new Error('fal.ai timeout (' + (timeoutMs / 60000) + ' min)');
 }
 
-// ─── Config ───
+// â”€â”€â”€ Config â”€â”€â”€
 const DEFAULT_PROMPTS = {
   hook: 'locked off tripod shot, static camera, zero camera movement, girl eyes fixed on phone screen, shakes head slightly, concerned expression, subtle facial movement only, not typing on phone, no tears',
   outro: 'locked off tripod shot, static camera, zero camera movement, girl looking at camera, gentle expression change, subtle movement, not typing on phone, no tears',
 };
-// ─── Escalating Dual-Provider: kie.ai (primary) + PoYo (secondary) ───
+// â”€â”€â”€ Escalating Dual-Provider: kie.ai (primary) + PoYo (secondary) â”€â”€â”€
 // Submit to kie.ai first. If still generating after 3 min, also submit to PoYo.
 // If kie.ai fails mid-generation, instantly escalate to PoYo.
 // First provider to complete wins. Minimizes double-pay risk.
@@ -207,7 +207,7 @@ const POYO_KEY = (typeof $env !== 'undefined' && $env.POYO_API_KEY) || 'sk-vJqqG
 const ESCALATE_AFTER_MS = 3 * 60 * 1000;    // 3 min before firing secondary
 const PROVIDER_TIMEOUT_MS = 12 * 60 * 1000; // 12 min total timeout
 
-// ── kie.ai Sora 2 submit ──
+// â”€â”€ kie.ai Sora 2 submit â”€â”€
 async function kieVideoSubmit(imageUrl, prompt) {
   const body = {
     model: 'sora-2',
@@ -234,7 +234,7 @@ async function kieVideoSubmit(imageUrl, prompt) {
   return data.data.taskId;
 }
 
-// ── kie.ai single poll (non-blocking) ──
+// â”€â”€ kie.ai single poll (non-blocking) â”€â”€
 async function kieVideoPollOnce(taskId) {
   try {
     const res = await fetch('https://api.kie.ai/api/v1/jobs/recordInfo?taskId=' + taskId, {
@@ -256,11 +256,11 @@ async function kieVideoPollOnce(taskId) {
     }
     return { status: 'generating' };
   } catch(e) {
-    return { status: 'generating' }; // network blip — keep polling
+    return { status: 'generating' }; // network blip â€” keep polling
   }
 }
 
-// ── PoYo submit ──
+// â”€â”€ PoYo submit â”€â”€
 async function poyoSubmit(imageUrl, prompt) {
   const input = { prompt: prompt, duration: 15, aspect_ratio: '9:16' };
   if (imageUrl) input.image_url = imageUrl;
@@ -280,7 +280,7 @@ async function poyoSubmit(imageUrl, prompt) {
   return data.data.task_id;
 }
 
-// ── PoYo single poll (non-blocking) ──
+// â”€â”€ PoYo single poll (non-blocking) â”€â”€
 async function poyoPollOnce(taskId) {
   try {
     const res = await fetch('https://api.poyo.ai/api/generate/status/' + taskId, {
@@ -297,12 +297,12 @@ async function poyoPollOnce(taskId) {
     if (st === 'failed') return { status: 'failed', error: 'PoYo task failed' };
     return { status: 'generating' };
   } catch(e) {
-    return { status: 'generating' }; // network blip — keep polling
+    return { status: 'generating' }; // network blip â€” keep polling
   }
 }
 
-// ── Escalating orchestrator ──
-// Primary (kie.ai) → after 3 min or failure → also Secondary (PoYo) → first wins
+// â”€â”€ Escalating orchestrator â”€â”€
+// Primary (kie.ai) â†’ after 3 min or failure â†’ also Secondary (PoYo) â†’ first wins
 async function escalatingGenerate(imageUrl, prompt) {
   const POLL_INTERVAL = 5000;
   const TBOT = (typeof $env !== 'undefined' && $env.TELEGRAM_BOT_TOKEN) || '';
@@ -333,7 +333,7 @@ async function escalatingGenerate(imageUrl, prompt) {
   var poyoTaskId = null;
   if (!kieTaskId) {
     try {
-      console.log('[escalate] kie.ai refused — trying PoYo immediately...');
+      console.log('[escalate] kie.ai refused â€” trying PoYo immediately...');
       poyoTaskId = await poyoSubmit(imageUrl, prompt);
       console.log('[escalate] PoYo accepted, taskId: ' + poyoTaskId);
     } catch(e) {
@@ -354,8 +354,8 @@ async function escalatingGenerate(imageUrl, prompt) {
     // Escalation trigger: if kie.ai still running after 3 min, fire PoYo
     if (kieTaskId && !poyoTaskId && !poyoEscalated && elapsed >= ESCALATE_AFTER_MS) {
       poyoEscalated = true;
-      console.log('[escalate] 3 min elapsed — escalating to PoYo...');
-      await notifyTg('Video generation still in progress — escalating to backup provider...');
+      console.log('[escalate] 3 min elapsed â€” escalating to PoYo...');
+      await notifyTg('Video generation still in progress â€” escalating to backup provider...');
       try {
         poyoTaskId = await poyoSubmit(imageUrl, prompt);
         console.log('[escalate] PoYo escalation accepted, taskId: ' + poyoTaskId);
@@ -377,7 +377,7 @@ async function escalatingGenerate(imageUrl, prompt) {
         // Instantly escalate to PoYo on kie.ai failure
         if (!poyoTaskId && !poyoEscalated) {
           poyoEscalated = true;
-          console.log('[escalate] kie.ai failed — escalating to PoYo now...');
+          console.log('[escalate] kie.ai failed â€” escalating to PoYo now...');
           try {
             poyoTaskId = await poyoSubmit(imageUrl, prompt);
             console.log('[escalate] PoYo emergency accepted: ' + poyoTaskId);
@@ -422,9 +422,9 @@ function stripVoTags(text) {
   return text.replace(/\[(gasps?|sighs?|laughs?|whispers?|sarcastic|frustrated|curious|excited)\]/gi, '').replace(/\s{2,}/g, ' ').trim();
 }
 
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 // Main logic
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 
 const input = $input.first().json;
 const inputBinary = $input.first().binary || {};
@@ -452,12 +452,12 @@ const sourceType = (() => {
   }
 })();
 
-// ─── Pool passthrough: hook was already consumed from Hook Pool in Generate Hook ───
+// â”€â”€â”€ Pool passthrough: hook was already consumed from Hook Pool in Generate Hook â”€â”€â”€
 // Both 'pool' (speaking, has audio) and 'pool_reaction' (silent) skip Sora 2
 if (sourceType === 'pool' || sourceType === 'pool_reaction') {
-  // hookVideo binary was already output by Generate Hook — this node is a no-op.
+  // hookVideo binary was already output by Generate Hook â€” this node is a no-op.
   // Download Assets will find hookVideo in Generate Hook's binary output.
-  console.log('[Img2Vid] Pool hook (' + sourceType + ') — passthrough (no Sora 2 needed)');
+  console.log('[Img2Vid] Pool hook (' + sourceType + ') â€” passthrough (no Sora 2 needed)');
   return [{
     json: {
       success: true,
@@ -471,9 +471,9 @@ if (sourceType === 'pool' || sourceType === 'pool_reaction') {
 
 const FAL_KEY = (typeof $env !== 'undefined' && $env.FAL_KEY) || '1f90e772-6c27-4772-9c31-9fb0efd2ccb7:e1ae20a74cf0ad9a5be03baefd1603e0';
 
-// ═══════════════════════════════════════
-// DEBUG MODE — skip API calls, generate dummy video via FFmpeg
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// DEBUG MODE â€” skip API calls, generate dummy video via FFmpeg
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 const DEBUG_FAST = false;  // SET TO true FOR FAST TESTING
 if (DEBUG_FAST) {
   const debugPath = '/tmp/debug_' + assetType + '_vid_' + Date.now() + '.mp4';
@@ -500,9 +500,9 @@ if (DEBUG_FAST) {
   }];
 }
 
-// ═══════════════════════════════════════
-// KLING AVATAR V2 — OUTRO LIPSYNC (native audio baked in, no FFmpeg overlay)
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// KLING AVATAR V2 â€” OUTRO LIPSYNC (native audio baked in, no FFmpeg overlay)
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 const FAL_AVATAR_ENDPOINT = 'fal-ai/kling-video/ai-avatar/v2/standard';
 
 if (assetType === 'outro' && sourceType === 'speaking') {
@@ -550,7 +550,7 @@ if (assetType === 'outro' && sourceType === 'speaking') {
 
       console.log('[Kling Avatar V2] Video URL: ' + klingVideoUrl);
 
-      // Download video — audio is baked in by Kling, no FFmpeg overlay needed
+      // Download video â€” audio is baked in by Kling, no FFmpeg overlay needed
       const vidRes = await fetch(klingVideoUrl);
       if (!vidRes.ok) throw new Error('Kling video download failed: ' + vidRes.status);
       const videoBuffer = Buffer.from(await vidRes.arrayBuffer());
@@ -577,18 +577,18 @@ if (assetType === 'outro' && sourceType === 'speaking') {
         }
       }];
     } catch(err) {
-      console.log('[Kling Avatar V2] Failed: ' + err.message + ' — falling back to escalatingGenerate');
+      console.log('[Kling Avatar V2] Failed: ' + err.message + ' â€” falling back to escalatingGenerate');
       // Fall through to speaking block below
     }
   } else {
-    console.log('[Kling Avatar V2] Skipped — missing ' + (!outroImageUrl ? 'image' : 'audio') + ' URL, falling back to escalatingGenerate');
+    console.log('[Kling Avatar V2] Skipped â€” missing ' + (!outroImageUrl ? 'image' : 'audio') + ' URL, falling back to escalatingGenerate');
   }
   // Fall through: if Kling Avatar failed or missing audio, use speaking block as fallback
 }
 
-// ═══════════════════════════════════════
-// SPEAKING — image + VO text in prompt → video with lip movement
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// SPEAKING â€” image + VO text in prompt â†’ video with lip movement
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 if (sourceType === 'speaking') {
   // Get image URL (kie.ai URL from Generate Hook/Outro, or upload binary to temp host)
   let imageUrl = '';
@@ -619,9 +619,42 @@ if (sourceType === 'speaking') {
   const voData = (() => { try { return $('Generate VO').first().json; } catch(e) { return {}; } })();
   const audioUrl = assetType === 'hook' ? voData.voHookFileUrl : voData.voOutroFileUrl;
 
-  // Build Sora 2 prompt — include VO text so lip movements match
+  // Build Sora 2 prompt â€” use Airtable template if available, else fallback
   let sora2Prompt;
-  if (voText) {
+  const sora2Template = production.sora2SpeakingPrompt || '';
+  if (sora2Template && voText) {
+    // Split VO into 3 segments for the 3-moment template
+    const sentences = voText.match(/[^.!?]+[.!?]*/g) || [voText];
+    const thirds = [];
+    if (sentences.length >= 3) {
+      thirds.push(sentences.slice(0, Math.ceil(sentences.length / 3)).join(' ').trim());
+      thirds.push(sentences.slice(Math.ceil(sentences.length / 3), Math.ceil(sentences.length * 2 / 3)).join(' ').trim());
+      thirds.push(sentences.slice(Math.ceil(sentences.length * 2 / 3)).join(' ').trim());
+    } else {
+      thirds.push(sentences[0] || voText);
+      thirds.push(sentences[1] || '');
+      thirds.push(sentences[2] || '');
+    }
+    // Extract CAPS emphasis words and build action lines
+    const extractCaps = (t) => {
+      const words = (t || '').match(/\b[A-Z]{2,}\b/g) || [];
+      const ignore = new Set(['POV', 'DM', 'DMS', 'IG', 'OK', 'II', 'III']);
+      return words.filter(w => !ignore.has(w));
+    };
+    const buildAction = (caps) => {
+      if (caps.length === 0) return 'Slight pause for emphasis';
+      if (caps.length === 1) return 'Emphasis on "' + caps[0] + '"';
+      return 'Emphasis on "' + caps.slice(0, 2).join('" and "') + '"';
+    };
+    sora2Prompt = sora2Template;
+    for (let i = 0; i < 3; i++) {
+      const text = thirds[i] || '';
+      const capsWords = extractCaps(text);
+      const actionLine = buildAction(capsWords);
+      sora2Prompt = sora2Prompt.replace('{{SPEECH_' + (i + 1) + '}}', text);
+      sora2Prompt = sora2Prompt.replace('{{ACTION_' + (i + 1) + '}}', actionLine);
+    }
+  } else if (voText) {
     sora2Prompt = 'A young woman saying "' + voText + '" to the camera with subtle facial expressions, slight natural handheld sway, no text, no watermark, no subtitles';
   } else {
     sora2Prompt = 'A young woman speaking naturally to the camera with subtle facial expressions, slight natural handheld sway, no text, no watermark, no subtitles';
@@ -720,10 +753,10 @@ if (sourceType === 'speaking') {
   }
 }
 
-// ═══════════════════════════════════════
-// SORA 2 REACTION — image + motion prompt → video (no speech, no audio)
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// SORA 2 REACTION â€” image + motion prompt â†’ video (no speech, no audio)
 // Used for reaction sourceType AND as default fallback for any other type.
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 
 // Get image URL or binary
 let imageUrl = '';
@@ -748,7 +781,7 @@ if (!imageUrl) {
 // Get prompt from Prepare Production or default
 const production = (() => { try { return $('Prepare Production').first().json; } catch(e) { return {}; } })();
 const motionPrompt = (assetType === 'hook'
-  ? (production.hookKlingPrompt || DEFAULT_PROMPTS.hook)
+  ? (production.sora2ReactionPrompt || production.hookKlingPrompt || DEFAULT_PROMPTS.hook)
   : (production.outroKlingPrompt || DEFAULT_PROMPTS.outro));
 
 // Send status to Telegram
@@ -763,7 +796,7 @@ try {
   }
 } catch (e) { /* non-fatal */ }
 
-// 25% micro asymmetry — breaks puppet effect
+// 25% micro asymmetry â€” breaks puppet effect
 let motionPromptFinal = motionPrompt;
 if (!motionPromptFinal.includes('no text')) {
   motionPromptFinal += ', no text, no watermark, no subtitles';
@@ -782,7 +815,7 @@ try {
     throw new Error('Generated video too small (' + videoBuffer.length + ' bytes)');
   }
 
-  // ─── Sora 2 trim selection: save raw 10s, create 3 clips, let user pick ───
+  // â”€â”€â”€ Sora 2 trim selection: save raw 10s, create 3 clips, let user pick â”€â”€â”€
   // Trim options from 10s video: [0-3s] [3-6s] [6-9s]
   const TRIM_OPTS = [
     { start: 0, label: '0-3s' },
@@ -857,7 +890,7 @@ try {
     }
   }
 
-  // Poll Airtable for trim choice — no timeout, wait as long as needed (10s intervals)
+  // Poll Airtable for trim choice â€” no timeout, wait as long as needed (10s intervals)
   let chosenBuffer = null;
   let chosenLabel = '1-4s';
   if (ATOKEN && recordId !== 'unknown') {
@@ -922,7 +955,7 @@ try {
         req.write(doneBody);
         req.end();
       });
-      console.log('[trim] hook_vid_approval set to approved — downstream poll will auto-pass');
+      console.log('[trim] hook_vid_approval set to approved â€” downstream poll will auto-pass');
     } catch(e) { /* non-fatal */ }
   }
 

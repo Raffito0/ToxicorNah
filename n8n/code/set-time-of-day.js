@@ -1,13 +1,14 @@
 // NODE: Set Time of Day
 // After /done asks "day or night?", user replies /day or /night.
-// Stores timeOfDay in static data, clears active recording, outputs
-// scenario info for the Airtable update chain.
+// DAY: clears state, outputs scenario info for Airtable update.
+// NIGHT: asks LED color via inline keyboard. Callback handler completes the flow.
 // Mode: Run Once for All Items
 //
-// WIRING: Switch (set_time_of_day) → this Code node → Update Scenario Recorded
-//         (same Airtable chain as Handle Done success path)
+// WIRING: Switch (set_time_of_day) â†’ this Code node â†’
+//   IF askingLed â†’ Send LED Question (Telegram with inline keyboard)
+//   ELSE â†’ Update Scenario Recorded (Airtable chain)
 
-// Helper: "toxic-sad-happy-girl-1771197483216" → "Toxic Sad Happy Girl"
+// Helper: "toxic-sad-happy-girl-1771197483216" â†’ "Toxic Sad Happy Girl"
 function formatName(raw) {
   if (!raw) return 'Scenario';
   return raw.replace(/-\d{10,}$/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -22,7 +23,7 @@ if (!staticData.activeRecording) {
     json: {
       error: true,
       chatId: input.chatId,
-      message: '⚠️ Nessuna registrazione attiva. Manda /done prima di specificare giorno o notte.',
+      message: 'âš ï¸? Nessuna registrazione attiva. Manda /done prima di specificare giorno o notte.',
     }
   }];
 }
@@ -32,13 +33,22 @@ const scenarioName = rec.scenarioName;
 const scenarioRecordId = rec.scenarioRecordId;
 const clipCount = rec.clipCount || rec.receivedCount || 0;
 
-// Store timeOfDay for use during production (generate-hook reads this)
+if (timeOfDay === 'night') {
+  // Don't clear state yet â€” wait for LED color answer
+  staticData.activeRecording.timeOfDay = 'night';
+  return [{
+    json: {
+      askingLed: true,
+      chatId: input.chatId,
+      scenarioRecordId,
+      message: 'ðŸŒ™ Night â€” che LED hai usato?',
+    }
+  }];
+}
+
+// DAY â€” complete immediately
 staticData.activeRecordingTimeOfDay = timeOfDay;
-
-// Clear recording state — user is done
 delete staticData.activeRecording;
-
-const timeLabel = timeOfDay === 'night' ? '🌙 Night' : '☀️ Day';
 
 return [{
   json: {
@@ -47,8 +57,8 @@ return [{
     chatId: input.chatId,
     clipCount,
     timeOfDay,
-    timeLabel,
-    // Queue Next Scenario reads this message
-    message: '✅ ' + clipCount + ' clip — ' + timeLabel + ' — salvate per "' + formatName(scenarioName) + '".\n\n👉 /next quando vuoi iniziare un altro scenario.',
+    ledColor: '',
+    timeLabel: 'â˜€ï¸? Day',
+    message: 'âœ… ' + clipCount + ' clip â€” â˜€ï¸? Day â€” salvate per "' + formatName(scenarioName) + '".\n\nâ?³ Generando hook image...',
   }
 }];

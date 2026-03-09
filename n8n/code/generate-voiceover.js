@@ -6,12 +6,12 @@
 // Self-healing: retries 1x per segment, skips failed segments
 // Mode: Run Once for All Items
 //
-// WIRING: Hook Approved? → this Code node → VO Needs Approval? → Send VO Segments
+// WIRING: Hook Approved? â†’ this Code node â†’ VO Needs Approval? â†’ Send VO Segments
 
 const fs = require('fs');
 const { execSync } = require('child_process');
 
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// â”€â”€â”€ fetch polyfill (n8n Code node sandbox lacks global fetch) â”€â”€â”€
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -57,8 +57,8 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── Temp file upload with multi-host fallback ───
-// Tries 0x0.st → catbox.moe → tmpfiles.org in sequence
+// â”€â”€â”€ Temp file upload with multi-host fallback â”€â”€â”€
+// Tries 0x0.st â†’ catbox.moe â†’ tmpfiles.org in sequence
 function upload0x0(buffer, filename, mimeType) {
   return new Promise((resolve, reject) => {
     const boundary = '----FormBoundary' + Date.now();
@@ -157,7 +157,7 @@ async function uploadToTempHost(buffer, filename, mimeType = 'audio/mpeg') {
   for (const host of hosts) {
     try {
       const url = await host.fn();
-      console.log('[upload] ' + filename + ' → ' + host.name + ': ' + url);
+      console.log('[upload] ' + filename + ' â†’ ' + host.name + ': ' + url);
       return url;
     } catch (err) {
       errors.push(host.name + ': ' + err.message);
@@ -167,12 +167,12 @@ async function uploadToTempHost(buffer, filename, mimeType = 'audio/mpeg') {
   throw new Error('All upload hosts failed: ' + errors.join(' | '));
 }
 
-// ─── fal.ai key (for storage upload used by Sora 2 speaking) ───
+// â”€â”€â”€ fal.ai key (for storage upload used by Sora 2 speaking) â”€â”€â”€
 const FAL_KEY = (typeof $env !== 'undefined' && $env.FAL_KEY) || '1f90e772-6c27-4772-9c31-9fb0efd2ccb7:e1ae20a74cf0ad9a5be03baefd1603e0';
 
-// ─── fal.ai storage upload (2-step: initiate → PUT) ───
+// â”€â”€â”€ fal.ai storage upload (2-step: initiate â†’ PUT) â”€â”€â”€
 // Based on fal-ai/fal-js SDK source: libs/client/src/storage.ts
-// Step 1: POST rest.alpha.fal.ai/storage/upload/initiate → { file_url, upload_url }
+// Step 1: POST rest.alpha.fal.ai/storage/upload/initiate â†’ { file_url, upload_url }
 // Step 2: PUT binary to upload_url
 // Returns file_url (guaranteed accessible by fal.ai inference servers)
 async function uploadToFalStorage(buffer, filename, mimeType) {
@@ -207,7 +207,7 @@ async function uploadToFalStorage(buffer, filename, mimeType) {
   });
 
   if (initResult.status !== 200 || !initResult.data.upload_url) {
-    throw new Error('fal initiate HTTP ' + initResult.status + ' — ' + JSON.stringify(initResult.data).substring(0, 150));
+    throw new Error('fal initiate HTTP ' + initResult.status + ' â€” ' + JSON.stringify(initResult.data).substring(0, 150));
   }
 
   const uploadUrl = initResult.data.upload_url;
@@ -236,22 +236,22 @@ async function uploadToFalStorage(buffer, filename, mimeType) {
     req.end();
   });
 
-  console.log('[fal storage] SUCCESS → ' + fileUrl);
+  console.log('[fal storage] SUCCESS â†’ ' + fileUrl);
   return fileUrl;
 }
 
-// ─── TTS Provider Toggle ───
+// â”€â”€â”€ TTS Provider Toggle â”€â”€â”€
 // 'elevenlabs' = ElevenLabs v3 (primary)
 // 'fish'       = Fish.audio s1 (backup)
 const TTS_PROVIDER = 'elevenlabs';
 
-// ─── ElevenLabs config ───
+// â”€â”€â”€ ElevenLabs config â”€â”€â”€
 const ELEVENLABS_API_KEY = 'sk_a645bb67bdb3fecc5604c41b18588e7b1d8a35092d0c28fc';
 let ELEVENLABS_VOICE_ID = 'cIZgE1zTtJx92OFuLtNz'; // overridden by phone config below
 const ELEVENLABS_MODEL = 'eleven_v3';
 const ELEVENLABS_OUTPUT_FORMAT = 'mp3_44100_128';
 
-// ─── Fish.audio config (backup) ───
+// â”€â”€â”€ Fish.audio config (backup) â”€â”€â”€
 const FISH_API_KEY = '145c958d4b194854b82e045f103472ee';
 const REFERENCE_ID = '0b48750248ea42b68366d62bf2117edb';
 const MODEL = 's1';
@@ -259,7 +259,7 @@ const MODEL = 's1';
 const MAX_RETRIES = 1;
 const RETRY_DELAY_MS = 5000;
 
-// ─── retry helper ───
+// â”€â”€â”€ retry helper â”€â”€â”€
 async function withRetry(fn, label = 'API call') {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -271,7 +271,7 @@ async function withRetry(fn, label = 'API call') {
   }
 }
 
-// ─── Strip emojis from text (TTS engines try to vocalize them → garbage sounds) ───
+// â”€â”€â”€ Strip emojis from text (TTS engines try to vocalize them â†’ garbage sounds) â”€â”€â”€
 function stripEmojis(text) {
   return text
     .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}\u{2702}-\u{27B0}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2300}-\u{23FF}\u{2B50}\u{2B55}\u{231A}\u{231B}\u{25AA}-\u{25FE}\u{2934}-\u{2935}\u{2190}-\u{21FF}]/gu, '')
@@ -279,12 +279,12 @@ function stripEmojis(text) {
     .trim();
 }
 
-// ─── Strip ElevenLabs emotion tags (for Fish.audio which doesn't understand them) ───
+// â”€â”€â”€ Strip ElevenLabs emotion tags (for Fish.audio which doesn't understand them) â”€â”€â”€
 function stripEmotionTags(text) {
   return text.replace(/\[(gasps|sighs|laughs|whispers|sarcastic|frustrated|curious|excited)\]\s*/gi, '').trim();
 }
 
-// ─── ElevenLabs v3 TTS for a single text segment ───
+// â”€â”€â”€ ElevenLabs v3 TTS for a single text segment â”€â”€â”€
 async function elevenLabsTTS(text) {
   text = stripEmojis(text);
   const url = 'https://api.elevenlabs.io/v1/text-to-speech/' + ELEVENLABS_VOICE_ID + '?output_format=' + ELEVENLABS_OUTPUT_FORMAT;
@@ -307,7 +307,7 @@ async function elevenLabsTTS(text) {
   return Buffer.from(audioBuffer).toString('base64');
 }
 
-// ─── Fish.audio TTS for a single text segment (backup) ───
+// â”€â”€â”€ Fish.audio TTS for a single text segment (backup) â”€â”€â”€
 async function fishTTS(text) {
   text = stripEmotionTags(stripEmojis(text));
   const requestBody = { text, format: 'mp3' };
@@ -329,7 +329,7 @@ async function fishTTS(text) {
   return Buffer.from(audioBuffer).toString('base64');
 }
 
-// ─── Unified TTS dispatcher ───
+// â”€â”€â”€ Unified TTS dispatcher â”€â”€â”€
 async function generateSegmentAudio(text) {
   if (TTS_PROVIDER === 'elevenlabs') return elevenLabsTTS(text);
   return fishTTS(text);
@@ -392,27 +392,27 @@ if (scenarioRecordId || conceptIdVO) {
           const poolHookType = poolData.records[0].fields.hook_type || 'speaking';
           if (poolHookType === 'speaking') {
             hookFromPool = true;
-            console.log('[VO] Hook Pool has ready speaking clip — will skip hook VO');
+            console.log('[VO] Hook Pool has ready speaking clip â€” will skip hook VO');
           } else {
             hookFromPoolReaction = true;
-            console.log('[VO] Hook Pool has ready reaction clip — hook VO still needed');
+            console.log('[VO] Hook Pool has ready reaction clip â€” hook VO still needed');
           }
         }
       }
     } catch(e) {
-      console.log('[VO] Hook Pool check failed: ' + e.message + ' — generating hook VO as fallback');
+      console.log('[VO] Hook Pool check failed: ' + e.message + ' â€” generating hook VO as fallback');
     }
   }
 }
 
-// ═══════════════════════════════════════
-// DEBUG MODE — skip Fish.audio TTS, return dummy audio per segment
-// ═══════════════════════════════════════
-const DEBUG_FAST = false;  // ← SET TO true FOR FAST TESTING (dummy audio)
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// DEBUG MODE â€” skip Fish.audio TTS, return dummy audio per segment
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+const DEBUG_FAST = false;  // â†? SET TO true FOR FAST TESTING (dummy audio)
 
-// ─── Map template segments to VO text ───
-// hook → copyJson.hookVO, outro → copyJson.outroVO
-// Body sections WITH VO → copyJson.bodyClips[bodyIndex].vo (in order)
+// â”€â”€â”€ Map template segments to VO text â”€â”€â”€
+// hook â†’ copyJson.hookVO, outro â†’ copyJson.outroVO
+// Body sections WITH VO â†’ copyJson.bodyClips[bodyIndex].vo (in order)
 // Sections that NEVER have VO: screenshot, upload_chat (visual-only sections)
 const NO_VO_SECTIONS = ['screenshot', 'upload_chat'];
 
@@ -464,10 +464,10 @@ for (let i = 0; i < segments.length; i++) {
   } else if (isOutro) {
     voText = getVoTextForSection('outro', -1);
   } else if (NO_VO_SECTIONS.includes(section)) {
-    // Visual-only section — no VO, don't consume a bodyClips entry
+    // Visual-only section â€” no VO, don't consume a bodyClips entry
     voText = null;
   } else {
-    // Body section WITH VO — use next bodyClip VO
+    // Body section WITH VO â€” use next bodyClip VO
     voText = getVoTextForSection(section, bodyIndex);
     console.log('[VO-DEBUG] section=' + section + ' bodyIndex=' + bodyIndex + ' voText=' + (voText ? voText.slice(0, 40) : 'NULL'));
     bodyIndex++;
@@ -497,9 +497,9 @@ if (segmentsWithVo.length === 0) {
   }];
 }
 
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 // Generate audio per segment
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 const binaryData = {};
 const warnings = [];
 
@@ -531,7 +531,7 @@ if (DEBUG_FAST) {
 
     // V3: Skip hook VO if clip came from pool (audio already baked in)
     if (seg.section === 'hook' && hookFromPool) {
-      console.log('[VO] Hook skipped (pool source — audio baked into clip)');
+      console.log('[VO] Hook skipped (pool source â€” audio baked into clip)');
       continue;
     }
 
@@ -570,18 +570,18 @@ if (generatedCount === 0) {
   }];
 }
 
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 // Upload hook/outro VO to temp host for Sora 2 speaking (needs public URLs)
 // Only uploads if the effective hook/outro type uses speaking
-// ═══════════════════════════════════════
+// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
 let voHookFileUrl = null;
 let voOutroFileUrl = null;
 
 const effectiveHookType = production.effectiveHookType || production.hookType;
 const effectiveOutroType = production.effectiveOutroType || (production.selectedOutro && production.selectedOutro.type);
 
-// ─── Pad hook/outro VO to exact template duration for Sora 2 speaking ───
-// Sora 2 generates video matching audio length → audio must be exact for beat sync
+// â”€â”€â”€ Pad hook/outro VO to exact template duration for Sora 2 speaking â”€â”€â”€
+// Sora 2 generates video matching audio length â†’ audio must be exact for beat sync
 // Uses FFmpeg apad (silence padding) + trim to guarantee exact duration
 function padVoToExactDuration(segIdx, targetDur) {
   const key = 'voSegment_' + segIdx;
@@ -612,7 +612,7 @@ if (effectiveOutroType === 'speaking') {
   if (outroSeg) padVoToExactDuration(outroSeg.index, outroSeg.duration);
 }
 
-// Upload hook VO if Sora 2 speaking needs it (skip for pool — audio baked in)
+// Upload hook VO if Sora 2 speaking needs it (skip for pool â€” audio baked in)
 if (effectiveHookType === 'speaking' && !hookFromPool) {
   const hookSeg = voSegments.find(s => s.section === 'hook' && s.hasAudio);
   if (!hookSeg) {
@@ -623,9 +623,9 @@ if (effectiveHookType === 'speaking' && !hookFromPool) {
     // fal.ai storage first (guaranteed accessible), fallback to temp hosts
     try {
       voHookFileUrl = await uploadToFalStorage(hookVoBuffer, 'vo_hook.mp3', 'audio/mpeg');
-      console.log('[VO upload] hook → fal.ai storage: ' + voHookFileUrl);
+      console.log('[VO upload] hook â†’ fal.ai storage: ' + voHookFileUrl);
     } catch (falErr) {
-      console.log('[VO upload] fal.ai storage failed: ' + falErr.message + ' — trying temp hosts');
+      console.log('[VO upload] fal.ai storage failed: ' + falErr.message + ' â€” trying temp hosts');
       try {
         voHookFileUrl = await uploadToTempHost(hookVoBuffer, 'vo_hook.mp3');
       } catch (err) {
@@ -645,9 +645,9 @@ if (effectiveOutroType === 'speaking') {
     const outroVoBuffer = Buffer.from(binaryData['voSegment_' + outroSeg.index].data, 'base64');
     try {
       voOutroFileUrl = await uploadToFalStorage(outroVoBuffer, 'vo_outro.mp3', 'audio/mpeg');
-      console.log('[VO upload] outro → fal.ai storage: ' + voOutroFileUrl);
+      console.log('[VO upload] outro â†’ fal.ai storage: ' + voOutroFileUrl);
     } catch (falErr) {
-      console.log('[VO upload] fal.ai storage failed: ' + falErr.message + ' — trying temp hosts');
+      console.log('[VO upload] fal.ai storage failed: ' + falErr.message + ' â€” trying temp hosts');
       try {
         voOutroFileUrl = await uploadToTempHost(outroVoBuffer, 'vo_outro.mp3');
       } catch (err) {

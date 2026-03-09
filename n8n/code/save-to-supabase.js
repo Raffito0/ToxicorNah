@@ -6,7 +6,7 @@
 // WIRING: In Workflow 2, placed on the "approve" branch of the IF node after Update Status.
 // References $('Find Scenario') for scenario_json and $('Parse Callback') for action/scenarioName.
 //
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// â”€â”€â”€ fetch polyfill (n8n Code node sandbox lacks global fetch) â”€â”€â”€
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -52,9 +52,9 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// Config — hardcoded for private self-hosted n8n
+// Config â€” hardcoded for private self-hosted n8n
 const SUPABASE_URL = 'https://iilqnbumccqxlyloerzd.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpbHFuYnVtY2NxeGx5bG9lcnpkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODcyMzAyOCwiZXhwIjoyMDg0Mjk5MDI4fQ.XUKQTfMrtg2gYwIiJX_dMBX6C4VSlKZS09cNC7h7yVQ'; // ← Replace with your service_role key from Supabase Dashboard → Settings → API
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpbHFuYnVtY2NxeGx5bG9lcnpkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODcyMzAyOCwiZXhwIjoyMDg0Mjk5MDI4fQ.XUKQTfMrtg2gYwIiJX_dMBX6C4VSlKZS09cNC7h7yVQ'; // â†? Replace with your service_role key from Supabase Dashboard â†’ Settings â†’ API
 const APP_URL = 'https://toxicor-nah.vercel.app';
 
 // Get action and scenarioName from the callback handler node
@@ -67,7 +67,7 @@ if (action !== 'approve') {
   return [{ json: { skipped: true, reason: 'Action is not approve: ' + action } }];
 }
 
-// Get scenario_json from the Find Scenario node (not $input — after Update Status, input only has id+status)
+// Get scenario_json from the Find Scenario node (not $input â€” after Update Status, input only has id+status)
 const airtableRecord = $('Find Scenario (Callback)').first().json;
 let scenarioJson = airtableRecord.scenario_json || airtableRecord.fields?.scenario_json;
 
@@ -140,6 +140,6 @@ return [{
     uuid,
     scenarioName,
     demoUrl,
-    message: '📱 Demo URL: ' + demoUrl,
+    message: 'ðŸ“± Demo URL: ' + demoUrl,
   }
 }];

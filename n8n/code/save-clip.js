@@ -2,7 +2,7 @@
 // Prepares the Airtable record for any clip type uploaded via Telegram
 // Mode: Run Once for All Items
 //
-// WIRING: Parse Message → Route Message (Switch) → Find Scenario → this Code node → Airtable Create → Telegram confirm
+// WIRING: Parse Message â†’ Route Message (Switch) â†’ Find Scenario â†’ this Code node â†’ Airtable Create â†’ Telegram confirm
 //
 // Input: parsed message data from Parse Message + scenario record from Find Scenario
 // Handles all 3 clip types: body_clip, hook_clip, outro_clip
