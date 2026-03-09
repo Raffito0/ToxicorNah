@@ -187,14 +187,91 @@
 - **Status tracking**: `platform_status_tiktok` / `platform_status_instagram` = pending → posted / draft / skipped
 - **Content Library orphans**: Old records with deleted R2 files return 403 — clean periodically
 
-## Weekly & Daily Plan Integration
+## Weekly & Daily Plan System
 - **Location**: `C:\Users\trmlsn\Desktop\Weekly & Daily Plan\`
-- **Python system**: Generates realistic posting schedules for 6 accounts (3 phones × TikTok + IG)
-- **17 behavioral rules**: scroll timing, rest days, one-post days, aborted sessions, personality evolution, proxy rotation, extended sessions, post errors (draft/skip)
-- **Output**: `weekly_plan_YYYY-WNN.json` consumed by automation software
-- **Delivery bridge lives inside** this project as `delivery/` module
+- **Python 3.14 package** (`planner/`): generates realistic posting schedules for 6 accounts (3 phones × TikTok + IG)
+- **Output**: `output/weekly_plan_YYYY-WNN.json` + `.txt` (human-readable)
+- **State**: `state/account_state.json` persists personalities, last rest days, break intervals
+- **Delivery bridge**: `delivery/` module (see Video Delivery Bridge section above)
 - **Will be integrated** into user's Flask-based automation software (Python 3.12, Appium/ADB, currently Instagram-only, TikTok in progress)
-- **Execution flow**: Weekly plan says "post at 19:45" → execution script calls `get_next_video()` → `download_video()` → `push_to_phone()` → automation posts → `mark_posted()`
+- **CLI**: `python -m planner.main --weekly` (current week) or `--weekly --date 2026-03-02` (specific week)
+- **Validation**: `python validate.py` (checks all rules), `python stress_test.py` (20 runs, 100% pass rate)
+
+### Account Setup
+- 3 phones, each with TikTok + Instagram account (6 total)
+- 1 shared USA Mobile SOCKS5 proxy (`sinister.services:20002`), rotated on phone switch only
+- Only 1 account active at a time (proxy rotates when switching phones)
+- Phone order randomized daily, both accounts of same phone always consecutive
+
+### Key Rules (17+ total)
+- **R2**: 75-95% of normal days have 2 posts (personality-driven). ~2 posts/day/account
+- **R3**: 2 sessions/account/day (92%), 1 session (8%). Max 2
+- **R4/R5**: Pre-post scroll 6-19min (normal), post-post scroll 6-14min. Short/long outliers per personality
+- **R6**: Time slots with weighted engagement (Evening/Night Peak = weight 3, highest)
+- **R7**: 1 rest day/week (84-95% prob) — sessions but NO posts
+- **R8**: 1 one-post day/week (only 1 post instead of 2). Never same as rest day
+- **R9**: Rest and one-post days rotate weekdays each week
+- **R10**: Every 7-15 days, 1 account takes 2 consecutive days completely OFF
+- **R12**: 5-10% of sessions aborted (<2 min, no post). If post was scheduled, reschedule
+- **R13**: 3-7% weekly: extended session 25-40 min (user gets lost scrolling)
+- **R14**: Post errors: 2-5% saved as DRAFT, 1-3% SKIPPED (changed mind). Vary by personality
+- **R15**: ≥2 phones active daily (ensures proxy rotation)
+- **R16**: Dynamic personalities per account (refresh every 7-14 days, 70% new + 30% old blend)
+- **R17**: 1-5 min gap same-phone sessions, 0-30 min gap different-phone sessions
+
+### Session JSON Structure (what the execution script reads)
+```json
+{
+  "account": "ph2_tiktok",
+  "phone": 2,
+  "platform": "tiktok",
+  "start_time": "19:45",
+  "end_time": "20:11",
+  "time_slot": "Evening",
+  "session_number": 1,
+  "type": "normal",
+  "post_scheduled": true,
+  "post_outcome": "posted",
+  "pre_activity_minutes": 15,
+  "post_activity_minutes": 10,
+  "total_duration_minutes": 26,
+  "proxy_rotation_before": false
+}
+```
+- **type**: `normal` | `aborted` | `extended` | `rest_only`
+- **post_outcome**: `posted` | `draft` | `skipped` | `null`
+- **proxy_rotation_before**: true = call rotation API before this session
+
+### Execution Flow (how the automation software should use it)
+```
+1. Load weekly plan JSON → filter today's sessions
+2. For each session (at start_time):
+   a. If proxy_rotation_before: call proxy rotation API, wait 2-3s
+   b. Open app (platform on phone) via ADB
+   c. If type == "aborted": close app after 1-2 min, skip to next
+   d. Scroll for pre_activity_minutes
+   e. If post_scheduled && post_outcome == "posted":
+      → delivery.get_next_video(phone_id, platform)
+      → delivery.download_video() + delivery.push_to_phone()
+      → Post video with caption from video["caption"]
+      → delivery.mark_posted(record_id, platform)
+   f. If post_outcome == "draft": open post screen → save as draft
+   g. If post_outcome == "skipped": open post screen → go back
+   h. Scroll for post_activity_minutes
+   i. Close app
+3. Same video goes to both TikTok + IG on same phone
+   → First platform: download + push + post + mark_posted("tiktok")
+   → Second platform: video already on phone → post + mark_posted("instagram")
+```
+
+### Key Files
+- `planner/config.py` — accounts, proxy, time slots, rule parameters
+- `planner/scheduler.py` — core scheduling orchestration
+- `planner/rules_engine.py` — 17 rules implementations
+- `planner/personality.py` — dynamic personality evolution (Rule 16)
+- `planner/models.py` — Session, DailyPlan, WeeklyPlan dataclasses
+- `planner/formatter.py` — JSON + TXT output
+- `delivery/` — Video Delivery Bridge (see above)
 
 ## CURRENT TODO (2026-03-09)
 1. **Batch Generator**: Import `workflow-hook-batch.json` + `unified-pipeline-fixed.json` on n8n → test
