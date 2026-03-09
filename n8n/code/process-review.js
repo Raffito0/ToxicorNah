@@ -1,4 +1,4 @@
-// NODE: Process Review (Telegram Webhook — instant response)
+// NODE: Process Review (Telegram Webhook -- instant response)
 // Handles all Telegram review interactions for Hook Generator:
 //   - Timestamps (e.g. "0.7" or "0.5 4.2 9.8")
 //   - Approvals ("all" or "1 3")
@@ -7,13 +7,13 @@
 // Triggered instantly by Telegram Webhook Trigger node.
 // Replaces Phase 3 (getUpdates polling) from the scheduled Hook Generator.
 //
-// WIRING: Telegram Trigger → this Code node
+// WIRING: Telegram Trigger -> this Code node
 // Mode: Run Once for All Items
 
 const fs = require('fs');
 const { execSync } = require('child_process');
 
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// --- fetch polyfill (n8n Code node sandbox lacks global fetch) ---
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -59,7 +59,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── Config ───
+// --- Config ---
 const ABASE = 'appsgjIdkpak2kaXq';
 const HOOK_POOL_TABLE = 'tbl3q91o3l0isSX9w';
 const QUEUE_TABLE = 'tblXpyxSLN2vSJ4i3';
@@ -72,7 +72,7 @@ const ADMIN_CHAT = '5120450288';
 const CLIP_DURATION = 3;
 const FAL_KEY = (typeof $env !== 'undefined' && $env.FAL_KEY) || '1f90e772-6c27-4772-9c31-9fb0efd2ccb7:e1ae20a74cf0ad9a5be03baefd1603e0';
 
-// ─── fal.ai Topaz video enhance (deflicker + stabilize) ───
+// --- fal.ai Topaz video enhance (deflicker + stabilize) ---
 async function falUploadVideo(buffer) {
   // Step 1: Get presigned upload URL
   const initRes = await fetch('https://rest.alpha.fal.ai/storage/upload/initiate', {
@@ -104,7 +104,7 @@ async function topazEnhance(videoUrl) {
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Key ' + FAL_KEY },
     body: JSON.stringify({
       video_url: videoUrl,
-      upscale_factor: 1,  // same resolution — just deflicker/stabilize/denoise
+      upscale_factor: 1,  // same resolution -- just deflicker/stabilize/denoise
       H264_output: true,
     }),
   });
@@ -143,7 +143,7 @@ async function topazEnhance(videoUrl) {
 }
 
 async function enhanceClip(clipPath) {
-  // Upload trimmed clip → Topaz enhance → download enhanced → return enhanced buffer
+  // Upload trimmed clip -> Topaz enhance -> download enhanced -> return enhanced buffer
   const clipBuffer = fs.readFileSync(clipPath);
   const falUrl = await falUploadVideo(clipBuffer);
   const enhancedUrl = await topazEnhance(falUrl);
@@ -152,11 +152,11 @@ async function enhanceClip(clipPath) {
   const dlRes = await fetch(enhancedUrl);
   if (!dlRes.ok) throw new Error('Enhanced download failed: ' + dlRes.status);
   const enhancedBuffer = Buffer.from(await dlRes.arrayBuffer());
-  console.log('[review] Enhanced clip: ' + clipBuffer.length + ' → ' + enhancedBuffer.length + ' bytes');
+  console.log('[review] Enhanced clip: ' + clipBuffer.length + ' -> ' + enhancedBuffer.length + ' bytes');
   return enhancedBuffer;
 }
 
-// ─── Telegram helpers ───
+// --- Telegram helpers ---
 async function sendTelegram(text, replyMarkup) {
   try {
     const payload = { chat_id: ADMIN_CHAT, text: text };
@@ -215,9 +215,9 @@ async function deleteTelegramMessage(messageId) {
   } catch (e) { console.log('[review] Telegram delete error: ' + e.message); }
 }
 
-// ─── FFmpeg trim (two-step: re-encode full → extract clip) ───
+// --- FFmpeg trim (two-step: re-encode full -> extract clip) ---
 function trimClip(videoPath, startSec, keepAudio) {
-  // Step 1: re-encode full video to clean H.264 (proven to work — same as burnTimecode)
+  // Step 1: re-encode full video to clean H.264 (proven to work -- same as burnTimecode)
   const h264Path = videoPath.replace('.mp4', '_h264.mp4');
   const audioFlag = keepAudio ? '-c:a aac' : '-an';
   console.log('[review] Step 1: Re-encoding to H.264 (audio: ' + (keepAudio ? 'keep' : 'strip') + ')...');
@@ -241,12 +241,12 @@ function trimClip(videoPath, startSec, keepAudio) {
   try { fs.unlinkSync(h264Path); } catch (e) {}
 
   if (clipSize < 5000) {
-    throw new Error('Clip too small (' + clipSize + ' bytes) — likely corrupt');
+    throw new Error('Clip too small (' + clipSize + ' bytes) -- likely corrupt');
   }
   return outPath;
 }
 
-// ─── Upload via Telegram (sendDocument → getFile → direct URL) ───
+// --- Upload via Telegram (sendDocument -> getFile -> direct URL) ---
 async function uploadFile(buffer, filename) {
   const boundary = '----TGUploadBoundary' + Date.now();
   const header =
@@ -289,7 +289,7 @@ async function uploadFile(buffer, filename) {
   return url;
 }
 
-// ─── Airtable helpers ───
+// --- Airtable helpers ---
 async function airtableFetch(tablePath, options) {
   options = options || {};
   const res = await fetch('https://api.airtable.com/v0/' + ABASE + '/' + tablePath, {
@@ -315,7 +315,7 @@ async function poolCreate(fields) {
   });
 }
 
-// ─── Counter message helpers ───
+// --- Counter message helpers ---
 // Stores the "Clips saved" counter msg_id in a special __counter__ queue record
 async function getCounter() {
   try {
@@ -359,22 +359,22 @@ async function updateCounterMessage(newClips) {
 }
 
 
-// ═══════════════════════════════════════════════════════
-// MAIN — Process incoming Telegram update (message or callback_query)
-// ═══════════════════════════════════════════════════════
+// =======================================================
+// MAIN -- Process incoming Telegram update (message or callback_query)
+// =======================================================
 
 const result = { processed: false, action: null };
 
 if (!ATOKEN) {
-  console.log('[review] No AIRTABLE_API_KEY — exiting');
+  console.log('[review] No AIRTABLE_API_KEY -- exiting');
   return [{ json: { skipped: true, reason: 'no_api_key' } }];
 }
 
 const input = $input.first();
 
-// ═══════════════════════════════════════════════════════
-// CALLBACK QUERY — Hook image approval (inline keyboard buttons)
-// ═══════════════════════════════════════════════════════
+// =======================================================
+// CALLBACK QUERY -- Hook image approval (inline keyboard buttons)
+// =======================================================
 
 const callbackQuery = input.json.callback_query || null;
 if (callbackQuery) {
@@ -404,7 +404,7 @@ if (callbackQuery) {
 
     // Update inline keyboard to show result
     if (cbMsgId) {
-      const btnText = isApprove ? '\u2705 Approved — submitting to Sora 2...' : '\uD83D\uDD04 Redoing...';
+      const btnText = isApprove ? '\u2705 Approved -- submitting to Sora 2...' : '\uD83D\uDD04 Redoing...';
       try {
         await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/editMessageReplyMarkup', {
           method: 'POST',
@@ -430,7 +430,7 @@ if (callbackQuery) {
     return [{ json: { type: 'hook_image_approval', action: isApprove ? 'approve' : 'redo', recordId: queueRecordId } }];
   }
 
-  // ─── review_skip_ — Skip video at timestamp step (inline button) ───
+  // --- review_skip_ -- Skip video at timestamp step (inline button) ---
   if (cbData.startsWith('review_skip_')) {
     const queueRecordId = cbData.substring('review_skip_'.length);
 
@@ -471,7 +471,7 @@ if (callbackQuery) {
     return [{ json: { type: 'review_skip', recordId: queueRecordId } }];
   }
 
-  // ─── clips_all_ — Approve all clips (inline button) ───
+  // --- clips_all_ -- Approve all clips (inline button) ---
   if (cbData.startsWith('clips_all_')) {
     const queueRecordId = cbData.substring('clips_all_'.length);
 
@@ -540,13 +540,13 @@ if (callbackQuery) {
         try {
           const trimPath = trimClip(rawPath, ts, hookMode === 'speaking');
 
-          // Topaz enhance (deflicker + stabilize) — graceful fallback to raw clip
+          // Topaz enhance (deflicker + stabilize) -- graceful fallback to raw clip
           let clipBuffer;
           try {
             clipBuffer = await enhanceClip(trimPath);
             console.log('[review] Topaz enhanced clip ' + idx);
           } catch (enhErr) {
-            console.log('[review] Topaz enhance failed clip ' + idx + ': ' + enhErr.message + ' — using raw');
+            console.log('[review] Topaz enhance failed clip ' + idx + ': ' + enhErr.message + ' -- using raw');
             clipBuffer = fs.readFileSync(trimPath);
           }
 
@@ -590,7 +590,7 @@ if (callbackQuery) {
     return [{ json: { type: 'clips_approve_all', recordId: queueRecordId } }];
   }
 
-  // ─── clips_skip_ — Skip all clips (inline button) ───
+  // --- clips_skip_ -- Skip all clips (inline button) ---
   if (cbData.startsWith('clips_skip_')) {
     const queueRecordId = cbData.substring('clips_skip_'.length);
 
@@ -629,14 +629,14 @@ if (callbackQuery) {
     return [{ json: { type: 'clips_skip', recordId: queueRecordId } }];
   }
 
-  // Unknown callback — ignore
+  // Unknown callback -- ignore
   console.log('[review] Unknown callback: ' + cbData);
   return [{ json: { skipped: true, reason: 'unknown_callback', data: cbData } }];
 }
 
-// ═══════════════════════════════════════════════════════
-// TEXT MESSAGE — Process review (timestamps, approvals, skips)
-// ═══════════════════════════════════════════════════════
+// =======================================================
+// TEXT MESSAGE -- Process review (timestamps, approvals, skips)
+// =======================================================
 
 // Get the message from Telegram Trigger node
 const message = input.json.message || input.json;
@@ -645,7 +645,7 @@ const userText = (message.text || '').trim();
 const userMsgId = message.message_id; // Track for cleanup
 
 if (!userText) {
-  console.log('[review] No text in message — ignoring');
+  console.log('[review] No text in message -- ignoring');
   return [{ json: { skipped: true, reason: 'no_text' } }];
 }
 
@@ -671,7 +671,7 @@ try {
 }
 
 if (!reviewRecord) {
-  console.log('[review] No pending review — ignoring message');
+  console.log('[review] No pending review -- ignoring message');
   return [{ json: { skipped: true, reason: 'no_pending_review' } }];
 }
 
@@ -679,7 +679,7 @@ const rf = reviewRecord.fields;
 const reviewStatus = rf.status;
 console.log('[review] Record ' + reviewRecord.id + ' status: ' + reviewStatus);
 
-// ─── WAITING FOR TIMESTAMPS ───
+// --- WAITING FOR TIMESTAMPS ---
 if (reviewStatus === 'review_sent') {
   if (userText.toLowerCase() === 'skip') {
     await queueUpdate(reviewRecord.id, { status: 'failed', error_message: 'Skipped by user' });
@@ -768,7 +768,7 @@ if (reviewStatus === 'review_sent') {
   }
 }
 
-// ─── WAITING FOR APPROVAL ───
+// --- WAITING FOR APPROVAL ---
 if (reviewStatus === 'clips_preview_sent') {
   if (userText.toLowerCase() === 'skip') {
     await queueUpdate(reviewRecord.id, { status: 'failed', error_message: 'Skipped at approval' });
@@ -836,13 +836,13 @@ if (reviewStatus === 'clips_preview_sent') {
           try {
             const trimPath = trimClip(rawPath, ts, isSpeaking);
 
-            // Topaz enhance (deflicker + stabilize) — graceful fallback to raw clip
+            // Topaz enhance (deflicker + stabilize) -- graceful fallback to raw clip
             let clipBuffer;
             try {
               clipBuffer = await enhanceClip(trimPath);
               console.log('[review] Topaz enhanced clip ' + idx);
             } catch (enhErr) {
-              console.log('[review] Topaz enhance failed clip ' + idx + ': ' + enhErr.message + ' — using raw');
+              console.log('[review] Topaz enhance failed clip ' + idx + ': ' + enhErr.message + ' -- using raw');
               clipBuffer = fs.readFileSync(trimPath);
             }
 

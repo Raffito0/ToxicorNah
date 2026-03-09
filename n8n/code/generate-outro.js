@@ -1,16 +1,16 @@
 // NODE: Generate Outro (Self-Contained)
 // Uses the selectedOutro from Prepare Production (weighted random from outroPool):
-//   - manual_clip â†’ pass through the already-uploaded outro clip file_id
-//   - ai_generated â†’ fal.ai nano-banana-2 with girl ref, prompt built from outroPromptTemplate
-//   - none â†’ skip outro
+//   - manual_clip ' pass through the already-uploaded outro clip file_id
+//   - ai_generated ' fal.ai nano-banana-2 with girl ref, prompt built from outroPromptTemplate
+//   - none ' skip outro
 //
 // Self-contained: builds prompt internally from concept's outroPromptTemplate
 // No dependency on external LLM nodes
 // Mode: Run Once for All Items
 //
-// WIRING: Generate Hook â†’ this node â†’ Telegram Approval (if AI) or [outro ready]
+// WIRING: Generate Hook ' this node ' Telegram Approval (if AI) or [outro ready]
 
-// â”€â”€â”€ fetch polyfill (n8n Code node sandbox lacks global fetch) â”€â”€â”€
+// """ fetch polyfill (n8n Code node sandbox lacks global fetch) """
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -68,7 +68,7 @@ const RETRY_DELAY_MS = 5000;
 // AI-generated prompt from Outro Prompt Agent (upstream AI Agent node)
 const AI_GENERATED_PROMPT = $input.first().json.output || '';
 
-// â”€â”€â”€ retry helper â”€â”€â”€
+// """ retry helper """
 async function withRetry(fn, label = 'API call') {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -80,7 +80,7 @@ async function withRetry(fn, label = 'API call') {
   }
 }
 
-// â”€â”€â”€ R2 upload (for last-frame extraction) â”€â”€â”€
+// """ R2 upload (for last-frame extraction) """
 const R2_PUBLIC_URL = (typeof $env !== 'undefined' && $env.R2_PUBLIC_URL) || 'https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev';
 function hmacSha256(key, data, encoding) {
   return crypto.createHmac('sha256', key).update(data).digest(encoding);
@@ -135,7 +135,7 @@ async function uploadToR2(r2Key, bodyBuffer, contentType) {
   });
 }
 
-// â”€â”€â”€ Extract last frame from hook video â”€â”€â”€
+// """ Extract last frame from hook video """
 // Sora 2 reinterprets the input image, so the actual video content differs
 // from the original hook image. Using the last frame ensures visual continuity.
 async function extractHookLastFrame() {
@@ -183,7 +183,7 @@ async function extractHookLastFrame() {
   }
 }
 
-// â”€â”€â”€ kie.ai nano-banana-2 (async: createTask â†’ poll) â”€â”€â”€
+// """ kie.ai nano-banana-2 (async: createTask ' poll) """
 async function kieGenerate(prompt, imageRefs, options = {}) {
   const { aspectRatio = '9:16', resolution = '2K', timeOfDay = 'day', isSelfie = false } = options;
   const lighting = timeOfDay === 'night' ? 'nighttime' : 'daytime';
@@ -235,7 +235,7 @@ async function kiePoll(taskId) {
   throw new Error('kie.ai poll timeout after 120s');
 }
 
-// â”€â”€â”€ fal.ai nano-banana-2 (synchronous â€” no polling needed) â”€â”€â”€
+// """ fal.ai nano-banana-2 (synchronous " no polling needed) """
 async function falGenerate(prompt, imageRefs, options = {}) {
   const { aspectRatio = '9:16', resolution = '2K', timeOfDay = 'day', isSelfie = false } = options;
   const lighting = timeOfDay === 'night'
@@ -266,7 +266,7 @@ async function falGenerate(prompt, imageRefs, options = {}) {
   return data.images[0].url;
 }
 
-// â”€â”€â”€ generateImage: kie.ai primary â†’ fal.ai fallback â”€â”€â”€
+// """ generateImage: kie.ai primary ' fal.ai fallback """
 async function generateImage(prompt, imageRefs, options = {}) {
   try {
     console.log('[imageGen] Trying kie.ai...');
@@ -276,14 +276,14 @@ async function generateImage(prompt, imageRefs, options = {}) {
     console.log('[imageGen] kie.ai OK: ' + url);
     return url;
   } catch (kieErr) {
-    console.log('[imageGen] kie.ai failed: ' + kieErr.message + ' â€” falling back to fal.ai');
+    console.log('[imageGen] kie.ai failed: ' + kieErr.message + ' " falling back to fal.ai');
     const url = await falGenerate(prompt, imageRefs, options);
     console.log('[imageGen] fal.ai fallback OK: ' + url);
     return url;
   }
 }
 
-// â”€â”€â”€ V2.0 Outro prompt builder â”€â”€â”€
+// """ V2.0 Outro prompt builder """
 // Continuity with hook: outroTone derived from hookPoseCategory
 // Hook = tension/reaction. Outro = awareness/decision/follow-through.
 function buildOutroPromptFallback(production, hasHookImage) {
@@ -295,7 +295,7 @@ function buildOutroPromptFallback(production, hasHookImage) {
     hookPoseCategory = score <= 15 ? 'cold_calculated' : 'explosive_control';
   }
 
-  // Map to outroTone â€” continues the narrative arc of the hook
+  // Map to outroTone " continues the narrative arc of the hook
   const outroTone = hookPoseCategory === 'cold_calculated' ? 'knowing_dominant' : 'controlled_decisive';
 
   // Emotion pools by outroTone
@@ -316,7 +316,7 @@ function buildOutroPromptFallback(production, hasHookImage) {
   const emotionPool = emotionPools[outroTone];
   const emotion = emotionPool[Math.floor(Math.random() * emotionPool.length)];
 
-  // Eye direction (weighted random â€” eliminates AI stare syndrome)
+  // Eye direction (weighted random " eliminates AI stare syndrome)
   const eyeOpts = [
     { weight: 40, text: 'direct eye contact' },
     { weight: 25, text: 'eyes slightly past the camera' },
@@ -331,7 +331,7 @@ function buildOutroPromptFallback(production, hasHookImage) {
     return eyeOpts[0].text;
   }
 
-  // Context anchor â€” progressive, different from hook's "after reading a shocking message"
+  // Context anchor " progressive, different from hook's "after reading a shocking message"
   const anchors = [
     'after processing what she just read',
     'after realizing what it really means',
@@ -339,7 +339,7 @@ function buildOutroPromptFallback(production, hasHookImage) {
   ];
   const anchor = anchors[Math.floor(Math.random() * anchors.length)];
 
-  // Position: "10 seconds later" feel â€” micro-shift ONLY, never a new staged pose
+  // Position: "10 seconds later" feel " micro-shift ONLY, never a new staged pose
   // Rule: she does NOT stand up, does NOT cross arms, does NOT look out a window
   const positionOpts = [
     'still seated in the same spot, slightly shifted posture, phone now lowered to her lap',
@@ -367,7 +367,7 @@ function buildOutroPromptFallback(production, hasHookImage) {
   return angle + ' the same exact girl from the reference image, ' + envDesc +
     ', ' + anchor + ', ' + emotion + ', ' + pickEye() + selfieStyle;
 }
-// â”€â”€â”€ End helpers â”€â”€â”€
+// """ End helpers """
 
 const production = $('Prepare Production').first().json;
 const selectedOutro = production.selectedOutro || { type: 'none' };
@@ -378,10 +378,10 @@ const scenarioName = production.scenarioName;
 const effectiveOutroType = production.effectiveOutroType || selectedOutro.type;
 const outroCategory = production.outroCategory || 'organic';
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// DEBUG MODE â€” skip AI generation, return dummy image instantly
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-const DEBUG_FAST = false;  // â†? SET TO true FOR FAST TESTING
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// DEBUG MODE " skip AI generation, return dummy image instantly
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+const DEBUG_FAST = false;  // ? SET TO true FOR FAST TESTING
 if (DEBUG_FAST && effectiveOutroType !== 'manual_clip' && effectiveOutroType !== 'none' && effectiveOutroType !== 'app_store_clip') {
   // Generate a proper 1080x1920 debug image via FFmpeg (Telegram rejects programmatic PNGs)
   const { execSync } = require('child_process');
@@ -409,9 +409,9 @@ if (DEBUG_FAST && effectiveOutroType !== 'manual_clip' && effectiveOutroType !==
   }];
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// NONE â€” no outro for this video
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// NONE " no outro for this video
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 if (selectedOutro.type === 'none') {
   return [{
     json: {
@@ -423,9 +423,9 @@ if (selectedOutro.type === 'none') {
   }];
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// MANUAL CLIP â€” already uploaded via #outro
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// MANUAL CLIP " already uploaded via #outro
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 if (selectedOutro.type === 'manual_clip') {
   if (!production.outroClipFileId) {
     return [{
@@ -450,9 +450,9 @@ if (selectedOutro.type === 'manual_clip') {
   }];
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// AI GENERATED â€” fal.ai with girl ref, prompt from template
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// AI GENERATED " fal.ai with girl ref, prompt from template
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 if (selectedOutro.type === 'ai_generated') {
   if (!KIE_API_KEY && !FAL_KEY) {
     return [{ json: { error: true, chatId, message: 'No image gen API key configured (kie.ai or fal.ai)' } }];
@@ -491,7 +491,7 @@ if (selectedOutro.type === 'ai_generated') {
       json: {
         outroReady: false, // needs Telegram approval + img2vid
         outroSkipped: false,
-        outroSource: 'speaking', // ai_generated image â†’ Sora 2 speaking (lipsync + audio)
+        outroSource: 'speaking', // ai_generated image ' Sora 2 speaking (lipsync + audio)
         outroImageUrl: imageUrl,
         outroPromptUsed: outroPrompt,
         outroPromptSource: promptSource,
@@ -508,7 +508,7 @@ if (selectedOutro.type === 'ai_generated') {
       }
     }];
   } catch (err) {
-    // Self-healing: outro AI failed after retry â†’ skip outro (video works without it)
+    // Self-healing: outro AI failed after retry ' skip outro (video works without it)
     return [{
       json: {
         outroReady: true,
@@ -522,10 +522,10 @@ if (selectedOutro.type === 'ai_generated') {
   }
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// APP STORE CLIP â€” select random unused clip from Airtable
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// APP STORE CLIP " select random unused clip from Airtable
 // Pre-recorded clips showing the app in the app store. VO overlaid in assembly.
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 if (effectiveOutroType === 'app_store_clip') {
   // App store clips loaded from upstream Airtable node
   // Filter out empty items from alwaysOutputData (node outputs {} when Airtable returns 0 records)
@@ -537,7 +537,7 @@ if (effectiveOutroType === 'app_store_clip') {
   }
 
   if (appStoreClips.length === 0) {
-    // No clips available â€” fall back to skipping outro
+    // No clips available " fall back to skipping outro
     return [{
       json: {
         outroReady: true,
@@ -545,7 +545,7 @@ if (effectiveOutroType === 'app_store_clip') {
         outroSource: 'app_store_fallback_skip',
         chatId,
         scenarioName,
-        warning: 'âš ï¸? App store outro selected but no clips available. Skipping outro.',
+        warning: ' ï? App store outro selected but no clips available. Skipping outro.',
       }
     }];
   }
@@ -565,7 +565,7 @@ if (effectiveOutroType === 'app_store_clip') {
   }
 
   if (!clipFileUrl) {
-    // Clip record exists but has no file attachment â€” skip outro
+    // Clip record exists but has no file attachment " skip outro
     return [{
       json: {
         outroReady: true,
@@ -573,7 +573,7 @@ if (effectiveOutroType === 'app_store_clip') {
         outroSource: 'app_store_fallback_skip',
         chatId,
         scenarioName,
-        warning: 'âš ï¸? App store clip "' + (selected.clip_name || '?') + '" has no file. Skipping outro.',
+        warning: ' ï? App store clip "' + (selected.clip_name || '?') + '" has no file. Skipping outro.',
       }
     }];
   }
@@ -593,17 +593,17 @@ if (effectiveOutroType === 'app_store_clip') {
   }];
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// SPEAKING â€” Step 1: Generate original image with fal.ai
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// SPEAKING " Step 1: Generate original image with fal.ai
 // Image gets approved on Telegram, then Img2Vid node converts via Sora 2
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 if (effectiveOutroType === 'speaking') {
   if (!KIE_API_KEY && !FAL_KEY) {
-    return [{ json: { error: true, chatId, message: 'â?Œ No image gen API key configured' } }];
+    return [{ json: { error: true, chatId, message: '? No image gen API key configured' } }];
   }
 
   // Best reference = last frame of hook VIDEO (what the viewer actually sees)
-  // Sora 2 reinterprets the input image, so original hookImage â‰  video content
+  // Sora 2 reinterprets the input image, so original hookImage   video content
   const lastFrameUrl = await extractHookLastFrame();
   const hookImageUrl = lastFrameUrl
     || $input.first().json.hookImageUrl
@@ -617,7 +617,7 @@ if (effectiveOutroType === 'speaking') {
         outroSkipped: true,
         chatId,
         scenarioName,
-        warning: 'âš ï¸? No reference image for speaking outro (need hook image or girl_ref_url). Skipping.',
+        warning: ' ï? No reference image for speaking outro (need hook image or girl_ref_url). Skipping.',
       }
     }];
   }
@@ -629,7 +629,7 @@ if (effectiveOutroType === 'speaking') {
   try {
     let imagePrompt = production.outroImagePrompt || '';
     if (!imagePrompt || imagePrompt.length < 10) {
-      // V2.0 speaking outro: about to speak â€” confident, not reacting
+      // V2.0 speaking outro: about to speak " confident, not reacting
       const lipsyncAnchors = [
         'after letting it sink in',
         'after processing what she just read',
@@ -656,7 +656,7 @@ if (effectiveOutroType === 'speaking') {
 
     return [{
       json: {
-        outroReady: false, // needs Telegram approval â†’ then Img2Vid (Sora 2)
+        outroReady: false, // needs Telegram approval ' then Img2Vid (Sora 2)
         outroSkipped: false,
         outroSource: 'speaking',
         outroImageUrl: generatedImageUrl,
@@ -682,7 +682,7 @@ if (effectiveOutroType === 'speaking') {
         outroSource: 'fallback_skip',
         chatId,
         scenarioName,
-        warning: 'âš ï¸? Speaking outro image failed: ' + err.message + '. Skipping outro.',
+        warning: ' ï? Speaking outro image failed: ' + err.message + '. Skipping outro.',
       }
     }];
   }

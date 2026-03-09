@@ -25,7 +25,7 @@ function repairJson(raw) {
   s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
 
   // Smart quote repair: walk through and escape internal quotes
-  // When we see a " inside a string, peek ahead — if the next non-whitespace
+  // When we see a " inside a string, peek ahead -- if the next non-whitespace
   // char is NOT valid JSON continuation (, } ] :), it's an internal quote
   let result = '';
   let inString = false;
@@ -49,7 +49,7 @@ function repairJson(raw) {
           inString = false;
           result += ch;
         } else {
-          // Internal quote — escape it
+          // Internal quote -- escape it
           result += '\\"';
         }
       }
@@ -95,7 +95,7 @@ const errors = [];
 
 // Character limit for all VOs (50 chars = ~3 seconds of natural speech)
 const VO_CHAR_LIMIT = 50;
-// Hard limit — above this we auto-trim instead of failing
+// Hard limit -- above this we auto-trim instead of failing
 const VO_CHAR_HARD_LIMIT = 65;
 
 // Strip ElevenLabs emotion tags for character counting (tags don't count as spoken chars)
@@ -108,8 +108,8 @@ function stripEmotionTags(text) {
 }
 
 // Fix bare emotion tags that Gemini outputs without brackets
-// "gasps Wait what?" → "[gasps] Wait what?"
-// "sighs laughs I can't" → "[sighs] [laughs] I can't"
+// "gasps Wait what?" -> "[gasps] Wait what?"
+// "sighs laughs I can't" -> "[sighs] [laughs] I can't"
 function fixEmotionTags(text) {
   if (!text || typeof text !== 'string') return text;
   // Match bare tags at the start of the string (up to 2 consecutive tags)
@@ -125,7 +125,7 @@ function fixEmotionTags(text) {
 
 // Auto-trim VOs that exceed the character limit (Gemini can't count chars)
 function trimVO(vo) {
-  // Allow small grace (up to 55) — only actively trim above that
+  // Allow small grace (up to 55) -- only actively trim above that
   const TRIM_THRESHOLD = 55;
   // Count chars WITHOUT emotion tags (they don't count as spoken text)
   const spokenLength = stripEmotionTags(vo).length;
@@ -139,7 +139,7 @@ function trimVO(vo) {
     if (trimmed.toLowerCase().endsWith(filler) || trimmed.toLowerCase().endsWith(filler + '.')) {
       trimmed = trimmed.substring(0, trimmed.length - (trimmed.toLowerCase().endsWith(filler + '.') ? filler.length + 1 : filler.length)).trim();
       // Re-add period if it makes sense
-      if (!/[.!?—…]$/.test(trimmed)) trimmed += '.';
+      if (!/[.!?--...]$/.test(trimmed)) trimmed += '.';
       if (stripEmotionTags(trimmed).length <= VO_CHAR_LIMIT) return trimmed;
     }
   }
@@ -163,7 +163,7 @@ function trimVO(vo) {
     const cut = textPart.substring(0, VO_CHAR_LIMIT - 1);
     const lastSpace = cut.lastIndexOf(' ');
     if (lastSpace > 15) {
-      trimmed = leadingTags + cut.substring(0, lastSpace).replace(/[,.\s]+$/, '') + '—';
+      trimmed = leadingTags + cut.substring(0, lastSpace).replace(/[,.\s]+$/, '') + '--';
     }
   }
 
@@ -181,7 +181,7 @@ if (!copy.hookText || typeof copy.hookText !== 'string') {
   errors.push('hookText too long: ' + copy.hookText.split(' ').length + ' words (max 8-10)');
 }
 
-// Hook VO (50 chars max for 3s speech) — auto-trim if over limit
+// Hook VO (50 chars max for 3s speech) -- auto-trim if over limit
 if (!copy.hookVO || typeof copy.hookVO !== 'string') {
   errors.push('Missing hookVO');
 } else {
@@ -189,7 +189,7 @@ if (!copy.hookVO || typeof copy.hookVO !== 'string') {
   const originalHookVO = copy.hookVO;
   copy.hookVO = trimVO(copy.hookVO);
   if (originalHookVO !== copy.hookVO) {
-    errors.push('hookVO auto-trimmed: "' + originalHookVO + '" → "' + copy.hookVO + '" (auto-fixed)');
+    errors.push('hookVO auto-trimmed: "' + originalHookVO + '" -> "' + copy.hookVO + '" (auto-fixed)');
   }
   if (stripEmotionTags(copy.hookVO).length > VO_CHAR_HARD_LIMIT) {
     errors.push('hookVO too long even after trim: ' + stripEmotionTags(copy.hookVO).length + ' spoken chars (max ' + VO_CHAR_LIMIT + '). Text: "' + copy.hookVO + '"');
@@ -221,7 +221,7 @@ if (!Array.isArray(copy.bodyClips)) {
       const originalVO = clip.vo;
       clip.vo = trimVO(clip.vo);
       if (originalVO !== clip.vo) {
-        errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): vo auto-trimmed: "' + originalVO + '" → "' + clip.vo + '" (auto-fixed)');
+        errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): vo auto-trimmed: "' + originalVO + '" -> "' + clip.vo + '" (auto-fixed)');
       }
       if (stripEmotionTags(clip.vo).length > VO_CHAR_HARD_LIMIT) {
         errors.push('Body clip ' + i + ' (' + (clip.section || '?') + '): vo too long even after trim (' + stripEmotionTags(clip.vo).length + ' spoken chars, max ' + VO_CHAR_LIMIT + '). Text: "' + clip.vo + '"');
@@ -239,7 +239,7 @@ if (!Array.isArray(copy.bodyClips)) {
   }
 }
 
-// ═══ Outro category override from pool selection (Build Copy Prompt) ═══
+// === Outro category override from pool selection (Build Copy Prompt) ===
 const { selectedOutroCategory, selectedOutroText, selectedOutroVO: selectedOutroVOText } = $('Build Copy Prompt').first().json;
 if (selectedOutroText) {
   copy.outroText = selectedOutroText;
@@ -248,12 +248,12 @@ if (selectedOutroText) {
 // Tag the copy JSON with the selected category for Workflow 3 routing
 copy.outroCategory = selectedOutroCategory || 'organic';
 
-// Outro text (max 7 words — pool examples can be longer)
+// Outro text (max 7 words -- pool examples can be longer)
 if (!copy.outroText || typeof copy.outroText !== 'string') {
   errors.push('Missing outroText');
 }
 
-// Outro VO (50 chars max for 3s speech) — auto-trim if over limit
+// Outro VO (50 chars max for 3s speech) -- auto-trim if over limit
 if (!copy.outroVO || typeof copy.outroVO !== 'string') {
   errors.push('Missing outroVO');
 } else {
@@ -261,7 +261,7 @@ if (!copy.outroVO || typeof copy.outroVO !== 'string') {
   const originalOutroVO = copy.outroVO;
   copy.outroVO = trimVO(copy.outroVO);
   if (originalOutroVO !== copy.outroVO) {
-    errors.push('outroVO auto-trimmed: "' + originalOutroVO + '" → "' + copy.outroVO + '" (auto-fixed)');
+    errors.push('outroVO auto-trimmed: "' + originalOutroVO + '" -> "' + copy.outroVO + '" (auto-fixed)');
   }
   if (stripEmotionTags(copy.outroVO).length > VO_CHAR_HARD_LIMIT) {
     errors.push('outroVO too long even after trim: ' + stripEmotionTags(copy.outroVO).length + ' spoken chars (max ' + VO_CHAR_LIMIT + '). Text: "' + copy.outroVO + '"');

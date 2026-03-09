@@ -21,7 +21,7 @@ function weightedRandom(items, weightField) {
 
 const concept = weightedRandom(concepts, 'weight');
 
-// --- Vibe selection (toxic only — most viral) ---
+// --- Vibe selection (toxic only -- most viral) ---
 function pickVibe() {
   return 'toxic';
 }

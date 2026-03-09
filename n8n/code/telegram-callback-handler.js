@@ -3,7 +3,7 @@
 // Handles FOUR types of callbacks:
 //   1. Per-segment VO approval: "vpVoOk_{recordId}_{segIndex}", "vpVoRedo_{recordId}_{segIndex}"
 //      Approves individual VO segments. On redo: regenerates via Fish.audio, re-sends audio.
-//      When ALL segments approved â†’ sets vo_approval to "approved" â†’ pipeline continues.
+//      When ALL segments approved ' sets vo_approval to "approved" ' pipeline continues.
 //   2. Video pipeline asset approval: "vpApprove_{recordId}_{step}", "vpRedo_{recordId}_{step}"
 //      Steps: hook_img, outro_img (vo is now handled per-segment above)
 //   3. Hook generator: "img_approve_{recId}", "img_redo_{recId}", "vid_skip_{recId}", "vid_all_{recId}"
@@ -14,7 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 
-// â”€â”€â”€ fetch polyfill (n8n Code node sandbox lacks global fetch) â”€â”€â”€
+// """ fetch polyfill (n8n Code node sandbox lacks global fetch) """
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -60,7 +60,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// â”€â”€â”€ Multipart upload helper for Telegram sendAudio with inline_keyboard â”€â”€â”€
+// """ Multipart upload helper for Telegram sendAudio with inline_keyboard """
 function sendTelegramAudio(botToken, chatId, audioBuffer, filename, caption, replyMarkup) {
   return new Promise((resolve, reject) => {
     const boundary = '----FormBoundary' + Date.now() + Math.random().toString(36).slice(2);
@@ -100,18 +100,18 @@ function sendTelegramAudio(botToken, chatId, audioBuffer, filename, caption, rep
   });
 }
 
-// â”€â”€â”€ TTS Provider Toggle â”€â”€â”€
+// """ TTS Provider Toggle """
 // 'elevenlabs' = ElevenLabs v3 (primary)
 // 'fish'       = Fish.audio s1 (backup)
 const TTS_PROVIDER = 'elevenlabs';
 
-// â”€â”€â”€ ElevenLabs config â”€â”€â”€
+// """ ElevenLabs config """
 const ELEVENLABS_API_KEY = 'sk_a645bb67bdb3fecc5604c41b18588e7b1d8a35092d0c28fc';
 const ELEVENLABS_VOICE_ID = 'cIZgE1zTtJx92OFuLtNz';
 const ELEVENLABS_MODEL = 'eleven_v3';
 const ELEVENLABS_OUTPUT_FORMAT = 'mp3_44100_128';
 
-// â”€â”€â”€ Fish.audio config (backup) â”€â”€â”€
+// """ Fish.audio config (backup) """
 const FISH_API_KEY = '145c958d4b194854b82e045f103472ee';
 const FISH_REFERENCE_ID = '0b48750248ea42b68366d62bf2117edb';
 const FISH_MODEL = 's1';
@@ -123,14 +123,14 @@ function stripEmojis(text) {
     .trim();
 }
 
-// â”€â”€â”€ Strip ElevenLabs emotion tags (for Fish.audio which doesn't understand them) â”€â”€â”€
+// """ Strip ElevenLabs emotion tags (for Fish.audio which doesn't understand them) """
 function stripEmotionTags(text) {
   return text.replace(/\[(gasps|sighs|laughs|whispers|sarcastic|frustrated|curious|excited)\]\s*/gi, '').trim();
 }
 
-// â”€â”€â”€ ElevenLabs v3 TTS with native speed control â”€â”€â”€
+// """ ElevenLabs v3 TTS with native speed control """
 // speed is passed at TOP LEVEL of request body (not in voice_settings)
-// ElevenLabs eleven_v3 natively adjusts voice cadence â€” sounds like real person speaking faster/slower
+// ElevenLabs eleven_v3 natively adjusts voice cadence " sounds like real person speaking faster/slower
 async function elevenLabsTTS(text, speed) {
   text = stripEmojis(text);
   const url = 'https://api.elevenlabs.io/v1/text-to-speech/' + ELEVENLABS_VOICE_ID + '?output_format=' + ELEVENLABS_OUTPUT_FORMAT;
@@ -150,7 +150,7 @@ async function elevenLabsTTS(text, speed) {
   return Buffer.from(audioBuffer);
 }
 
-// â”€â”€â”€ Fish.audio TTS with speed control (backup) â”€â”€â”€
+// """ Fish.audio TTS with speed control (backup) """
 async function fishTTS(text, speed) {
   text = stripEmotionTags(stripEmojis(text));
   const requestBody = { text, format: 'mp3' };
@@ -173,7 +173,7 @@ async function fishTTS(text, speed) {
   return Buffer.from(audioBuffer);
 }
 
-// â”€â”€â”€ Unified TTS dispatcher â”€â”€â”€
+// """ Unified TTS dispatcher """
 async function ttsGenerate(text, speed) {
   if (TTS_PROVIDER === 'elevenlabs') return elevenLabsTTS(text, speed);
   return fishTTS(text, speed);
@@ -212,9 +212,9 @@ const messageId = update.callback_query
   ? update.callback_query.message.message_id
   : '';
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// PER-SEGMENT VO APPROVAL â€” vpVoOk / vpVoRedo / vpVoFaster
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// PER-SEGMENT VO APPROVAL " vpVoOk / vpVoRedo / vpVoFaster
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') || callbackData.startsWith('vpVoFaster_') || callbackData.startsWith('vpVoSlower_')) {
   const isApprove = callbackData.startsWith('vpVoOk_');
   const isFaster = callbackData.startsWith('vpVoFaster_');
@@ -260,7 +260,7 @@ if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') |
   const label = sectionLabels[seg.section] || seg.section;
 
   if (isApprove) {
-    // â”€â”€â”€ APPROVE: mark segment, check if all done â”€â”€â”€
+    // """ APPROVE: mark segment, check if all done """
     seg.status = 'approved';
 
     if (messageId) {
@@ -311,9 +311,9 @@ if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') |
     return [{ json: { type: 'vo_segment', action: 'approve', segIndex, recordId, allApproved: pendingSegs.length === 0 } }];
 
   } else {
-    // â”€â”€â”€ REDO / FASTER / SLOWER: regenerate via Fish.audio â”€â”€â”€
+    // """ REDO / FASTER / SLOWER: regenerate via Fish.audio """
     // Faster: +0.15 speed. Slower: -0.15 speed. Redo: keep current speed.
-    // Fish.audio range: 0.5 â€“ 2.0
+    // Fish.audio range: 0.5 " 2.0
     const currentSpeed = seg.speed || 1.0;
     const newSpeed = isFaster
       ? Math.min(2.0, Math.round((currentSpeed + 0.15) * 100) / 100)
@@ -435,10 +435,10 @@ if (callbackData.startsWith('vpVoOk_') || callbackData.startsWith('vpVoRedo_') |
   }
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// VIDEO PIPELINE APPROVAL â€” vpApprove_{recordId}_{step} / vpRedo_{recordId}_{step}
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// VIDEO PIPELINE APPROVAL " vpApprove_{recordId}_{step} / vpRedo_{recordId}_{step}
 // recordId = Airtable Video Runs record ID
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 if (callbackData.startsWith('vpApprove_') || callbackData.startsWith('vpRedo_')) {
   const isApprove = callbackData.startsWith('vpApprove_');
   const prefix = isApprove ? 'vpApprove_' : 'vpRedo_';
@@ -558,10 +558,10 @@ if (callbackData.startsWith('vpApprove_') || callbackData.startsWith('vpRedo_'))
   }];
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 // AUTO-NEXT: load next approved scenario after LED/Day selection
 // Replicates start-next-scenario.js logic inline
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 const HOOK_QUEUE_TABLE = 'tblXpyxSLN2vSJ4i3';
 const SCENARIOS_TABLE = 'tblcQaMBBPcOAy0NF';
 const PHONES_TABLE = 'tblCvT47GpZv29jz9';
@@ -586,8 +586,26 @@ async function autoLoadNextScenario(botToken, targetChatId) {
 
   // Already recording? Skip
   if (staticData.activeRecording) {
-    console.log('[auto-next] Already recording â€” skipping');
+    console.log('[auto-next] Already recording " skipping');
     return;
+  }
+
+  // Look up phone topic IDs for forum routing
+  let topicAssembleId = '';
+  try {
+    const phoneFilter = encodeURIComponent("{telegram_chat_id}='" + targetChatId + "'");
+    const phoneRes = await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/tblCvT47GpZv29jz9?filterByFormula=' + phoneFilter + '&maxRecords=1', {
+      headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN },
+    });
+    const phoneData = await phoneRes.json();
+    if (phoneData.records && phoneData.records.length > 0) {
+      topicAssembleId = phoneData.records[0].fields.topic_assemble_id || '';
+    }
+  } catch(e) { /* non-fatal */ }
+
+  function withTopic(obj) {
+    if (topicAssembleId) obj.message_thread_id = Number(topicAssembleId);
+    return obj;
   }
 
   // 1. Find next approved scenario
@@ -602,7 +620,7 @@ async function autoLoadNextScenario(botToken, targetChatId) {
       await fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: targetChatId, text: '\u26A0\uFE0F Auto-next error: Airtable ' + scenRes.status }),
+        body: JSON.stringify(withTopic({ chat_id: targetChatId, text: '\u26A0\uFE0F Auto-next error: Airtable ' + scenRes.status })),
       });
     } catch (e) { /* non-fatal */ }
     return;
@@ -615,7 +633,7 @@ async function autoLoadNextScenario(botToken, targetChatId) {
       await fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: targetChatId, text: '\uD83D\uDCCB Nessuno scenario approvato in coda.\nGenera nuovi scenari prima.' }),
+        body: JSON.stringify(withTopic({ chat_id: targetChatId, text: '\uD83D\uDCCB Nessuno scenario approvato in coda.\nGenera nuovi scenari prima.' })),
       });
     } catch (e) { /* non-fatal */ }
     return;
@@ -711,7 +729,7 @@ async function autoLoadNextScenario(botToken, targetChatId) {
       const photoRes = await fetch('https://api.telegram.org/bot' + botToken + '/sendPhoto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: targetChatId, photo: screenshotUrl, caption: caption }),
+        body: JSON.stringify(withTopic({ chat_id: targetChatId, photo: screenshotUrl, caption: caption })),
       });
       const photoJson = await photoRes.json();
       if (photoJson.ok) {
@@ -724,7 +742,7 @@ async function autoLoadNextScenario(botToken, targetChatId) {
       await fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: targetChatId, text: caption }),
+        body: JSON.stringify(withTopic({ chat_id: targetChatId, text: caption })),
       });
     }
   } catch (e) { console.log('[auto-next] Telegram send error: ' + e.message); }
@@ -732,9 +750,9 @@ async function autoLoadNextScenario(botToken, targetChatId) {
   console.log('[auto-next] Loaded scenario: ' + scenarioName);
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 // HELPERS: concept lookup + round-robin phone + batch queue
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 
 // Fetch concept prompts by Airtable record ID (not text concept_id)
 async function fetchConceptData(conceptRecordId) {
@@ -791,11 +809,11 @@ async function assignPhoneSequential() {
     }
   }
 
-  // All phones have 3+ ready â€” pick first phone anyway (will batch immediately)
+  // All phones have 3+ ready " pick first phone anyway (will batch immediately)
   return { phone: phones[0], currentReady: counts[phones[0].phoneId] || 0 };
 }
 
-// Check if a phone has 3+ 'ready' scenarios with same time_of_day+led_color â†’ batch into 1 queue record
+// Check if a phone has 3+ 'ready' scenarios with same time_of_day+led_color ' batch into 1 queue record
 async function checkAndCreateBatch(phone, hookImagePrompt, sora2SpeakingPrompt, conceptIdStr, timeOfDay, ledColor) {
   var ledPart = ledColor ? ",{led_color}='" + ledColor + "'" : ",{led_color}=''";
   var filter = encodeURIComponent("AND({status}='ready',{phone_id}='" + phone.phoneId + "',{time_of_day}='" + timeOfDay + "'" + ledPart + ")");
@@ -854,10 +872,10 @@ async function checkAndCreateBatch(phone, hookImagePrompt, sora2SpeakingPrompt, 
   return { created: true, count: 3, phoneId: phone.phoneId, hookTexts: hookTexts };
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// LED COLOR CALLBACK â€” led_{color}_{scenarioRecordId}
-// After /done â†’ night, user picks LED color. Marks scenario ready, batches 3 into queue.
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// LED COLOR CALLBACK " led_{color}_{scenarioRecordId}
+// After /done ' night, user picks LED color. Marks scenario ready, batches 3 into queue.
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 
 const ledMatch = callbackData.match(/^led_(red|purple|green|blue|none)_(.+)$/);
 if (ledMatch) {
@@ -866,19 +884,19 @@ if (ledMatch) {
 
   // Answer callback
   if (callbackQueryId) {
-    const label = ledColor ? ('ðŸ’¡ ' + ledColor.charAt(0).toUpperCase() + ledColor.slice(1) + ' LED') : 'âš« No LED';
+    const label = ledColor ? ('' ' + ledColor.charAt(0).toUpperCase() + ledColor.slice(1) + ' LED') : ' No LED';
     try {
       await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/answerCallbackQuery', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callback_query_id: callbackQueryId, text: label + ' â€” generating hook...' }),
+        body: JSON.stringify({ callback_query_id: callbackQueryId, text: label + ' " generating hook...' }),
       });
     } catch (e) { /* non-fatal */ }
   }
 
   // Update button
   if (messageId) {
-    const btnLabel = ledColor ? ('ðŸ’¡ ' + ledColor.charAt(0).toUpperCase() + ledColor.slice(1) + ' LED') : 'âš« No LED';
+    const btnLabel = ledColor ? ('' ' + ledColor.charAt(0).toUpperCase() + ledColor.slice(1) + ' LED') : ' No LED';
     try {
       await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/editMessageReplyMarkup', {
         method: 'POST',
@@ -920,7 +938,7 @@ if (ledMatch) {
       body: JSON.stringify({ fields: { time_of_day: 'night', led_color: ledColor, phone_id: assignedPhone.phoneId, status: 'ready' } }),
     });
 
-    // 5. Check batch â€” creates queue record if this phone has 3+ ready scenarios
+    // 5. Check batch " creates queue record if this phone has 3+ ready scenarios
     batchResult = await checkAndCreateBatch(assignedPhone, hookImagePrompt, sora2SpeakingPrompt, conceptIdStr, 'night', ledColor);
   } catch (e) {
     hookRequestError = e.message;
@@ -961,10 +979,10 @@ if (ledMatch) {
   return [{ json: { type: 'led_selection', scenarioRecordId, timeOfDay: 'night', ledColor, chatId } }];
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// DAY/NIGHT CALLBACK â€” tod_day_{scenarioRecordId} / tod_night_{scenarioRecordId}
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// DAY/NIGHT CALLBACK " tod_day_{scenarioRecordId} / tod_night_{scenarioRecordId}
 // Replaces /day and /night text commands with inline keyboard
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 const todMatch = callbackData.match(/^tod_(day|night)_(.+)$/);
 if (todMatch) {
   const timeOfDay = todMatch[1];
@@ -1026,7 +1044,7 @@ if (todMatch) {
     return [{ json: { type: 'tod_night_asking_led', scenarioRecordId, chatId, callbackQueryId } }];
   }
 
-  // DAY â€” update button, create hook request inline, confirm
+  // DAY " update button, create hook request inline, confirm
   if (messageId) {
     try {
       await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/editMessageReplyMarkup', {
@@ -1068,7 +1086,7 @@ if (todMatch) {
       body: JSON.stringify({ fields: { time_of_day: 'day', led_color: '', phone_id: dayAssignedPhone.phoneId, status: 'ready' } }),
     });
 
-    // 5. Check batch â€” creates queue record if this phone has 3+ ready scenarios
+    // 5. Check batch " creates queue record if this phone has 3+ ready scenarios
     dayBatchResult = await checkAndCreateBatch(dayAssignedPhone, hookImagePrompt, sora2SpeakingPrompt, conceptIdStr, 'day', '');
   } catch (e) {
     dayError = e.message;
@@ -1107,10 +1125,10 @@ if (todMatch) {
   return [{ json: { type: 'led_selection', scenarioRecordId, timeOfDay: 'day', ledColor: '', chatId } }];
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// HOOK GENERATOR CALLBACKS â€” img_approve/img_redo/vid_skip/vid_all
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// HOOK GENERATOR CALLBACKS " img_approve/img_redo/vid_skip/vid_all
 // Handled here (webhook) so buttons update INSTANTLY
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 
 if (callbackData.startsWith('img_approve_') || callbackData.startsWith('img_redo_')) {
   const isApprove = callbackData.startsWith('img_approve_');
@@ -1226,9 +1244,9 @@ if (callbackData === 'noop') {
   return [{ json: { type: 'noop', chatId, callbackQueryId } }];
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
-// SCENARIO APPROVAL â€” approve/redo/skip_{scenarioName}
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
+// SCENARIO APPROVAL " approve/redo/skip_{scenarioName}
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 const parts = callbackData.split('_');
 const action = parts[0];
 const scenarioName = parts.slice(1).join('_');

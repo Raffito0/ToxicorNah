@@ -2,8 +2,8 @@
 // Handles image generation via kie.ai's Nano Banana Pro API
 //
 // API flow:
-//   1. POST /api/v1/jobs/createTask → taskId
-//   2. GET  /api/v1/jobs/recordInfo?taskId=xxx → poll until success → resultUrls[]
+//   1. POST /api/v1/jobs/createTask -> taskId
+//   2. GET  /api/v1/jobs/recordInfo?taskId=xxx -> poll until success -> resultUrls[]
 //
 // Supports up to 8 reference images for character/environment consistency
 // Pricing: ~$0.09/image (1K-2K), ~$0.12/image (4K)
@@ -99,7 +99,7 @@ async function generate(apiKey, prompt, imageRefs = [], options = {}, timeoutMs 
       };
     }
 
-    // Still processing (waiting, queuing, generating) — continue polling
+    // Still processing (waiting, queuing, generating) -- continue polling
   }
 
   return { success: false, error: 'Timeout after ' + (timeoutMs / 1000) + 's', taskId };

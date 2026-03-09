@@ -38,6 +38,8 @@ const codeMap = {
   'process-review.js': 'Process Review',
   'monitor-availability.js': 'Monitor Availability',
   'save-to-content-library.js': 'Save to Content Library',
+  'auto-produce.js': 'Auto Produce',
+  'set-produce-context.js': 'Set Produce Context',
 };
 
 let totalUpdated = 0;

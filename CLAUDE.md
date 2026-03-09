@@ -103,7 +103,7 @@
 - VO limit: 50 characters max (character-based, not word-based)
 
 ## Workflow 3 — Video Pipeline (Modular)
-- **Trigger**: Telegram commands: `#body`, `#hook`, `#outro`, `/produce`
+- **Trigger**: Telegram commands: `#body`, `#hook`, `#outro`, `/produce` + Auto Produce Schedule (30 min) + Webhook
 - **Modular by concept**: hook_type per concept (manual_clip, ai_image, ai_multi_image, speaking, reaction)
 - **Outro Pool**: weighted random selection from enabled options per concept (`outro_pool_json` in Video Concepts)
 - **Video Templates**: beat-synced at 120 BPM, segments with fixed durations (Standard 17s, Extended 20s, Snappy 14s, Long 23s)
@@ -117,7 +117,7 @@
 - **VO**: ElevenLabs v3 (primary), Fish.audio s1 (backup) — `TTS_PROVIDER` toggle in code
 - **Approvals**: every AI asset → Telegram inline keyboard → Wait node → Workflow 2 callback
 - Airtable tables: Video Templates (`tblmyK72H7PlJeskQ`), Music Library (`tblrI9FPHxkfgyrii`)
-- Key code files: `parse-video-message.js`, `save-clip.js`, `prepare-production.js`, `generate-hook.js`, `generate-outro.js`, `generate-voiceover.js`, `extract-frame.js`, `img-to-video.js`, `assemble-video.js`
+- Key code files: `parse-video-message.js`, `save-clip.js`, `prepare-production.js`, `generate-hook.js`, `generate-outro.js`, `generate-voiceover.js`, `extract-frame.js`, `img-to-video.js`, `assemble-video.js`, `auto-produce.js`, `set-produce-context.js`
 - Chat Screenshot concept: hook = manual clip (not Puppeteer), HAS outro (from pool)
 - Before After concept: hook = 3 AI images (1s each) OR manual 3s clip
 - **Hook types renamed**: `kling_lipsync` → `speaking`, `kling_motion` → `reaction`. Kling no longer used for hooks — all via Sora 2
@@ -135,7 +135,7 @@
 - **Topaz deflicker**: fal.ai Topaz Video Upscaler (`fal-ai/topaz/upscale/video`) applied to each 3s trimmed clip in `process-review.js` before upload to Hook Pool. `upscale_factor: 1` (same res, just deflicker/stabilize/denoise). Cost: $0.01/sec × 3s = $0.03/clip. Graceful fallback: if Topaz fails, raw clip is used. Queue API: submit → poll status → get result
 - **Anti-flicker prompt keywords**: Added to `buildSpeakingPrompt()` and `REACTION_MOTION_PROMPTS` in `hook-generator.js`: "consistent lighting, stable exposure, temporal consistency, smooth skin texture, no brightness fluctuation". Reduces Sora 2 flickering at source ~60-70%
 - **Multi-Phone System**: Pipeline is phone-aware. Each phone has its own girl, voice, Telegram chat, and hook quota
-  - Phones table (`tblCvT47GpZv29jz9`): `telegram_chat_id`, `girl_ref_url`, `elevenlabs_voice_id`, `videos_per_day`
+  - Phones table (`tblCvT47GpZv29jz9`): `telegram_chat_id`, `girl_ref_url`, `elevenlabs_voice_id`, `videos_per_day`, `topic_assemble_id`, `topic_images_videos_id`
   - Hook Pool + Queue: `phone_id` field links clips/jobs to specific phones
   - `prepare-production.js`: Looks up phone by `telegram_chat_id` from chatId, passes `phoneId/phoneName/phoneRecordId/phoneVoiceId/phoneGirlRefUrl` downstream
   - `generate-hook.js`: Prefers `phoneGirlRefUrl` over concept `girlRefUrl`, filters Hook Pool by `phone_id`
@@ -146,15 +146,36 @@
 - **Content Library** (`tblx1KX7mlTX5QyGb`): `save-to-content-library.js` runs after "Send Final Video" — downloads video from Telegram → uploads to Cloudflare R2 → saves permanent R2 URL + social_caption + phone_id + platform_status_tiktok/ig='pending' to Airtable. ADB software reads from here
 - **Cloudflare R2**: Storage for permanent video URLs + girl ref images. Bucket: `toxic-or-nah`, public dev URL: `https://pub-6e119e86bbae4479912db5c9a79d8fed.r2.dev`. Upload via S3 API with AWS Sig V4 (built-in `crypto` module). Env vars: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_URL`. Girl ref images at `girls/phone-{1,2,3}.jpg`, videos at `videos/{name}_{timestamp}.mp4`
 - **URL expiration gotchas**: Telegram file URLs expire after ~1 hour (officially). Airtable attachment URLs expire after ~2 hours. Neither is suitable for permanent storage → use R2
-- **Telegram chat structure**: @Prep01_Bot (scenarios, shared), @Ueien_bot (everything else — per-phone chats). @asdfsfddfdffbot deprecated
-  - Phone 1: chat_id `-5281394823`, Phone 2: `-5070665033`, Phone 3: `-5005369370`
-  - Each phone chat receives: hook images, Sora 2 review videos, trimmed clips, `/produce` flow, final videos
+- **Telegram chat structure**: @Prep01_Bot (scenarios, shared), @Ueien_bot (everything else — per-phone supergroups with forum topics). @asdfsfddfdffbot deprecated
+  - **SUPERGROUPS (forum topics enabled, 2026-03-09)**:
+    - Phone 1: chat_id `-1003628617587`, topic_images_videos=`16`
+    - Phone 2: chat_id `-1003822830975`, topic_images_videos=`3`
+    - Phone 3: chat_id `-1003808705017`, topic_images_videos=`3`
+  - OLD chat IDs (NO LONGER VALID): Phone 1 `-5281394823`, Phone 2 `-5070665033`, Phone 3 `-5005369370`
+  - **Forum Topics**: "Assemble" = renamed General topic (NO message_thread_id needed), "Images & Videos" = custom topic (needs message_thread_id)
+  - `topic_assemble_id` in Airtable Phones table = EMPTY (General doesn't need thread ID)
+  - `topic_images_videos_id` in Airtable Phones table = topic ID per phone (16, 3, 3)
+  - Each phone chat receives: hook images → "Images & Videos" topic, VOs/outro/final → "Assemble" (General) topic
   - @Ueien_bot privacy mode DISABLED (required for receiving text messages like timestamps in group chats)
+  - **Supergroup gotcha**: enabling forum topics migrates groups to supergroups with NEW chat IDs. Old IDs return "group chat was upgraded to a supergroup chat" with `migrate_to_chat_id`
+  - **Bot must be member**: after supergroup migration, bot may lose access — remove and re-add to each group
+  - **General topic**: sending without `message_thread_id` goes to General (= Assemble). Sending with `message_thread_id=1` FAILS ("message thread not found")
 - **Per-phone delivery**: Hook Generator sends images/videos to `phone.telegram_chat_id` (looked up from Phones table). `tgSendPhoto`/`tgSendVideo`/`tgSendMessage` accept `targetChatId` param, fallback to `HOOK_CHAT`
 - **Trim processing**: Handled by `process-hook-trim.js` in Unified Pipeline (NOT in Hook Generator). Looks up phone from chatId → filters queue by `phone_id` → trims → sends clips to same chat → saves to Hook Pool. Triggered via Telegram Trigger webhook (no getUpdates conflict)
 - **Scenario Generator auto-loop**: `select-concept.js` has quota logic — loads active phones, calculates `SUM(videos_per_day) * 7 / 2 * 3` scenarios needed, counts available (approved + has `generated_hook_text`), skips if enough. After Send Photo (Telegram) loops back to Get Active Concepts for next scenario. "Should Generate?" IF node gates the flow. Fully automatic — adding a phone increases quota automatically
 - **Hook texts from Scenarios table**: `batch-generate-hooks.js` uses `fetchScenarioHookTexts()` to query Scenarios table (`tblcQaMBBPcOAy0NF`) for approved scenarios with `generated_hook_text`, NOT the old Hook Text Pool
 - **One-at-a-time video delivery**: `saveToQueue()` saves with `status: 'completed'`, `deliverNextForReview()` checks for active `review_sent` before delivering next. Videos queue up, delivered one at a time for review
+- **Auto Produce System** (2026-03-09): Automatic parallel video production for all phones
+  - Schedule Trigger (every 30 min) → `auto-produce.js` checks quota per phone → triggers webhook per phone
+  - Each webhook call = separate n8n execution = TRUE parallel production (3 phones simultaneously)
+  - Quota: `videos_per_day * 7` pending videos per phone. Stops when phone has enough Content Library stock
+  - In-progress guard: checks Video Runs table for `status='started'` per phone — won't launch 2nd production for same phone
+  - `set-produce-context.js`: merge node that standardizes data from both manual `/produce` and auto webhook paths
+  - `prepare-production.js` references `$('Set Produce Context')` (was `$('Parse Message')`)
+  - Ack Produce prefixes "🤖 Auto: " for auto-triggered productions
+  - Approval gates UNCHANGED — user still approves hook/VO/outro via Telegram inline keyboard
+  - Key files: `auto-produce.js`, `set-produce-context.js`
+  - Webhook path: `auto-produce` (internal, called from `http://localhost:5678/webhook/auto-produce`)
 
 ## n8n Docker/VPS Setup
 - VPS: Hostinger, IP `72.62.61.93`, docker-compose at `/docker/n8n/docker-compose.yml`
@@ -273,8 +294,66 @@
 - `planner/formatter.py` — JSON + TXT output
 - `delivery/` — Video Delivery Bridge (see above)
 
-## CURRENT TODO (2026-03-09)
-1. **Batch Generator**: Import `workflow-hook-batch.json` + `unified-pipeline-fixed.json` on n8n → test
-2. **Produce videos for Phone 1 and Phone 3** (currently 0 pending in Content Library)
-3. **ADB serials**: Configure `ADB_SERIAL_PHONE1/2/3` env vars for delivery bridge
-4. **WisGate provider**: API works (submit/poll OK) but aggressive content filter. Integrate as fallback in sora2Race() if needed
+## CURRENT OBJECTIVE (2026-03-09): Auto-Produce + Forum Topics
+
+### Cosa funziona gia:
+- Auto-produce triggera 3 phone in parallelo (webhook per phone, esecuzioni separate)
+- VO segments arrivano su Telegram nel topic General/Assemble di ogni phone
+- `topic_assemble_id` svuotato (General = Assemble, nessun message_thread_id)
+- `topic_images_videos_id` corretto per tutti i phone (16, 3, 3)
+
+### Problema attuale (dove riprendere):
+**Generate VO node fallisce con SyntaxError** su tutti e 3 i phone. L'errore era causato da **encoding corrotto** (smart quotes + Unicode arrows/box chars nei file JS). Fix applicato:
+1. **899 smart quotes** (`""''`) sostituite con virgolette normali in 19 file
+2. **Frecce/em-dash/box chars** Unicode sostituiti con ASCII equivalenti
+3. **Mojibake patterns** (`\u00E2\u20AC` etc.) rimossi
+4. **Syntax fix**: `' ' '` (da rimozione freccia `->`) corretto in `' -> '` in `generate-voiceover.js:160`
+
+### Stato deploy:
+- ✅ Codice sorgente fixato (tutti i file in `n8n/code/`)
+- ✅ `embed-code.cjs` eseguito → workflow JSON aggiornati
+- ⚠️ **PROSSIMO STEP**: Importare `unified-pipeline-fixed.json` su n8n VPS
+- ⚠️ Dopo import: **disattivare e riattivare** il workflow (registra webhook Telegram)
+- ⚠️ Pulire Video Runs `status='started'` prima di ritriggare (usare Airtable MCP o API)
+- ⚠️ Poi triggare auto-produce e verificare che Generate VO funzioni
+
+### Test da fare dopo deploy:
+1. Importare workflow su n8n
+2. Disattivare + riattivare workflow
+3. Pulire eventuali Video Runs con `status='started'`
+4. Triggare auto-produce (manualmente dal Schedule Trigger o aspettare 30 min)
+5. Verificare che i VO arrivino su tutti e 3 i phone
+6. Premere Approve sui VO → verificare che il callback funzioni (Parse Callback era rotto, ora fixato)
+7. Se VO approvati → pipeline continua con hook → outro → assembly → video finale
+
+### Problemi risolti oggi (2026-03-09):
+1. **Webhook 404**: auto-produce POST ma webhook accettava solo GET → aggiunto `httpMethod: POST`
+2. **$('Parse Message') not executed**: auto-produce path bypassa Parse Message → cambiato a `$('Set Produce Context')` in Find Scenario e Find Template
+3. **Supergroup migration**: abilitare forum topics cambia chat_id → aggiornati tutti gli ID in Airtable
+4. **Bot non vedeva supergroup**: rimosso e riaggiunto @Ueien_bot a Phone 2 e 3
+5. **message_thread_id=1 invalido**: General topic non usa thread ID → svuotato `topic_assemble_id`
+6. **Smart quotes SyntaxError**: `""''` nei file JS → sostituite con `""''` ASCII
+7. **Unicode arrows/box chars**: `->`, `--`, `+` nei commenti → sostituiti con ASCII
+8. **Generate VO broken string**: `' ' '` → `' -> '` dopo rimozione freccia
+
+### File chiave modificati oggi:
+- `n8n/code/telegram-callback-handler.js` — withTopic() helper per forum routing
+- `n8n/code/handle-done.js` — phone lookup per topic_assemble_id
+- `n8n/code/auto-produce.js` — trigger webhook per phone
+- `n8n/code/set-produce-context.js` — merge node per manual/auto paths
+- `n8n/code/generate-voiceover.js` — syntax fix linea 160
+- `n8n/code/send-vo-segments.js` — topicAssembleId per VO messages
+- `n8n/unified-pipeline-fixed.json` — webhook POST, Set Produce Context refs, topic routing
+- TUTTI i file in `n8n/code/` — encoding fix (smart quotes, Unicode)
+
+### Encoding gotcha IMPORTANTE:
+- I file JS in `n8n/code/` erano pieni di **smart quotes** (`""`) e **Unicode chars** (`->`, `--`, box drawing `+===+`)
+- Questi funzionano in VS Code ma ROMPONO il JavaScript engine di n8n (Code node sandbox)
+- **MAI** usare caratteri non-ASCII nel codice JS per n8n. Solo ASCII puro
+- Script di pulizia: `n8n/fix_encoding.py` — rimuove tutti i non-ASCII problematici
+- Se un file viene editato e reintroduce smart quotes, rieseguire: `python3 n8n/fix_encoding.py && node n8n/embed-code.cjs`
+
+### TODO futuro:
+1. **Batch Generator**: Import `workflow-hook-batch.json` su n8n → test
+2. **ADB serials**: Configure `ADB_SERIAL_PHONE1/2/3` env vars per delivery bridge
+3. **WisGate provider**: Integrate as fallback in sora2Race() if needed

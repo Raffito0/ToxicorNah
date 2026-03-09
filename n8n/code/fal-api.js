@@ -3,12 +3,12 @@
 // since n8n Code node sandbox can't require() local files.
 //
 // Two Kling endpoints via fal.ai:
-// 1. Kling Avatar V2 (lip-sync): reference image + audio → lip-synced video
-// 2. Kling Image-to-Video V2 (motion): reference image + prompt → gesture video
+// 1. Kling Avatar V2 (lip-sync): reference image + audio -> lip-synced video
+// 2. Kling Image-to-Video V2 (motion): reference image + prompt -> gesture video
 //
-// Both use the same queue mechanism: submit → poll status → get result
+// Both use the same queue mechanism: submit -> poll status -> get result
 
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// --- fetch polyfill (n8n Code node sandbox lacks global fetch) ---
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -54,7 +54,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── fal.ai queue helpers ───
+// --- fal.ai queue helpers ---
 
 const FAL_AVATAR_ENDPOINT = 'fal-ai/kling-video/ai-avatar/v2/standard';
 const FAL_I2V_ENDPOINT = 'fal-ai/kling-video/v2/master/image-to-video';
@@ -125,10 +125,10 @@ async function falPoll(falKey, endpoint, requestId, timeoutMs = FAL_TIMEOUT) {
         throw new Error('fal.ai job failed: ' + JSON.stringify(statusData));
       }
 
-      // IN_QUEUE or IN_PROGRESS — keep polling
+      // IN_QUEUE or IN_PROGRESS -- keep polling
     } catch (err) {
       if (err.message.includes('failed') || err.message.includes('FAILED')) throw err;
-      // Network error — wait longer and retry
+      // Network error -- wait longer and retry
       await new Promise(r => setTimeout(r, FAL_POLL_INTERVAL * 2));
     }
   }
@@ -202,7 +202,7 @@ async function downloadVideo(videoUrl) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-// Export for reference (not used in n8n — functions are inlined)
+// Export for reference (not used in n8n -- functions are inlined)
 module.exports = {
   falSubmit,
   falPoll,

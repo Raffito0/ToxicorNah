@@ -1,4 +1,4 @@
-// NODE: Batch Generate Hooks (Schedule Trigger — 8 AM CET / 6 AM UTC)
+// NODE: Batch Generate Hooks (Schedule Trigger -- 8 AM CET / 6 AM UTC)
 // Pre-generates Sora 2 hook videos during off-peak hours (5-15 CET = low error rate).
 // Each 15s Sora 2 video = 5 × 3s hook segments stored in Hook Pool.
 // /produce pulls from pool instantly instead of waiting for real-time Sora 2 generation.
@@ -7,23 +7,23 @@
 //   1. Weighted random pick of concept (batch_weight field on Concepts table)
 //   2. Weighted random pick of sub_concept within that concept (weight in sub_concepts_json)
 //   3. For ALL active phones in parallel: generate unique kie.ai image + Sora 2 video
-//   4. If Sora 2 fails, retry persistently (same combo) — never skip
+//   4. If Sora 2 fails, retry persistently (same combo) -- never skip
 //   5. Repeat for BATCHES_PER_RUN rounds
 //
 // Cost: $0.025 per 15s video = $0.005 per hook. At 3 phones × 3 rounds = 9 videos = $0.225/run.
 //
-// WIRING: Schedule Trigger (0 6 * * *) → this Code node
+// WIRING: Schedule Trigger (0 6 * * *) -> this Code node
 //
 // Airtable tables:
-//   - Video Concepts (tblhhTVI4EYofdY32) — source of concept configs + batch_weight
-//   - Hook Pool (tbl3q91o3l0isSX9w) — stores pre-generated hook video segments
-//   - Phones (tblCvT47GpZv29jz9) — active phones with girl_ref_url
+//   - Video Concepts (tblhhTVI4EYofdY32) -- source of concept configs + batch_weight
+//   - Hook Pool (tbl3q91o3l0isSX9w) -- stores pre-generated hook video segments
+//   - Phones (tblCvT47GpZv29jz9) -- active phones with girl_ref_url
 // Mode: Run Once for All Items
 
 const fs = require('fs');
 const { execSync } = require('child_process');
 
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// --- fetch polyfill (n8n Code node sandbox lacks global fetch) ---
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -70,7 +70,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── Config ───
+// --- Config ---
 const ABASE = 'appsgjIdkpak2kaXq';
 const CONCEPTS_TABLE = 'tblhhTVI4EYofdY32';
 const HOOK_POOL_TABLE = 'tbl3q91o3l0isSX9w';
@@ -82,7 +82,7 @@ const APIMART_MODELS = ['sora-2', 'sora-2-vip'];
 const BATCHES_PER_RUN = 3; // rounds per scheduled execution
 const SORA2_RETRY_COOLDOWN_SEC = 120; // wait between full retry cycles when Sora 2 is down
 
-// ─── kie.ai image generation ───
+// --- kie.ai image generation ---
 async function kieGenerate(prompt, imageRefs, options = {}) {
   const { timeOfDay = 'day' } = options;
   const lighting = timeOfDay === 'night' ? 'nighttime' : 'daytime';
@@ -122,7 +122,7 @@ async function kiePoll(taskId) {
   }
 }
 
-// ─── APIMart Sora 2 ───
+// --- APIMart Sora 2 ---
 async function apimartSubmit(model, imageUrl, prompt, options = {}) {
   const { duration = 15 } = options;
   const reqBody = { model, prompt, duration, aspect_ratio: '9:16', watermark: false, private: true };
@@ -227,7 +227,7 @@ async function sora2Persistent(imageUrl, prompt, options = {}, label = '', botTo
   }
 }
 
-// ─── Batch image prompt pools ───
+// --- Batch image prompt pools ---
 // speaking = kling_lipsync (selfie, direct gaze), reaction = kling_motion (candid, phone reading)
 const BATCH_IMAGE_PROMPTS = {
   kling_motion: [
@@ -243,26 +243,26 @@ const BATCH_IMAGE_PROMPTS = {
   ],
 };
 
-// ─── Batch motion prompt pools ───
+// --- Batch motion prompt pools ---
 const BATCH_MOTION_PROMPTS = {
   kling_motion: [
-    'Locked off tripod shot, static camera, continuous uncut 15-second shot — girl sitting on bed holding phone still, not typing, screen not visible. She cycles through distinct micro-reactions: completely motionless with one slow blink, jaw subtly tightens, micro head tilt with eyes narrowing, brief eye-widen then settle, controlled exhale with lips pressing. Each reaction separated by moments of stillness. No tears, dry eyes, no text, no watermark, no subtitles',
-    'Locked off tripod shot, static camera, continuous uncut 15-second shot — girl sitting on couch holding phone still, not typing, screen not visible. Subtle shifting reactions: frozen stare, slight head shake, jaw tightens then relaxes, eyes briefly look away then refocus, one slow controlled blink. Natural rhythm between reactions. No tears, dry eyes, no text, no watermark, no subtitles',
-    'Locked off tripod shot, static camera, continuous uncut 15-second shot — girl on bed with phone, not typing, screen not visible. Series of contained reactions: blank expression then micro eyebrow raise, slight lean forward, eyes narrow briefly, jaw sets with controlled breath, head tilts slightly. Each beat is distinct. No tears, dry eyes, no text, no watermark, no subtitles',
+    'Locked off tripod shot, static camera, continuous uncut 15-second shot -- girl sitting on bed holding phone still, not typing, screen not visible. She cycles through distinct micro-reactions: completely motionless with one slow blink, jaw subtly tightens, micro head tilt with eyes narrowing, brief eye-widen then settle, controlled exhale with lips pressing. Each reaction separated by moments of stillness. No tears, dry eyes, no text, no watermark, no subtitles',
+    'Locked off tripod shot, static camera, continuous uncut 15-second shot -- girl sitting on couch holding phone still, not typing, screen not visible. Subtle shifting reactions: frozen stare, slight head shake, jaw tightens then relaxes, eyes briefly look away then refocus, one slow controlled blink. Natural rhythm between reactions. No tears, dry eyes, no text, no watermark, no subtitles',
+    'Locked off tripod shot, static camera, continuous uncut 15-second shot -- girl on bed with phone, not typing, screen not visible. Series of contained reactions: blank expression then micro eyebrow raise, slight lean forward, eyes narrow briefly, jaw sets with controlled breath, head tilts slightly. Each beat is distinct. No tears, dry eyes, no text, no watermark, no subtitles',
   ],
   kling_lipsync: [
-    'Close-up selfie angle, direct camera gaze, continuous uncut 15-second shot — girl looking directly at camera with subtle shifting micro-expressions: frozen stare with slow blink, slight head tilt with jaw tightening, eyes narrow with one eyebrow raised, slow controlled breath with lips parting slightly, direct intense gaze with jaw set. Each expression natural and unhurried. No text, no watermark, no subtitles',
-    'Close-up selfie angle, direct camera gaze, continuous uncut 15-second shot — girl looking into camera with evolving reactions: completely still then micro blink, deadpan smirk forming, eyes widening slightly, controlled exhale through nose, head tilts with narrowed eyes. Natural pace. No text, no watermark, no subtitles',
+    'Close-up selfie angle, direct camera gaze, continuous uncut 15-second shot -- girl looking directly at camera with subtle shifting micro-expressions: frozen stare with slow blink, slight head tilt with jaw tightening, eyes narrow with one eyebrow raised, slow controlled breath with lips parting slightly, direct intense gaze with jaw set. Each expression natural and unhurried. No text, no watermark, no subtitles',
+    'Close-up selfie angle, direct camera gaze, continuous uncut 15-second shot -- girl looking into camera with evolving reactions: completely still then micro blink, deadpan smirk forming, eyes widening slightly, controlled exhale through nose, head tilts with narrowed eyes. Natural pace. No text, no watermark, no subtitles',
   ],
 };
 
-// Aliases: speaking→lipsync prompts, reaction→motion prompts
+// Aliases: speaking->lipsync prompts, reaction->motion prompts
 BATCH_IMAGE_PROMPTS.speaking = BATCH_IMAGE_PROMPTS.kling_lipsync;
 BATCH_IMAGE_PROMPTS.reaction = BATCH_IMAGE_PROMPTS.kling_motion;
 BATCH_MOTION_PROMPTS.speaking = BATCH_MOTION_PROMPTS.kling_lipsync;
 BATCH_MOTION_PROMPTS.reaction = BATCH_MOTION_PROMPTS.kling_motion;
 
-// ─── Utility functions ───
+// --- Utility functions ---
 function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 // Pick N unique items from array (shuffled). If N > arr.length, allows repeats.
@@ -287,9 +287,9 @@ function weightedPick(items, weightFn) {
   return items[items.length - 1];
 }
 
-// ═══════════════════════════════════════
+// =======================================
 // Main batch logic
-// ═══════════════════════════════════════
+// =======================================
 
 const ATOKEN = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
 const TBOT = (typeof $env !== 'undefined' && $env.TELEGRAM_BOT_TOKEN) || '';
@@ -389,7 +389,7 @@ const results = [];
 
 for (let round = 0; round < BATCHES_PER_RUN; round++) {
   const roundLabel = 'Round ' + (round + 1) + '/' + BATCHES_PER_RUN;
-  console.log('\n[' + roundLabel + '] ─────────────────────');
+  console.log('\n[' + roundLabel + '] ---------------------');
 
   // a. Weighted pick of concept
   const concept = weightedPick(activeConcepts, c => c.batchWeight);
@@ -501,8 +501,8 @@ for (let round = 0; round < BATCHES_PER_RUN; round++) {
   // Telegram notification per round
   if (TBOT && ADMIN_CHAT) {
     const msg = roundFailures.length > 0
-      ? '\u26A0\uFE0F ' + roundLabel + ': ' + concept.conceptName + '/' + hookType + ' — ' + roundSuccesses.length + '/' + activePhones.length + ' phones OK (' + totalSegs + ' clips)\nFailed: ' + roundFailures.map(f => f.phoneId).join(', ')
-      : '\u2705 ' + roundLabel + ': ' + concept.conceptName + '/' + hookType + ' — ' + activePhones.length + ' phones, ' + totalSegs + ' clips generated';
+      ? '\u26A0\uFE0F ' + roundLabel + ': ' + concept.conceptName + '/' + hookType + ' -- ' + roundSuccesses.length + '/' + activePhones.length + ' phones OK (' + totalSegs + ' clips)\nFailed: ' + roundFailures.map(f => f.phoneId).join(', ')
+      : '\u2705 ' + roundLabel + ': ' + concept.conceptName + '/' + hookType + ' -- ' + activePhones.length + ' phones, ' + totalSegs + ' clips generated';
     try {
       await fetch('https://api.telegram.org/bot' + TBOT + '/sendMessage', {
         method: 'POST',
@@ -530,7 +530,7 @@ const summary = '\uD83D\uDCCA Hook Pool Batch Complete\n' +
   '\u2705 Generated: ' + totalGenerated + ' videos (' + totalSegments + ' clips)\n' +
   (totalFailed > 0 ? '\u274C Failed: ' + totalFailed + ' videos\n' : '') +
   '\nBreakdown:\n' +
-  results.map(r => '  R' + r.round + ': ' + r.conceptId + '/' + r.hookType + ' — ' + r.generated + ' ok' +
+  results.map(r => '  R' + r.round + ': ' + r.conceptId + '/' + r.hookType + ' -- ' + r.generated + ' ok' +
     (r.failed > 0 ? ', ' + r.failed + ' failed' : '')).join('\n');
 
 console.log(summary);

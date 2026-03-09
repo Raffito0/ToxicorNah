@@ -1,4 +1,4 @@
-// NODE: Monitor Availability (Schedule Trigger — every 30 minutes)
+// NODE: Monitor Availability (Schedule Trigger -- every 30 minutes)
 // Probes PoYo Sora 2 API availability and records results in Airtable.
 // After several days of data, patterns emerge showing best hours/days for generation.
 //
@@ -7,10 +7,10 @@
 //
 // At 23:30 CET (21:30 UTC), also runs daily analysis and sends Telegram summary.
 //
-// WIRING: Schedule Trigger (*/30 * * * *) → this Code node
+// WIRING: Schedule Trigger (*/30 * * * *) -> this Code node
 // Mode: Run Once for All Items
 
-// ─── fetch polyfill ───
+// --- fetch polyfill ---
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -55,7 +55,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── Config ───
+// --- Config ---
 const ABASE = 'appsgjIdkpak2kaXq';
 const MONITOR_TABLE = 'tbluInOlQ1Biyg1CB';
 const POYO_KEY = (typeof $env !== 'undefined' && $env.POYO_API_KEY) || 'sk-vJqqGNNTcH9g89DnEYum48LHkdR0R6sZ-qQCFoiWzCJQlPmXKtbIdOWiRGnhB-';
@@ -65,7 +65,7 @@ const ADMIN_CHAT = (typeof $env !== 'undefined' && $env.ADMIN_CHAT_ID) || '51204
 
 const MODELS_TO_PROBE = ['sora-2'];
 
-// ─── CET time helpers ───
+// --- CET time helpers ---
 function getCETTime() {
   const now = new Date();
   const month = now.getUTCMonth();
@@ -91,7 +91,7 @@ function getCETTime() {
   };
 }
 
-// ─── Probe PoYo ───
+// --- Probe PoYo ---
 async function probePoyo(model) {
   const start = Date.now();
   try {
@@ -136,7 +136,7 @@ async function probePoyo(model) {
   }
 }
 
-// ─── Save probe result to Airtable ───
+// --- Save probe result to Airtable ---
 async function saveProbe(cet, provider, model, result) {
   if (!ATOKEN) return;
 
@@ -167,7 +167,7 @@ async function saveProbe(cet, provider, model, result) {
   }
 }
 
-// ─── Daily analysis (runs at 23:30 CET) ───
+// --- Daily analysis (runs at 23:30 CET) ---
 async function runDailyAnalysis() {
   if (!ATOKEN) return null;
 
@@ -277,9 +277,9 @@ async function runDailyAnalysis() {
   return summary;
 }
 
-// ═══════════════════════════════════════
+// =======================================
 // Main logic
-// ═══════════════════════════════════════
+// =======================================
 
 const cet = getCETTime();
 console.log('[monitor] Probe at ' + cet.isoString + ' (' + cet.dayOfWeek + ' ' + String(cet.hour).padStart(2, '0') + ':' + String(cet.minute).padStart(2, '0') + ' CET)');

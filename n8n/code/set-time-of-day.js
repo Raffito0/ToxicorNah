@@ -4,11 +4,11 @@
 // NIGHT: asks LED color via inline keyboard. Callback handler completes the flow.
 // Mode: Run Once for All Items
 //
-// WIRING: Switch (set_time_of_day) â†’ this Code node â†’
-//   IF askingLed â†’ Send LED Question (Telegram with inline keyboard)
-//   ELSE â†’ Update Scenario Recorded (Airtable chain)
+// WIRING: Switch (set_time_of_day) ' this Code node '
+//   IF askingLed ' Send LED Question (Telegram with inline keyboard)
+//   ELSE ' Update Scenario Recorded (Airtable chain)
 
-// Helper: "toxic-sad-happy-girl-1771197483216" â†’ "Toxic Sad Happy Girl"
+// Helper: "toxic-sad-happy-girl-1771197483216" ' "Toxic Sad Happy Girl"
 function formatName(raw) {
   if (!raw) return 'Scenario';
   return raw.replace(/-\d{10,}$/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -23,7 +23,7 @@ if (!staticData.activeRecording) {
     json: {
       error: true,
       chatId: input.chatId,
-      message: 'âš ï¸? Nessuna registrazione attiva. Manda /done prima di specificare giorno o notte.',
+      message: ' ï? Nessuna registrazione attiva. Manda /done prima di specificare giorno o notte.',
     }
   }];
 }
@@ -34,19 +34,19 @@ const scenarioRecordId = rec.scenarioRecordId;
 const clipCount = rec.clipCount || rec.receivedCount || 0;
 
 if (timeOfDay === 'night') {
-  // Don't clear state yet â€” wait for LED color answer
+  // Don't clear state yet " wait for LED color answer
   staticData.activeRecording.timeOfDay = 'night';
   return [{
     json: {
       askingLed: true,
       chatId: input.chatId,
       scenarioRecordId,
-      message: 'ðŸŒ™ Night â€” che LED hai usato?',
+      message: ' Night " che LED hai usato?',
     }
   }];
 }
 
-// DAY â€” complete immediately
+// DAY " complete immediately
 staticData.activeRecordingTimeOfDay = timeOfDay;
 delete staticData.activeRecording;
 
@@ -58,7 +58,7 @@ return [{
     clipCount,
     timeOfDay,
     ledColor: '',
-    timeLabel: 'â˜€ï¸? Day',
-    message: 'âœ… ' + clipCount + ' clip â€” â˜€ï¸? Day â€” salvate per "' + formatName(scenarioName) + '".\n\nâ?³ Generando hook image...',
+    timeLabel: 'ï? Day',
+    message: '... ' + clipCount + ' clip " ï? Day " salvate per "' + formatName(scenarioName) + '".\n\n?³ Generando hook image...',
   }
 }];

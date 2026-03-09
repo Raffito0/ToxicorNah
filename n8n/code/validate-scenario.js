@@ -27,7 +27,7 @@ function repairJson(raw) {
   s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
 
   // 4. Smart quote repair: walk through and escape internal quotes
-  // When we see a " inside a string, peek ahead — if the next non-whitespace
+  // When we see a " inside a string, peek ahead -- if the next non-whitespace
   // char is NOT valid JSON continuation (, } ] :), it's an internal quote
   let result = '';
   let inString = false;
@@ -50,7 +50,7 @@ function repairJson(raw) {
           inString = false;
           result += ch;
         } else {
-          // Internal quote — escape it
+          // Internal quote -- escape it
           result += '\\"';
         }
       }
@@ -78,7 +78,7 @@ try {
     // Already parsed by Structured Output Parser
     scenario = raw;
   } else {
-    // Raw string — parse with repair
+    // Raw string -- parse with repair
     const repaired = repairJson(String(raw));
     scenario = JSON.parse(repaired);
   }
@@ -232,7 +232,7 @@ if (r) {
 
   // --- Hard-code: toxic score must be 70+ (overallScore ≤ 30) for all vibes ---
   if (typeof r.overallScore === 'number' && r.overallScore > 30) {
-    errors.push('overallScore=' + r.overallScore + ' too high (max 30, toxic score must be 70+) — auto-fixed to 30');
+    errors.push('overallScore=' + r.overallScore + ' too high (max 30, toxic score must be 70+) -- auto-fixed to 30');
     r.overallScore = 30;
   }
 
@@ -320,11 +320,11 @@ if (r) {
     r.messageInsights.forEach((insight, i) => {
       // Step 1: Exact match against "them" messages (preferred)
       if (theirChatTexts.includes(insight.message)) {
-        // Perfect match — keep as-is
+        // Perfect match -- keep as-is
       }
       // Step 2: Exact match against ALL messages (edge case: "me" message in DECODED context)
       else if (chatTexts.includes(insight.message)) {
-        // Valid but not ideal — keep it
+        // Valid but not ideal -- keep it
       }
       // Step 3: Case-insensitive exact match against "them" messages
       else {
@@ -387,7 +387,7 @@ if (r) {
       return true;
     });
     if (beforeCount !== r.messageInsights.length) {
-      errors.push('Removed ' + (beforeCount - r.messageInsights.length) + ' greeting insight(s) — ' + r.messageInsights.length + ' remaining');
+      errors.push('Removed ' + (beforeCount - r.messageInsights.length) + ' greeting insight(s) -- ' + r.messageInsights.length + ' remaining');
     }
   }
 
@@ -400,7 +400,7 @@ if (r) {
 }
 
 // Inject display metadata for content mode hero section
-// These are pipeline-level fields, not AI output — stored in scenario JSON for Supabase
+// These are pipeline-level fields, not AI output -- stored in scenario JSON for Supabase
 scenario.personDisplayName = scenario.chat ? scenario.chat.contactName : (randomName || 'Him');
 scenario.personRelationshipStatus = randomRelStatus || null;
 

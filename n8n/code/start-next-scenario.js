@@ -3,11 +3,11 @@
 // If already recording, tells user to /done first.
 // Mode: Run Once for All Items
 //
-// WIRING: Switch (start_next) → Find Next Approved (Airtable) → this Code node →
-//   IF error → Telegram Send (error)
-//   ELSE → Telegram Send (recording instructions)
+// WIRING: Switch (start_next) -> Find Next Approved (Airtable) -> this Code node ->
+//   IF error -> Telegram Send (error)
+//   ELSE -> Telegram Send (recording instructions)
 
-// Helper: "toxic-sad-happy-girl-1771197483216" → "Toxic Sad Happy Girl"
+// Helper: "toxic-sad-happy-girl-1771197483216" -> "Toxic Sad Happy Girl"
 function formatName(raw) {
   if (!raw) return 'Scenario';
   return raw.replace(/-\d{10,}$/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');

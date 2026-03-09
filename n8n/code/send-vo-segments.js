@@ -2,13 +2,13 @@
 // Sends each VO segment as a separate audio message with individual Approve/Redo buttons.
 // Saves audio files to /tmp/toxicornah_vo/{recordId}/ for later use by Download Assets.
 // Writes vo_segments_json to Airtable for callback handler to use on redo.
-// When ALL segments approved (via callback handler), vo_approval â†’ "approved" â†’ pipeline continues.
+// When ALL segments approved (via callback handler), vo_approval ' "approved" ' pipeline continues.
 // Mode: Run Once for All Items
 
 const fs = require('fs');
 const path = require('path');
 
-// â”€â”€â”€ fetch polyfill â”€â”€â”€
+// """ fetch polyfill """
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -53,13 +53,17 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// â”€â”€â”€ Multipart upload helper for Telegram sendAudio with inline_keyboard â”€â”€â”€
-function sendTelegramAudio(botToken, chatId, audioBuffer, filename, caption, replyMarkup) {
+// """ Multipart upload helper for Telegram sendAudio with inline_keyboard """
+function sendTelegramAudio(botToken, chatId, audioBuffer, filename, caption, replyMarkup, messageThreadId) {
   return new Promise((resolve, reject) => {
     const boundary = '----FormBoundary' + Date.now() + Math.random().toString(36).slice(2);
     const parts = [];
 
     parts.push('--' + boundary + '\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n' + chatId + '\r\n');
+
+    if (messageThreadId) {
+      parts.push('--' + boundary + '\r\nContent-Disposition: form-data; name="message_thread_id"\r\n\r\n' + messageThreadId + '\r\n');
+    }
 
     if (caption) {
       parts.push('--' + boundary + '\r\nContent-Disposition: form-data; name="caption"\r\n\r\n' + caption + '\r\n');
@@ -107,6 +111,7 @@ const VIDEO_RUNS_TABLE = 'tbltCYcVXrLYvyIJL';
 const voData = $('Generate VO').first().json;
 const voBinary = $('Generate VO').first().binary || {};
 const chatId = voData.chatId;
+const topicAssembleId = (() => { try { return $('Prepare Production').first().json.topicAssembleId || ''; } catch(e) { return ''; } })();
 const scenarioName = voData.scenarioName;
 const voSegments = voData.voSegments || [];
 const recordId = (() => { try { return $('Create Video Run').first().json.id; } catch(e) { return 'unknown'; } })();
@@ -122,7 +127,7 @@ const sectionLabels = {
   'outro': '\uD83D\uDC4B Outro',
 };
 
-// â”€â”€â”€ Save VO files to disk for later use â”€â”€â”€
+// """ Save VO files to disk for later use """
 const voDir = '/tmp/toxicornah_vo/' + recordId;
 if (!fs.existsSync(voDir)) {
   fs.mkdirSync(voDir, { recursive: true });
@@ -135,7 +140,7 @@ const segmentsData = [];
 let sentCount = 0;
 for (const seg of voSegments) {
   if (!seg.hasAudio) {
-    // No audio for this section â€” track but skip sending
+    // No audio for this section " track but skip sending
     segmentsData.push({
       index: seg.index,
       section: seg.section,
@@ -189,7 +194,7 @@ for (const seg of voSegments) {
   };
 
   try {
-    await sendTelegramAudio(TELEGRAM_BOT_TOKEN, chatId, audioBuffer, 'vo_' + seg.section + '.mp3', caption, replyMarkup);
+    await sendTelegramAudio(TELEGRAM_BOT_TOKEN, chatId, audioBuffer, 'vo_' + seg.section + '.mp3', caption, replyMarkup, topicAssembleId);
     sentCount++;
     // Small delay between messages to avoid rate limiting
     if (sentCount < voSegments.filter(s => s.hasAudio).length) {
@@ -200,7 +205,7 @@ for (const seg of voSegments) {
   }
 }
 
-// â”€â”€â”€ Write vo_segments_json to Airtable â”€â”€â”€
+// """ Write vo_segments_json to Airtable """
 if (AIRTABLE_TOKEN && recordId && recordId !== 'unknown') {
   try {
     await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE + '/' + VIDEO_RUNS_TABLE + '/' + recordId, {
@@ -227,10 +232,10 @@ try {
   await fetch('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+    body: JSON.stringify(Object.assign({
       chat_id: chatId,
       text: summary,
-    }),
+    }, topicAssembleId ? { message_thread_id: Number(topicAssembleId) } : {})),
   });
 } catch (e) {
   // Non-fatal

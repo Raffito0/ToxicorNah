@@ -1,19 +1,19 @@
 // MODULE: ComfyUI REST API Helper
 // Connects to ComfyUI running on SimplePod.ai GPU cloud
-// Handles: submit workflow → poll status → download result
+// Handles: submit workflow -> poll status -> download result
 //
 // ComfyUI API endpoints:
-//   POST /prompt              — submit a workflow
-//   GET  /history/{prompt_id} — check execution status
-//   GET  /view?filename=...   — download output image/video
+//   POST /prompt              -- submit a workflow
+//   GET  /history/{prompt_id} -- check execution status
+//   GET  /view?filename=...   -- download output image/video
 //
 // Usage in n8n Code nodes:
 //   const comfy = require('./comfyui-api.js'); // or inline the functions
 //   const result = await comfy.run(COMFYUI_URL, workflowJson);
 
-// Config — set your SimplePod.ai ComfyUI instance URL
+// Config -- set your SimplePod.ai ComfyUI instance URL
 // Format: https://{pod-id}-8188.proxy.runpod.net or similar
-const DEFAULT_COMFYUI_URL = ''; // ← Set your ComfyUI URL from SimplePod.ai
+const DEFAULT_COMFYUI_URL = ''; // <- Set your ComfyUI URL from SimplePod.ai
 
 /**
  * Submit a ComfyUI workflow prompt and wait for completion

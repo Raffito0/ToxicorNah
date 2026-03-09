@@ -3,7 +3,7 @@
 // The callback handler (tod_day/tod_night) completes the flow.
 // Mode: Run Once for All Items
 
-// â”€â”€â”€ fetch polyfill â”€â”€â”€
+// """ fetch polyfill """
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -30,7 +30,7 @@ const PREP01_BOT = '8389477139:AAFWFMhwVj7TLWBOtlX-3Pqz7pqK88fP4EU';
 const staticData = $getWorkflowStaticData('global');
 const input = $input.first().json;
 
-// â”€â”€â”€ No active recording? â”€â”€â”€
+// """ No active recording? """
 if (!staticData.activeRecording) {
   return [{
     json: {
@@ -41,7 +41,7 @@ if (!staticData.activeRecording) {
   }];
 }
 
-// Helper: "toxic-sad-happy-girl-1771197483216" â†’ "Toxic Sad Happy Girl"
+// Helper: "toxic-sad-happy-girl-1771197483216" ' "Toxic Sad Happy Girl"
 function formatName(raw) {
   if (!raw) return 'Scenario';
   return raw.replace(/-\d{10,}$/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -64,27 +64,44 @@ if (receivedCount === 0) {
   }];
 }
 
-// Save clip count then clear state â€” callback is handled by Unified Pipeline (different workflow)
+// Save clip count then clear state " callback is handled by Unified Pipeline (different workflow)
 staticData.activeRecording.clipCount = receivedCount;
 delete staticData.activeRecording;
+
+// Look up phone topic ID for forum routing
+let topicAssembleId = '';
+const AIRTABLE_TOKEN_HD = (typeof $env !== 'undefined' && $env.AIRTABLE_API_KEY) || '';
+const AIRTABLE_BASE_HD = 'appsgjIdkpak2kaXq';
+try {
+  const phoneFilter = encodeURIComponent("{telegram_chat_id}='" + input.chatId + "'");
+  const phoneRes = await fetch('https://api.airtable.com/v0/' + AIRTABLE_BASE_HD + '/tblCvT47GpZv29jz9?filterByFormula=' + phoneFilter + '&maxRecords=1', {
+    headers: { 'Authorization': 'Bearer ' + AIRTABLE_TOKEN_HD },
+  });
+  const phoneData = await phoneRes.json();
+  if (phoneData.records && phoneData.records.length > 0) {
+    topicAssembleId = phoneData.records[0].fields.topic_assemble_id || '';
+  }
+} catch(e) { /* non-fatal */ }
 
 // Send day/night inline keyboard directly via Telegram API
 let sendResult = 'skipped';
 if (PREP01_BOT) {
   try {
+    const msgBody = {
+      chat_id: input.chatId,
+      text: '\u2705 ' + receivedCount + ' clip ricevute per "' + formatName(scenarioName) + '".\n\nHai registrato di giorno o di notte?',
+      reply_markup: { inline_keyboard: [
+        [
+          { text: '\u2600\uFE0F Giorno', callback_data: 'tod_day_' + scenarioRecordId },
+          { text: '\uD83C\uDF19 Notte', callback_data: 'tod_night_' + scenarioRecordId },
+        ],
+      ] },
+    };
+    if (topicAssembleId) msgBody.message_thread_id = Number(topicAssembleId);
     const res = await fetch('https://api.telegram.org/bot' + PREP01_BOT + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: input.chatId,
-        text: '\u2705 ' + receivedCount + ' clip ricevute per "' + formatName(scenarioName) + '".\n\nHai registrato di giorno o di notte?',
-        reply_markup: { inline_keyboard: [
-          [
-            { text: '\u2600\uFE0F Giorno', callback_data: 'tod_day_' + scenarioRecordId },
-            { text: '\uD83C\uDF19 Notte', callback_data: 'tod_night_' + scenarioRecordId },
-          ],
-        ] },
-      }),
+      body: JSON.stringify(msgBody),
     });
     const resText = await res.text();
     sendResult = 'status=' + res.status + ' body=' + resText.substring(0, 300);
@@ -97,7 +114,7 @@ return [{
   json: {
     error: true,
     chatId: input.chatId,
-    message: '', // empty â€” already sent via API above
+    message: '', // empty " already sent via API above
     _debug_send: sendResult,
     _debug_scenarioRecordId: scenarioRecordId,
     _debug_receivedCount: receivedCount,

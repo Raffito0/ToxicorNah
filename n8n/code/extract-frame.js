@@ -3,7 +3,7 @@
 // This frame serves as the environment/lighting reference for AI image generation
 // Mode: Run Once for All Items
 //
-// WIRING: After body clips are loaded → this Code node
+// WIRING: After body clips are loaded -> this Code node
 // Output: frame image as binary + frame URL (uploaded to temp storage)
 
 const { execSync } = require('child_process');

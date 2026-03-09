@@ -3,30 +3,30 @@
 // Reads state from workflow static data, auto-numbers the clip.
 // Mode: Run Once for All Items
 //
-// WIRING: Switch (auto_body_clip) â†’ this Code node â†’ Save Body Clip (Airtable Create) â†’ Send Confirmation (Telegram)
+// WIRING: Switch (auto_body_clip) ' this Code node ' Save Body Clip (Airtable Create) ' Send Confirmation (Telegram)
 //
 // Airtable Create node should map:
-//   clip_name     â†’ {{ $json.clipName }}
-//   scenario_id   â†’ {{ [$json.scenarioRecordId] }}   (linked record â€” must be array)
-//   clip_index    â†’ {{ $json.clipIndex }}
-//   telegram_file_id â†’ {{ $json.fileId }}
-//   clip_duration_sec â†’ {{ $json.duration }}
-//   clip_type     â†’ {{ $json.clipType }}
-//   section       â†’ {{ $json.section }}
-//   status        â†’ uploaded
+//   clip_name     ' {{ $json.clipName }}
+//   scenario_id   ' {{ [$json.scenarioRecordId] }}   (linked record " must be array)
+//   clip_index    ' {{ $json.clipIndex }}
+//   telegram_file_id ' {{ $json.fileId }}
+//   clip_duration_sec ' {{ $json.duration }}
+//   clip_type     ' {{ $json.clipType }}
+//   section       ' {{ $json.section }}
+//   status        ' uploaded
 //
 // Telegram Send node should use {{ $json.confirmMessage }} as text.
 
 const staticData = $getWorkflowStaticData('global');
 const input = $input.first().json;
 
-// â”€â”€â”€ No active recording? â”€â”€â”€
+// """ No active recording? """
 if (!staticData.activeRecording) {
   return [{
     json: {
       error: true,
       chatId: input.chatId,
-      message: 'âš ï¸? Nessuna registrazione attiva. Approva prima uno scenario.',
+      message: ' ï? Nessuna registrazione attiva. Approva prima uno scenario.',
     }
   }];
 }
@@ -46,13 +46,13 @@ const section = segment.section || 'body_' + clipIndex;
 const sectionLabel = segment.label || section;
 
 // Confirmation message
-let confirm = 'âœ… Clip ' + clipIndex + '/' + totalExpected + ' (' + sectionLabel + ')';
+let confirm = '... Clip ' + clipIndex + '/' + totalExpected + ' (' + sectionLabel + ')';
 if (clipIndex >= totalExpected) {
-  confirm += '\n\nâœ… Tutte le clip ricevute!';
+  confirm += '\n\n... Tutte le clip ricevute!';
 } else {
   const nextSeg = expected[clipIndex];
   if (nextSeg) {
-    confirm += '\n\nðŸ‘‰ Prossima: ' + (clipIndex + 1) + '. ' + nextSeg.label;
+    confirm += '\n\n' Prossima: ' + (clipIndex + 1) + '. ' + nextSeg.label;
   }
 }
 

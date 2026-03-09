@@ -4,9 +4,9 @@
 // Creates a Body Clips record in Airtable with the video file
 // Mode: Run Once for All Items
 //
-// WIRING: Telegram Trigger (message) → this Code node → Airtable Create → Telegram confirmation
+// WIRING: Telegram Trigger (message) -> this Code node -> Airtable Create -> Telegram confirmation
 
-const AIRTABLE_TOKEN = ''; // ← Set via n8n credentials, not hardcoded here
+const AIRTABLE_TOKEN = ''; // <- Set via n8n credentials, not hardcoded here
 const BASE_ID = 'appsgjIdkpak2kaXq';
 const BODY_CLIPS_TABLE = 'tblJcmlW99FNxMNXk';
 const SCENARIOS_TABLE = 'tblcQaMBBPcOAy0NF';
@@ -18,7 +18,7 @@ const message = update.message || update;
 const caption = message.caption || message.text || '';
 const chatId = message.chat?.id || '';
 
-// Get video file info — Telegram sends videos as either 'video' or 'document'
+// Get video file info -- Telegram sends videos as either 'video' or 'document'
 const video = message.video || message.document;
 if (!video) {
   return [{
@@ -49,7 +49,7 @@ const duration = video.duration || 0;
 
 // Get Telegram file download URL
 // n8n's Telegram node handles the Bot API token, but in a Code node we need to call the API directly
-// The bot token is available from the credential — we'll pass it through from the trigger node
+// The bot token is available from the credential -- we'll pass it through from the trigger node
 // For now, output the parsed data for the next nodes to handle
 
 return [{

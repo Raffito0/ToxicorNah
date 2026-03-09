@@ -1,23 +1,23 @@
-// NODE: Continuous Hook Generator (Schedule Trigger — every 2 min, 24/7)
+// NODE: Continuous Hook Generator (Schedule Trigger -- every 2 min, 24/7)
 // State machine that runs once per tick. Each tick advances the pipeline:
-//   Phase 0: QUOTA CHECK — exit early if enough hooks ready
-//   Phase 1: POLL PENDING — check provider status for submitted jobs
-//   Phase 1.5: PROCESS IMAGE APPROVALS — submit approved images to Sora 2, redo rejected
-//   Phase 2: DELIVER COMPLETED — download finished video, send to Telegram
-//   Phase 3: PROCESS REVIEWS — moved to webhook (process-review.js)
-//   Phase 4: GENERATE IMAGE — fal.ai image + send to Telegram for approval
+//   Phase 0: QUOTA CHECK -- exit early if enough hooks ready
+//   Phase 1: POLL PENDING -- check provider status for submitted jobs
+//   Phase 1.5: PROCESS IMAGE APPROVALS -- submit approved images to Sora 2, redo rejected
+//   Phase 2: DELIVER COMPLETED -- download finished video, send to Telegram
+//   Phase 3: PROCESS REVIEWS -- moved to webhook (process-review.js)
+//   Phase 4: GENERATE IMAGE -- fal.ai image + send to Telegram for approval
 //
 // Multi-provider (Sora 2 video): kie.ai (active, primary), PoYo (active, secondary), APIMart (disabled), laozhang (disabled)
 // State stored in Airtable "Hook Generation Queue" table.
-// Telegram review is non-blocking — videos queue up, user reviews at their pace.
+// Telegram review is non-blocking -- videos queue up, user reviews at their pace.
 //
-// WIRING: Schedule Trigger (*/2 * * * *) → this Code node
+// WIRING: Schedule Trigger (*/2 * * * *) -> this Code node
 // Mode: Run Once for All Items
 
 const fs = require('fs');
 const { execSync } = require('child_process');
 
-// ─── fetch polyfill (n8n Code node sandbox lacks global fetch) ───
+// --- fetch polyfill (n8n Code node sandbox lacks global fetch) ---
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -63,7 +63,7 @@ function fetch(url, opts = {}, _redirectCount = 0) {
   });
 }
 
-// ─── Config ───
+// --- Config ---
 const ABASE = 'appsgjIdkpak2kaXq';
 const CONCEPTS_TABLE = 'tblhhTVI4EYofdY32';
 const SCENARIOS_TABLE = 'tblcQaMBBPcOAy0NF';
@@ -79,13 +79,13 @@ const KIE_API_KEY = '7670ade582cc72601f388dbdc0525b9e';
 const KIE_API_URL = 'https://api.kie.ai/api/v1/jobs';
 const FAL_KEY = (typeof $env !== 'undefined' && $env.FAL_KEY) || '1f90e772-6c27-4772-9c31-9fb0efd2ccb7:e1ae20a74cf0ad9a5be03baefd1603e0';
 
-// ─── Quota constants ───
+// --- Quota constants ---
 const DEFAULT_VIDEOS_PER_DAY = 10;
 const BUFFER_DAYS = 2;
 const MAX_CONCURRENT = 6; // max simultaneous provider submissions across all phones
-const GENERATION_TIMEOUT_MS = 20 * 60 * 1000; // 20 min — mark as failed after this
+const GENERATION_TIMEOUT_MS = 20 * 60 * 1000; // 20 min -- mark as failed after this
 
-// ─── Multi-Provider Config ───
+// --- Multi-Provider Config ---
 const POYO_KEY = (typeof $env !== 'undefined' && $env.POYO_API_KEY) || 'sk-vJqqGNNTcH9g89DnEYum48LHkdR0R6sZ-qQCFoiWzCJQlPmXKtbIdOWiRGnhB-';
 const APIMART_KEY = (typeof $env !== 'undefined' && $env.APIMART_API_KEY) || '';
 const LAOZHANG_KEY = (typeof $env !== 'undefined' && $env.LAOZHANG_API_KEY) || '';
@@ -181,7 +181,7 @@ const PROVIDERS = [
   },
 ];
 
-// ─── Static data (persists across n8n executions) ───
+// --- Static data (persists across n8n executions) ---
 const staticData = $getWorkflowStaticData('global');
 if (!staticData.hookGenOffset) staticData.hookGenOffset = 0;
 if (!staticData.lastGroupIndex) staticData.lastGroupIndex = 0;
@@ -191,7 +191,7 @@ if (!staticData.lastQuotaNotification) staticData.lastQuotaNotification = '';
 // Track daily summary (YYYY-MM-DD of last summary sent)
 if (!staticData.lastDailySummary) staticData.lastDailySummary = '';
 
-// ─── Telegram helpers ───
+// --- Telegram helpers ---
 async function sendTelegram(text, replyMarkup) {
   try {
     const payload = { chat_id: ADMIN_CHAT, text: text };
@@ -263,8 +263,8 @@ async function sendTelegramPhoto(photoUrl, caption, replyMarkup) {
     const urlJson = await urlRes.json();
     if (urlJson.ok) return urlJson.result.message_id;
 
-    // URL failed — download image and upload as file
-    console.log('[hookgen] URL-based photo failed: ' + (urlJson.description || urlRes.status) + ' — downloading and uploading as file');
+    // URL failed -- download image and upload as file
+    console.log('[hookgen] URL-based photo failed: ' + (urlJson.description || urlRes.status) + ' -- downloading and uploading as file');
     const imgRes = await fetch(photoUrl);
     if (!imgRes.ok) {
       console.log('[hookgen] Image download failed: ' + imgRes.status);
@@ -300,7 +300,7 @@ async function sendTelegramPhoto(photoUrl, caption, replyMarkup) {
   }
 }
 
-// ─── kie.ai nano-banana-2 (async: createTask → poll) ───
+// --- kie.ai nano-banana-2 (async: createTask -> poll) ---
 async function kieGenerate(prompt, imageRefs) {
   const finalPrompt = prompt + ', maintain exact facial features from reference, shot on iPhone 13 Pro, no background blur, no bokeh, sharp background throughout, no color grading, raw UGC phone footage style';
   const res = await fetch(KIE_API_URL + '/createTask', {
@@ -343,7 +343,7 @@ async function kiePoll(taskId) {
   throw new Error('kie.ai poll timeout after 120s');
 }
 
-// ─── fal.ai nano-banana-2 (synchronous — no polling needed) ───
+// --- fal.ai nano-banana-2 (synchronous -- no polling needed) ---
 async function falGenerate(prompt, imageRefs) {
   const finalPrompt = prompt + ', maintain exact facial features from reference, shot on iPhone 13 Pro, no background blur, no bokeh, sharp background throughout, no color grading, raw UGC phone footage style';
   console.log('[hookgen] fal.ai generating: ' + finalPrompt.slice(0, 100) + '...');
@@ -361,7 +361,7 @@ async function falGenerate(prompt, imageRefs) {
   return data.images[0].url;
 }
 
-// ─── generateImage: kie.ai primary → fal.ai fallback ───
+// --- generateImage: kie.ai primary -> fal.ai fallback ---
 async function generateImage(prompt, imageRefs) {
   try {
     console.log('[hookgen] Trying kie.ai for image...');
@@ -371,14 +371,14 @@ async function generateImage(prompt, imageRefs) {
     console.log('[hookgen] kie.ai OK: ' + url);
     return url;
   } catch (kieErr) {
-    console.log('[hookgen] kie.ai failed: ' + kieErr.message + ' — falling back to fal.ai');
+    console.log('[hookgen] kie.ai failed: ' + kieErr.message + ' -- falling back to fal.ai');
     const url = await falGenerate(prompt, imageRefs);
     console.log('[hookgen] fal.ai fallback OK: ' + url);
     return url;
   }
 }
 
-// ─── FFmpeg burn timecode overlay (best-effort) ───
+// --- FFmpeg burn timecode overlay (best-effort) ---
 function burnTimecode(videoPath) {
   const outPath = videoPath.replace('.mp4', '_tc.mp4');
   try {
@@ -396,7 +396,7 @@ function burnTimecode(videoPath) {
   }
 }
 
-// ─── Airtable helpers ───
+// --- Airtable helpers ---
 async function airtableFetch(tablePath, options) {
   options = options || {};
   const res = await fetch('https://api.airtable.com/v0/' + ABASE + '/' + tablePath, {
@@ -434,7 +434,7 @@ async function queueDelete(recordIds) {
   }
 }
 
-// ─── Generic provider submit ───
+// --- Generic provider submit ---
 async function providerSubmit(provider, prompt, imageUrl) {
   const body = provider.buildBody(prompt, imageUrl);
   const res = await fetch(provider.submitUrl, {
@@ -456,7 +456,7 @@ async function providerSubmit(provider, prompt, imageUrl) {
   return provider.parseSubmitTaskId(data);
 }
 
-// ─── Generic provider poll (single check, NOT blocking loop) ───
+// --- Generic provider poll (single check, NOT blocking loop) ---
 async function providerCheckStatus(provider, taskId) {
   const res = await fetch(provider.statusUrl + taskId, {
     headers: { 'Authorization': provider.authPrefix + provider.apiKey },
@@ -476,7 +476,7 @@ async function providerCheckStatus(provider, taskId) {
   return { status: 'generating', videoUrl: null, error: null };
 }
 
-// ─── Image prompt pools ───
+// --- Image prompt pools ---
 const SPEAKING_IMAGE_PROMPTS = [
   'Close-up selfie shot of the same girl from reference, sitting on bed, looking directly at camera, neutral expression, holding phone, natural indoor lighting',
   'Close-up selfie angle of the same girl from reference, seated at desk, direct eye contact, subtle expression, casual home setting',
@@ -511,20 +511,20 @@ function buildSpeakingPrompt(hookTexts) {
 }
 
 
-// ═══════════════════════════════════════════════════════
-// MAIN STATE MACHINE — runs once per 2-minute tick
-// ═══════════════════════════════════════════════════════
+// =======================================================
+// MAIN STATE MACHINE -- runs once per 2-minute tick
+// =======================================================
 
 console.log('[hookgen] Tick started');
 
 if (!ATOKEN) {
-  console.log('[hookgen] No AIRTABLE_API_KEY — exiting');
+  console.log('[hookgen] No AIRTABLE_API_KEY -- exiting');
   return [{ json: { skipped: true, reason: 'no_api_key' } }];
 }
 
 const enabledProviders = PROVIDERS.filter(function(p) { return p.enabled; });
 if (enabledProviders.length === 0) {
-  console.log('[hookgen] No enabled providers — exiting');
+  console.log('[hookgen] No enabled providers -- exiting');
   return [{ json: { skipped: true, reason: 'no_providers' } }];
 }
 
@@ -534,16 +534,16 @@ const tickResult = {
 
 try {
 
-// ═══════════════════════════════════════
-// CLEANUP — remove finished/failed queue records
-// ═══════════════════════════════════════
+// =======================================
+// CLEANUP -- remove finished/failed queue records
+// =======================================
 try {
   const failFormula = encodeURIComponent("{status}='failed'");
   const failData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + failFormula + '&fields%5B%5D=task_id&fields%5B%5D=error_message');
   const failedRecords = failData.records || [];
   if (failedRecords.length > 0) {
     for (const r of failedRecords) {
-      console.log('[hookgen] Removing failed: ' + (r.fields.task_id || r.id) + ' — ' + (r.fields.error_message || 'no details'));
+      console.log('[hookgen] Removing failed: ' + (r.fields.task_id || r.id) + ' -- ' + (r.fields.error_message || 'no details'));
     }
     await queueDelete(failedRecords.map(r => r.id));
     console.log('[hookgen] Cleaned up ' + failedRecords.length + ' failed record(s)');
@@ -559,9 +559,9 @@ try {
   console.log('[hookgen] Cleanup error: ' + e.message);
 }
 
-// ═══════════════════════════════════════
-// PHASE 0 — QUOTA CHECK (per-phone)
-// ═══════════════════════════════════════
+// =======================================
+// PHASE 0 -- QUOTA CHECK (per-phone)
+// =======================================
 
 console.log('[hookgen] Phase 0: Quota check');
 
@@ -583,7 +583,7 @@ try {
 }
 
 if (activePhones.length === 0) {
-  console.log('[hookgen] No active phones with girl_ref_url — exiting');
+  console.log('[hookgen] No active phones with girl_ref_url -- exiting');
   return [{ json: { skipped: true, reason: 'no_active_phones' } }];
 }
 
@@ -652,20 +652,20 @@ if (allPhonesFull && staticData.lastQuotaNotification !== 'full') {
   await sendTelegram('All phones at quota! ' + readyCount + ' hooks ready. Pausing generation.');
   staticData.lastQuotaNotification = 'full';
 } else if (!allPhonesFull && staticData.lastQuotaNotification === 'full') {
-  await sendTelegram('Pool deficit detected — resuming generation');
+  await sendTelegram('Pool deficit detected -- resuming generation');
   staticData.lastQuotaNotification = 'low';
 }
 
-// If all phones at quota AND no pending work → exit early
+// If all phones at quota AND no pending work -> exit early
 if (allPhonesFull && pendingCount === 0) {
-  console.log('[hookgen] All phones at quota and no pending work — exiting');
+  console.log('[hookgen] All phones at quota and no pending work -- exiting');
   return [{ json: { skipped: true, reason: 'quota_met', readyCount: readyCount } }];
 }
 
 
-// ═══════════════════════════════════════
-// PHASE 1 — POLL PENDING SUBMISSIONS
-// ═══════════════════════════════════════
+// =======================================
+// PHASE 1 -- POLL PENDING SUBMISSIONS
+// =======================================
 
 console.log('[hookgen] Phase 1: Polling ' + submittedOrGenerating.length + ' pending submissions');
 
@@ -686,7 +686,7 @@ for (const record of submittedOrGenerating) {
     continue;
   }
 
-  // Check timeout — reset to image_approved to retry, not regenerate image
+  // Check timeout -- reset to image_approved to retry, not regenerate image
   const submittedAt = f.submitted_at ? new Date(f.submitted_at).getTime() : 0;
   if (submittedAt > 0 && (Date.now() - submittedAt) > GENERATION_TIMEOUT_MS) {
     const currentRetries = parseInt(f.error_message && f.error_message.match(/retries:(\d+)/) && f.error_message.match(/retries:(\d+)/)[1]) || 0;
@@ -744,7 +744,7 @@ for (const record of submittedOrGenerating) {
     // else: still generating, no update needed
   } catch (e) {
     console.log('[hookgen] Poll error for ' + taskId + ': ' + e.message);
-    // Don't mark as failed on transient errors — just skip
+    // Don't mark as failed on transient errors -- just skip
   }
   polledCount++;
 }
@@ -752,10 +752,10 @@ for (const record of submittedOrGenerating) {
 tickResult.phase1 = { polled: polledCount, completed: newlyCompleted, failed: newlyFailed };
 
 
-// ═══════════════════════════════════════
-// PHASE 1.5 — PROCESS IMAGE APPROVALS
+// =======================================
+// PHASE 1.5 -- PROCESS IMAGE APPROVALS
 // Submit approved images to Sora 2, regenerate redo'd images
-// ═══════════════════════════════════════
+// =======================================
 
 console.log('[hookgen] Phase 1.5: Process image approvals');
 
@@ -766,7 +766,7 @@ let imgRedone = 0;
 let currentActiveSlots = activeSubmissions - newlyCompleted - newlyFailed;
 if (currentActiveSlots < 0) currentActiveSlots = 0;
 
-// ─── Submit approved images to Sora 2 ───
+// --- Submit approved images to Sora 2 ---
 try {
   const imgApprovedFormula = encodeURIComponent("{status}='image_approved'");
   const imgApprovedData = await airtableFetch(
@@ -777,7 +777,7 @@ try {
 
   for (const record of imgApprovedRecords) {
     if (currentActiveSlots >= MAX_CONCURRENT) {
-      console.log('[hookgen] Phase 1.5: No Sora 2 slots — will submit next tick');
+      console.log('[hookgen] Phase 1.5: No Sora 2 slots -- will submit next tick');
       break;
     }
 
@@ -805,7 +805,7 @@ try {
     } catch (e) {
       console.log('[hookgen] Phase 1.5: Submit error for ' + record.id + ': ' + e.message);
       tickResult.phase1_5_error = e.message;
-      // Don't fail the record — retry next tick
+      // Don't fail the record -- retry next tick
     }
   }
 } catch (e) {
@@ -813,7 +813,7 @@ try {
   tickResult.phase1_5_error = 'query: ' + e.message;
 }
 
-// ─── Recovery: Re-send stuck image_approval records (no telegram_msg_id) ───
+// --- Recovery: Re-send stuck image_approval records (no telegram_msg_id) ---
 try {
   const stuckFormula = encodeURIComponent("AND({status}='image_approval',OR({telegram_msg_id}='',{telegram_msg_id}='[]'))");
   const stuckData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + stuckFormula);
@@ -842,7 +842,7 @@ try {
       await queueUpdate(record.id, { telegram_msg_id: JSON.stringify([msgId]) });
       console.log('[hookgen] Phase 1.5: Re-sent stuck image for ' + conceptName);
     } else {
-      // Image URL expired — mark for full redo
+      // Image URL expired -- mark for full redo
       await queueUpdate(record.id, { status: 'image_redo' });
       console.log('[hookgen] Phase 1.5: Image URL expired for ' + conceptName + ', marking redo');
     }
@@ -851,7 +851,7 @@ try {
   console.log('[hookgen] Phase 1.5: Stuck recovery error: ' + e.message);
 }
 
-// ─── Regenerate redo'd images ───
+// --- Regenerate redo'd images ---
 try {
   const imgRedoFormula = encodeURIComponent("{status}='image_redo'");
   const imgRedoData = await airtableFetch(QUEUE_TABLE + '?filterByFormula=' + imgRedoFormula);
@@ -878,7 +878,7 @@ try {
       const modeLabel = isSpeaking ? 'Speaking' : 'Reaction';
       let hookTexts = [];
       try { hookTexts = JSON.parse(f.hook_texts_json || '[]'); } catch (e) {}
-      const caption = 'Hook image (redo) — ' + conceptName + ' (' + modeLabel + ')\n' +
+      const caption = 'Hook image (redo) -- ' + conceptName + ' (' + modeLabel + ')\n' +
         hookTexts.map(function(t, i) { return (i + 1) + '. "' + t.slice(0, 60) + '"'; }).join('\n');
       const replyMarkup = {
         inline_keyboard: [[
@@ -907,16 +907,16 @@ try {
 tickResult.phase1_5 = { imgSubmitted: imgSubmitted, imgRedone: imgRedone };
 
 
-// ═══════════════════════════════════════
-// PHASE 2 — DELIVER COMPLETED VIDEOS (one at a time)
-// ═══════════════════════════════════════
+// =======================================
+// PHASE 2 -- DELIVER COMPLETED VIDEOS (one at a time)
+// =======================================
 
 console.log('[hookgen] Phase 2: Deliver completed videos');
 
 let delivered = 0;
 
 try {
-  // Check if there's already a video being reviewed — only 1 at a time
+  // Check if there's already a video being reviewed -- only 1 at a time
   const reviewFormula = encodeURIComponent("OR({status}='review_sent',{status}='clips_preview_sent')");
   const reviewData = await airtableFetch(
     QUEUE_TABLE + '?filterByFormula=' + reviewFormula + '&fields%5B%5D=status&maxRecords=1'
@@ -924,7 +924,7 @@ try {
   const hasActiveReview = (reviewData.records || []).length > 0;
 
   if (hasActiveReview) {
-    console.log('[hookgen] Phase 2: Already a video in review — waiting');
+    console.log('[hookgen] Phase 2: Already a video in review -- waiting');
   } else {
     // Find next completed video
     const formula = encodeURIComponent("{status}='completed'");
@@ -944,7 +944,7 @@ try {
       try { hookTexts = JSON.parse(f.hook_texts_json || '[]'); } catch (e) {}
 
       try {
-        // Daily summary — send once per day on first delivery after midnight
+        // Daily summary -- send once per day on first delivery after midnight
         const today = new Date().toISOString().slice(0, 10);
         if (staticData.lastDailySummary !== today) {
           // Count all completed videos (waiting for review)
@@ -988,7 +988,7 @@ try {
 
         // Only proceed if video was actually sent
         if (!videoMsgId) {
-          throw new Error('Telegram video send failed — will retry next tick');
+          throw new Error('Telegram video send failed -- will retry next tick');
         }
 
         // Send hook texts with inline Skip button
@@ -1028,9 +1028,9 @@ tickResult.phase2 = { delivered: delivered };
 tickResult.phase3 = { reviewsProcessed: 0 };
 
 
-// ═══════════════════════════════════════
-// PHASE 4 — SUBMIT NEW GENERATION (phone-aware)
-// ═══════════════════════════════════════
+// =======================================
+// PHASE 4 -- SUBMIT NEW GENERATION (phone-aware)
+// =======================================
 
 console.log('[hookgen] Phase 4: Submit new generation');
 
@@ -1042,7 +1042,7 @@ const MAX_PENDING_APPROVALS = 3;
 if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
   console.log('[hookgen] Max pending image approvals (' + imgWaitingApproval + '/' + MAX_PENDING_APPROVALS + ')');
 } else if (phonesNeedingHooks.length === 0) {
-  console.log('[hookgen] All phones at quota — skipping Phase 4');
+  console.log('[hookgen] All phones at quota -- skipping Phase 4');
 } else {
 
   try {
@@ -1165,7 +1165,7 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
         }
 
         if (groups.length > 0) {
-          // Pick next group (round-robin — separate counter from provider)
+          // Pick next group (round-robin -- separate counter from provider)
           const groupIndex = (staticData.lastGroupIndex || 0) % groups.length;
           const group = groups[groupIndex];
           staticData.lastGroupIndex = groupIndex + 1;
@@ -1178,7 +1178,7 @@ if (imgWaitingApproval >= MAX_PENDING_APPROVALS) {
           console.log('[hookgen] Generating image for ' + targetPhone.phoneName + ': ' + concept.conceptId + ' (' + hookMode + '), ' + groupScenarios.length + ' scenarios');
 
           try {
-            // fal.ai image generation — use PHONE's girl ref, not concept's
+            // fal.ai image generation -- use PHONE's girl ref, not concept's
             const imagePrompt = isSpeaking ? pickRandom(SPEAKING_IMAGE_PROMPTS) : pickRandom(REACTION_IMAGE_PROMPTS);
             const falImageUrl = await generateImage(imagePrompt, [targetPhone.girlRefUrl]);
 

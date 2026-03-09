@@ -1,16 +1,16 @@
 // NODE: Parse Video Pipeline Message
 // Routes incoming Telegram messages to the correct handler:
-//   - #body scenario_name clip_index [section]  â†’ body clip upload
-//   - #hook scenario_name                       â†’ manual hook clip upload
-//   - #outro scenario_name label                â†’ manual outro clip upload
-//   - /produce scenario_name [template]         â†’ trigger video production
-//   - /done                                     â†’ finish recording (does NOT auto-start next)
-//   - /next                                     â†’ manually start recording next approved scenario
-//   - video with no caption (during recording)  â†’ auto body clip
-//   - anything else                             â†’ ignored
+//   - #body scenario_name clip_index [section]  ' body clip upload
+//   - #hook scenario_name                       ' manual hook clip upload
+//   - #outro scenario_name label                ' manual outro clip upload
+//   - /produce scenario_name [template]         ' trigger video production
+//   - /done                                     ' finish recording (does NOT auto-start next)
+//   - /next                                     ' manually start recording next approved scenario
+//   - video with no caption (during recording)  ' auto body clip
+//   - anything else                             ' ignored
 // Mode: Run Once for All Items
 //
-// WIRING: Telegram Trigger (message) â†’ this Code node â†’ Switch node (Route Message)
+// WIRING: Telegram Trigger (message) ' this Code node ' Switch node (Route Message)
 // Switch outputs: body_clip | hook_clip | outro_clip | produce | done_recording | start_next | auto_body_clip | unknown
 
 const update = $input.first().json;
@@ -21,10 +21,10 @@ const chatId = message.chat?.id || '';
 const hasVideo = !!(message.video || message.document);
 const video = message.video || message.document || {};
 
-// â”€â”€â”€ Static data (needed for /produce timeOfDay fallback + auto_body_clip) â”€â”€â”€
+// """ Static data (needed for /produce timeOfDay fallback + auto_body_clip) """
 const staticData = $getWorkflowStaticData('global');
 
-// â”€â”€â”€ #body scenario_name clip_index [section] â”€â”€â”€
+// """ #body scenario_name clip_index [section] """
 const bodyMatch = text.match(/#body\s+(\S+)\s+(\d+)(?:\s+(\S+))?/i);
 if (hasVideo && bodyMatch) {
   return [{
@@ -41,7 +41,7 @@ if (hasVideo && bodyMatch) {
   }];
 }
 
-// â”€â”€â”€ #hook scenario_name â”€â”€â”€
+// """ #hook scenario_name """
 const hookMatch = text.match(/#hook\s+(\S+)/i);
 if (hasVideo && hookMatch) {
   return [{
@@ -56,7 +56,7 @@ if (hasVideo && hookMatch) {
   }];
 }
 
-// â”€â”€â”€ #outro scenario_name label â”€â”€â”€
+// """ #outro scenario_name label """
 const outroMatch = text.match(/#outro\s+(\S+)\s+(\S+)/i);
 if (hasVideo && outroMatch) {
   return [{
@@ -72,7 +72,7 @@ if (hasVideo && outroMatch) {
   }];
 }
 
-// â”€â”€â”€ /produce [scenario_name] [night|day] â€” no args = next ready scenario â”€â”€â”€
+// """ /produce [scenario_name] [night|day] " no args = next ready scenario """
 // Examples: /produce  |  /produce my-scenario  |  /produce my-scenario night  |  /produce night
 if (text.match(/^\/produce/i)) {
   const parts = text.trim().split(/\s+/);
@@ -85,12 +85,12 @@ if (text.match(/^\/produce/i)) {
       scenarioName = parts[i];
     }
   }
-  // Fall back to time recorded during /done â†’ /night|/day (stored in static data)
+  // Fall back to time recorded during /done ' /night|/day (stored in static data)
   const timeOfDay = explicitTimeOfDay || staticData.activeRecordingTimeOfDay || 'day';
   return [{ json: { messageType: 'produce', scenarioName, timeOfDay, chatId } }];
 }
 
-// â”€â”€â”€ /day or /night â€” set lighting time after /done â”€â”€â”€
+// """ /day or /night " set lighting time after /done """
 if (text.match(/^\/(day|night)$/i)) {
   const timeOfDay = text.match(/^\/night$/i) ? 'night' : 'day';
   return [{
@@ -102,7 +102,7 @@ if (text.match(/^\/(day|night)$/i)) {
   }];
 }
 
-// â”€â”€â”€ /done â€” finish recording â”€â”€â”€
+// """ /done " finish recording """
 if (text.match(/^\/done$/i)) {
   const activeRec = staticData.activeRecording;
   return [{
@@ -114,7 +114,7 @@ if (text.match(/^\/done$/i)) {
   }];
 }
 
-// â”€â”€â”€ /next â€” manually start recording next approved scenario â”€â”€â”€
+// """ /next " manually start recording next approved scenario """
 if (text.match(/^\/next$/i)) {
   return [{
     json: {
@@ -124,7 +124,7 @@ if (text.match(/^\/next$/i)) {
   }];
 }
 
-// â”€â”€â”€ Video with no recognized command during active recording â†’ auto body clip â”€â”€â”€
+// """ Video with no recognized command during active recording ' auto body clip """
 if (hasVideo && staticData.activeRecording) {
   return [{
     json: {
@@ -137,7 +137,7 @@ if (hasVideo && staticData.activeRecording) {
   }];
 }
 
-// â”€â”€â”€ Hook trim timestamps: "0.9 4.4 8.7" or "0.3 x 8.1" â”€â”€â”€
+// """ Hook trim timestamps: "0.9 4.4 8.7" or "0.3 x 8.1" """
 if (text && !hasVideo) {
   const parts = text.split(/[\s,]+/);
   const parsed = parts.map(function(p) {
@@ -159,7 +159,7 @@ if (text && !hasVideo) {
   }
 }
 
-// Unknown â€” ignore silently
+// Unknown " ignore silently
 return [{
   json: {
     messageType: 'unknown',

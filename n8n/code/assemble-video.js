@@ -8,7 +8,7 @@
 // Self-healing: handles missing optional assets, retries FFmpeg with simpler params on failure
 // Mode: Run Once for All Items
 //
-// WIRING: After all assets approved â†’ Download All Clips â†’ this Code node â†’ Send Final to Telegram
+// WIRING: After all assets approved ' Download All Clips ' this Code node ' Send Final to Telegram
 //
 // Expects all clips downloaded to /tmp/toxicornah/{scenarioName}/
 // Input: production data with template, clip mapping, file paths
@@ -18,7 +18,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const _https = require('https');
 
-// â”€â”€â”€ ElevenLabs Speech-to-Speech: convert baked hook audio to phone's voice â”€â”€â”€
+// """ ElevenLabs Speech-to-Speech: convert baked hook audio to phone's voice """
 function elevenLabsSTS(audioBuffer, voiceId, apiKey) {
   return new Promise((resolve, reject) => {
     const boundary = '----STS' + Date.now();
@@ -72,7 +72,7 @@ const {
 } = production;
 
 // Detect baked-in audio from Sora 2 speaking videos
-// These segments have speech audio embedded in the video â€” no separate VO overlay needed
+// These segments have speech audio embedded in the video " no separate VO overlay needed
 const hookSource = production.hookSource || '';
 const outroSource = production.outroSource || '';
 const hasBakedHookAudio = (hookSource === 'speaking' || hookSource === 'pool');
@@ -89,9 +89,9 @@ if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 // STEP 1: Probe all clip durations with FFprobe
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 function probeDuration(filePath) {
   try {
     const result = execSync(
@@ -116,9 +116,9 @@ function hasAudioStream(filePath) {
   }
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 // STEP 2: Calculate speed factors for smart trimming
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 function calcTrimStrategy(actualDuration, targetDuration) {
   if (actualDuration <= 0 || targetDuration <= 0) {
     return { method: 'none', speedFactor: 1.0 };
@@ -146,7 +146,7 @@ function calcTrimStrategy(actualDuration, targetDuration) {
     return { method: 'speed', speedFactor: sf };
   }
 
-  // Much shorter: just trim (clip ends shorter â€” better than ugly freeze frame)
+  // Much shorter: just trim (clip ends shorter " better than ugly freeze frame)
   if (sf < 0.7) {
     return { method: 'trim', speedFactor: 1.0 };
   }
@@ -154,15 +154,15 @@ function calcTrimStrategy(actualDuration, targetDuration) {
   return { method: 'none', speedFactor: 1.0 };
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 // CAPTION HELPERS: drawtext overlays for body clips and outro (NOT hook)
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 function stripEmojis(str) {
   if (!str) return '';
   return str.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, '').trim();
 }
 
-// Safe caption dir (no spaces/special chars â€” safe for FFmpeg drawtext path)
+// Safe caption dir (no spaces/special chars " safe for FFmpeg drawtext path)
 const captionDir = '/tmp/toncap_' + (runRecordId || scenarioName || 'x').replace(/[^a-zA-Z0-9_-]/g, '');
 if (!fs.existsSync(captionDir)) fs.mkdirSync(captionDir, { recursive: true });
 
@@ -174,7 +174,7 @@ function writeCaptionFile(text, label) {
   return fp;
 }
 
-// Font detection: Proxima Nova Semibold (TikTok style) â†’ fallback to system fonts
+// Font detection: Proxima Nova Semibold (TikTok style) ' fallback to system fonts
 const FONT_PATHS = [
   '/home/node/.n8n/fonts/ProximaNova-Semibold.ttf',
   '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
@@ -185,7 +185,7 @@ const FONT_PATHS = [
 const captionFont = FONT_PATHS.find(f => fs.existsSync(f)) || '';
 const captionFontParam = captionFont ? ':fontfile=' + captionFont : '';
 
-// Build section â†’ caption text map from copyJson
+// Build section ' caption text map from copyJson
 // Copy generation uses creative names (toxic_score, soul_type, wtf_happening)
 // Templates use technical names (score_reveal, soul_type_card, decoded_insight)
 // We store captions under ALL known aliases so either naming convention resolves
@@ -212,9 +212,9 @@ if (copyJson && copyJson.bodyClips) {
   }
 }
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 // STEP 3: Build FFmpeg command
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 const inputs = [];
 const filterParts = [];
 const scaledStreams = [];
@@ -223,7 +223,7 @@ let streamIdx = 0;
 // Helper: quote path for shell
 function q(p) { if (!p) return '""'; return '"' + p.replace(/"/g, '\\"') + '"'; }
 
-// â”€â”€â”€ Hook input â”€â”€â”€
+// """ Hook input """
 const hookSegment = template.segments.find(s => s.section === 'hook');
 const hookTarget = hookSegment ? hookSegment.duration : 3.0;
 let hookActualUsed = hookTarget; // track actual duration used (may differ for kling)
@@ -234,12 +234,12 @@ if (hookFile && fs.existsSync(hookFile)) {
   hookStreamIdx = streamIdx++;
 
   if (hookFile.endsWith('.png') || hookFile.endsWith('.jpg')) {
-    // Still image â†’ create video
+    // Still image ' create video
     inputs.push('-loop 1 -t ' + hookTarget + ' -framerate ' + FPS + ' -i ' + q(hookFile));
     filterParts.push('[' + hookStreamIdx + ':v]scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS + '[hook]');
     hookActualUsed = hookTarget;
   } else if (hookActual <= 0.1) {
-    // File has no readable duration (e.g. Telegram document) â€” loop first frame
+    // File has no readable duration (e.g. Telegram document) " loop first frame
     inputs.push('-loop 1 -t ' + hookTarget.toFixed(3) + ' -framerate ' + FPS + ' -i ' + q(hookFile));
     filterParts.push('[' + hookStreamIdx + ':v]scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS + '[hook]');
     hookActualUsed = hookTarget;
@@ -268,8 +268,8 @@ if (hookFile && fs.existsSync(hookFile)) {
   scaledStreams.push('[hook]');
 }
 
-// â”€â”€â”€ Body clip inputs â”€â”€â”€
-// NO filter â€” include ALL segments (missing files get black placeholder instead of being silently dropped)
+// """ Body clip inputs """
+// NO filter " include ALL segments (missing files get black placeholder instead of being silently dropped)
 const bodySegments = clipMapping || [];
 const _debugBody = []; // debug: track probed vs stored durations
 
@@ -283,7 +283,7 @@ for (let i = 0; i < bodySegments.length; i++) {
   const target = seg.targetDuration || 3.0;
   const fileExists = seg.localPath && fs.existsSync(seg.localPath);
 
-  // â”€â”€ Handle missing files: generate black placeholder â”€â”€
+  // "" Handle missing files: generate black placeholder ""
   if (!fileExists) {
     const placeholderPath = path.join(outputDir, 'black_body_' + i + '.png');
     try {
@@ -315,7 +315,7 @@ for (let i = 0; i < bodySegments.length; i++) {
     continue;
   }
 
-  // â”€â”€ File exists: probe and process â”€â”€
+  // "" File exists: probe and process ""
   const probed = probeDuration(seg.localPath);
   const _capMatch = bodyCaptionMap[seg.section] || null;
   _debugBody.push(seg.section + ': stored=' + (seg.actualDuration||0) + ' probed=' + probed.toFixed(2) + ' target=' + target + ' cap=' + (_capMatch ? JSON.stringify(_capMatch) : 'NONE'));
@@ -344,25 +344,25 @@ for (let i = 0; i < bodySegments.length; i++) {
       const speedFactor = probed / target;
       vf += ',setpts=PTS/' + speedFactor.toFixed(4) + ',trim=0:' + target.toFixed(3) + ',setpts=PTS-STARTPTS';
     } else {
-      // Clip within Â±5% or much longer: hard trim to exact target
+      // Clip within ±5% or much longer: hard trim to exact target
       vf += ',trim=0:' + target.toFixed(3) + ',setpts=PTS-STARTPTS';
     }
   }
 
-  // Caption overlay (body clips only â€” hook is excluded, visual-only sections like screenshot/upload_chat get no caption)
+  // Caption overlay (body clips only " hook is excluded, visual-only sections like screenshot/upload_chat get no caption)
   // Organic feel: random y-offset + random appear/disappear timing per segment
   const capText = bodyCaptionMap[seg.section] || null;
   const capFile = capText ? writeCaptionFile(capText, label) : null;
   if (capFile) {
-    // Y: base varies 0.27â€“0.37 of screen height + pixel jitter Â±30px
+    // Y: base varies 0.27"0.37 of screen height + pixel jitter ±30px
     const capYBase = 0.27 + capRand(i * 7 + 1) * 0.10;
     const capYJitter = Math.round(-30 + capRand(i * 11 + 5) * 60);
     const capY = 'h*' + capYBase.toFixed(3) + '+(' + capYJitter + ')';
-    // X: slight off-center Â±40px (feels hand-placed, not machine-centered)
+    // X: slight off-center ±40px (feels hand-placed, not machine-centered)
     const capXOff = Math.round(-40 + capRand(i * 19 + 7) * 80);
     const capX = '(w-text_w)/2+(' + capXOff + ')';
-    const capStart = 0.15 + capRand(i * 13 + 3) * 0.55;  // 0.15â€“0.70s
-    const capEnd = target - capRand(i * 17 + 11) * 0.45;  // 0â€“0.45s before end
+    const capStart = 0.15 + capRand(i * 13 + 3) * 0.55;  // 0.15"0.70s
+    const capEnd = target - capRand(i * 17 + 11) * 0.45;  // 0"0.45s before end
     vf += ',drawtext=textfile=' + capFile + captionFontParam + ':fontsize=50:fontcolor=white:borderw=3:bordercolor=black@0.6:x=' + capX + ':y=' + capY + ":enable='between(t\\," + capStart.toFixed(3) + '\\,' + capEnd.toFixed(3) + ")'";
   }
   vf += '[' + label + ']';
@@ -370,7 +370,7 @@ for (let i = 0; i < bodySegments.length; i++) {
   scaledStreams.push('[' + label + ']');
 }
 
-// â”€â”€â”€ Outro input â”€â”€â”€
+// """ Outro input """
 const outroSegment = template.segments.find(s => s.section === 'outro');
 const outroTarget = outroSegment ? outroSegment.duration : 3.0;
 let outroActualUsed = outroTarget;
@@ -393,7 +393,7 @@ if (outroFile && fs.existsSync(outroFile)) {
     : '';
 
   if (outroActual <= 0.1 && !outroFile.endsWith('.png') && !outroFile.endsWith('.jpg')) {
-    // File has no readable duration (e.g. Telegram document) â€” loop first frame
+    // File has no readable duration (e.g. Telegram document) " loop first frame
     inputs.push('-loop 1 -t ' + outroTarget.toFixed(3) + ' -framerate ' + FPS + ' -i ' + q(outroFile));
     filterParts.push('[' + outroStreamIdx + ':v]scale=' + WIDTH + ':' + HEIGHT + ':force_original_aspect_ratio=increase,crop=' + WIDTH + ':' + HEIGHT + ',setsar=1,fps=' + FPS + outroDT + '[outro]');
     outroActualUsed = outroTarget;
@@ -421,27 +421,27 @@ if (outroFile && fs.existsSync(outroFile)) {
   scaledStreams.push('[outro]');
 }
 
-// â”€â”€â”€ Concatenate all video streams â”€â”€â”€
+// """ Concatenate all video streams """
 if (scaledStreams.length === 0) {
   return [{ json: { error: true, chatId, message: 'No video streams to assemble' } }];
 }
 filterParts.push(scaledStreams.join('') + 'concat=n=' + scaledStreams.length + ':v=1:a=0[outv]');
 
-// â”€â”€â”€ Audio: VO segments + Music â”€â”€â”€
+// """ Audio: VO segments + Music """
 let hasVo = false;
 let musicIdx = -1;
 
 // Per-segment VO with adelay (new format)
 // Each VO segment is placed at its correct timeline position.
 // If VO is longer than its clip duration, speed up with atempo (max 1.4x, preserves pitch).
-// Beyond 1.4x the VO bleeds slightly â€” use per-segment redo to regenerate shorter.
+// Beyond 1.4x the VO bleeds slightly " use per-segment redo to regenerate shorter.
 if (voSegmentFiles && voSegmentFiles.length > 0) {
   const voLabels = [];
   let timeOffsetMs = 0;
 
   for (const seg of voSegmentFiles) {
     // Skip VO overlay for segments with baked-in audio (Sora 2 speaking)
-    // Their audio is embedded in the video â€” extracted separately below
+    // Their audio is embedded in the video " extracted separately below
     const isBakedSegment = (seg.section === 'hook' && hasBakedHookAudio)
                         || (seg.section === 'outro' && hasBakedOutroAudio);
 
@@ -512,8 +512,8 @@ if (musicFile && fs.existsSync(musicFile)) {
   filterParts.push('[' + musicIdx + ':a]atrim=0:' + totalDur.toFixed(3) + ',asetpts=PTS-STARTPTS,volume=0.15,afade=t=out:st=' + (totalDur - 1).toFixed(3) + ':d=1[music]');
 }
 
-// â”€â”€â”€ Embedded audio: extract from speaking videos (Sora 2 with baked speech) â”€â”€â”€
-// For speaking hooks: extract audio â†’ ElevenLabs STS â†’ convert to phone's voice
+// """ Embedded audio: extract from speaking videos (Sora 2 with baked speech) """
+// For speaking hooks: extract audio ' ElevenLabs STS ' convert to phone's voice
 const klingAudioLabels = [];
 let stsHookFile = null;
 let stsHookIdx = -1;
@@ -524,15 +524,15 @@ if (hasBakedHookAudio && hookStreamIdx >= 0) {
   const elevenLabsKey = (typeof $env !== 'undefined' && $env.ELEVENLABS_API_KEY) || 'sk_a645bb67bdb3fecc5604c41b18588e7b1d8a35092d0c28fc';
 
   if (!hookHasAudio) {
-    // Hook video has no audio stream â€” skip hook audio entirely (VO + music still work)
-    console.log('[assemble] Hook video has no audio stream â€” skipping hook audio');
+    // Hook video has no audio stream " skip hook audio entirely (VO + music still work)
+    console.log('[assemble] Hook video has no audio stream " skipping hook audio');
   } else if (phoneVoiceId && elevenLabsKey && hookFile && fs.existsSync(hookFile)) {
     // Extract audio from hook video
     const hookAudioTmp = path.join(outputDir, 'hook_audio_' + Date.now() + '.mp3');
     try {
       execSync('ffmpeg -y -i ' + q(hookFile) + ' -vn -acodec libmp3lame -ar 44100 -ab 128k ' + q(hookAudioTmp), { timeout: 10000 });
       const hookAudioBuf = fs.readFileSync(hookAudioTmp);
-      console.log('[assemble] STS: extracting hook audio (' + hookAudioBuf.length + ' bytes) â†’ voice ' + phoneVoiceId);
+      console.log('[assemble] STS: extracting hook audio (' + hookAudioBuf.length + ' bytes) ' voice ' + phoneVoiceId);
 
       // Speech-to-Speech conversion
       const stsBuf = await elevenLabsSTS(hookAudioBuf, phoneVoiceId, elevenLabsKey);
@@ -540,7 +540,7 @@ if (hasBakedHookAudio && hookStreamIdx >= 0) {
       fs.writeFileSync(stsHookFile, stsBuf);
       console.log('[assemble] STS: converted hook audio (' + stsBuf.length + ' bytes)');
 
-      // Add as separate input â€” use this instead of embedded audio
+      // Add as separate input " use this instead of embedded audio
       stsHookIdx = streamIdx++;
       inputs.push('-i ' + q(stsHookFile));
       filterParts.push('[' + stsHookIdx + ':a]loudnorm=I=-14:TP=-1:LRA=11,volume=1.0[kling_hook_a]');
@@ -555,7 +555,7 @@ if (hasBakedHookAudio && hookStreamIdx >= 0) {
       try { fs.unlinkSync(hookAudioTmp); } catch (e2) {}
     }
   } else {
-    // No voice_id or API key â€” use original embedded audio
+    // No voice_id or API key " use original embedded audio
     filterParts.push('[' + hookStreamIdx + ':a]loudnorm=I=-14:TP=-1:LRA=11,volume=1.0[kling_hook_a]');
     klingAudioLabels.push('[kling_hook_a]');
   }
@@ -594,7 +594,7 @@ if (allAudioLabels.length > 1) {
 
 const hasAudio = allAudioLabels.length > 0;
 
-// â”€â”€â”€ Build full command â”€â”€â”€
+// """ Build full command """
 const filterComplex = filterParts.join(';');
 
 let cmd = 'ffmpeg -y ' + inputs.join(' ') +
@@ -611,9 +611,9 @@ cmd += ' -c:v libx264 -preset fast -crf 23' +
   ' -movflags +faststart' +
   ' ' + q(outputFile);
 
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 // STEP 4: Execute FFmpeg (with retry using simpler params)
-// â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?â•?
+// *?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?
 
 // Collect warnings from Download Assets
 const assetWarnings = production.warnings || [];
