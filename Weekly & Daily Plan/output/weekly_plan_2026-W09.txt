@@ -1,0 +1,221 @@
+============================================================
+  WEEKLY PLAN - Week 9, 2026
+  23/02/2026 - 01/03/2026
+  Generated: 27/02/2026 15:54 | Timezone: ET (Eastern Time)
+============================================================
+
+LUNEDI' 23/02/2026
+--------------------------------------------------
+  06:26-06:52  Phone 3 | TikTok
+             Scroll 15min -> POST video -> Scroll 10min
+  06:54-06:59  Phone 3 | Instagram
+             Scroll 5min (no post - rest/browse)
+  16:00-16:25  Phone 3 | TikTok
+             Scroll 25min (no post - rest/browse)
+  16:30-16:45  Phone 3 | Instagram
+             Scroll 15min (no post - rest/browse)
+             [ROTATE PROXY: Phone 3 -> Phone 1]
+  19:30-19:40  Phone 1 | TikTok
+             Scroll 4min -> POST video -> Scroll 5min
+  19:41-19:42  Phone 1 | Instagram
+             ABORTED (1min) - opened and closed
+  19:45-20:12  Phone 1 | Instagram
+             Scroll 14min -> POST video -> Scroll 12min
+  20:17-20:38  Phone 1 | TikTok
+             Scroll 7min -> POST video -> Scroll 13min
+             [ROTATE PROXY: Phone 1 -> Phone 2]
+  20:52-21:13  Phone 2 | Instagram
+             Scroll 11min -> POST video -> Scroll 9min
+  21:16-21:18  Phone 2 | TikTok
+             ABORTED (2min) - opened and closed
+  21:23-21:57  Phone 2 | TikTok
+             Scroll 18min -> POST video -> Scroll 15min
+  22:00-22:34  Phone 2 | Instagram
+             Scroll 18min -> POST video -> Scroll 15min
+
+MARTEDI' 24/02/2026
+--------------------------------------------------
+  12:20-12:38  Phone 3 | TikTok
+             Scroll 18min (no post - rest/browse)
+  12:40-13:17  Phone 3 | Instagram
+             Scroll 23min -> POST video -> Scroll 13min
+  16:00-16:34  Phone 3 | TikTok
+             EXTENDED session (34min) - long scroll
+  16:35-16:47  Phone 3 | Instagram
+             Scroll 12min (no post - rest/browse)
+             [ROTATE PROXY: Phone 3 -> Phone 2]
+  17:11-17:48  Phone 2 | TikTok
+             Scroll 25min -> POST video -> Scroll 11min
+  17:53-18:13  Phone 2 | Instagram
+             Scroll 6min -> SAVED AS DRAFT (error) -> Scroll 13min
+             [ROTATE PROXY: Phone 2 -> Phone 1]
+  19:30-19:48  Phone 1 | TikTok
+             Scroll 8min -> POST video -> Scroll 9min
+  19:51-20:08  Phone 1 | Instagram
+             Scroll 6min -> POST video -> Scroll 10min
+  20:11-20:12  Phone 1 | Instagram
+             ABORTED (1min) - opened and closed
+  20:16-20:34  Phone 1 | TikTok
+             Scroll 6min -> SAVED AS DRAFT (error) -> Scroll 11min
+             [ROTATE PROXY: Phone 1 -> Phone 2]
+  20:43-21:00  Phone 2 | Instagram
+             Scroll 6min -> POST video -> Scroll 10min
+  21:04-21:05  Phone 2 | TikTok
+             ABORTED (1min) - opened and closed
+
+MERCOLEDI' 25/02/2026
+--------------------------------------------------
+  07:44-08:08  Phone 3 | Instagram
+             Scroll 16min -> POST video -> Scroll 7min
+  08:09-08:32  Phone 3 | TikTok
+             Scroll 13min -> POST video -> Scroll 9min
+             [ROTATE PROXY: Phone 3 -> Phone 2]
+  11:00-11:13  Phone 2 | Instagram
+             Scroll 6min -> POST video -> Scroll 6min
+  11:17-11:18  Phone 2 | TikTok
+             ABORTED (1min) - opened and closed
+             [ROTATE PROXY: Phone 2 -> Phone 3]
+  19:30-19:43  Phone 3 | Instagram
+             Scroll 13min (no post - rest/browse)
+  19:45-19:51  Phone 3 | TikTok
+             Scroll 6min (no post - rest/browse)
+             [ROTATE PROXY: Phone 3 -> Phone 2]
+  20:10-20:34  Phone 2 | Instagram
+             Scroll 24min (no post - rest/browse)
+  20:35-20:49  Phone 2 | TikTok
+             Scroll 7min -> POST video -> Scroll 6min
+             [ROTATE PROXY: Phone 2 -> Phone 1]
+  21:10-21:36  Phone 1 | Instagram
+             Scroll 19min -> POST video -> Scroll 6min
+  21:39-22:06  Phone 1 | TikTok
+             EXTENDED session (27min) - long scroll + POST video
+  22:07-22:44  Phone 1 | TikTok
+             Scroll 19min -> SAVED AS DRAFT (error) -> Scroll 17min
+  22:45-23:02  Phone 1 | Instagram
+             Scroll 8min -> POST video -> Scroll 8min
+
+GIOVEDI' 26/02/2026
+--------------------------------------------------
+  06:12-06:51  Phone 3 | Instagram
+             EXTENDED session (39min) - long scroll + POST video
+  06:55-07:11  Phone 3 | TikTok
+             Scroll 6min -> POST video -> Scroll 9min
+             [ROTATE PROXY: Phone 3 -> Phone 1]
+  19:30-19:39  Phone 1 | Instagram
+             Scroll 1min -> POST video -> Scroll 7min
+  19:42-20:04  Phone 1 | TikTok
+             Scroll 22min (no post - rest/browse)
+  20:07-20:32  Phone 1 | TikTok
+             Scroll 25min (no post - rest/browse)
+  20:34-20:58  Phone 1 | Instagram
+             Scroll 15min -> POST video -> Scroll 8min
+             [ROTATE PROXY: Phone 1 -> Phone 3]
+  21:02-21:25  Phone 3 | TikTok
+             Scroll 10min -> POST video -> Scroll 12min
+  21:30-22:01  Phone 3 | Instagram
+             Scroll 22min -> POST video -> Scroll 8min
+             [ROTATE PROXY: Phone 3 -> Phone 2]
+  22:02-22:30  Phone 2 | TikTok
+             Scroll 12min -> POST video -> Scroll 15min
+  22:31-22:55  Phone 2 | Instagram
+             Scroll 11min -> POST video -> Scroll 12min
+  22:56-23:42  Phone 2 | Instagram
+             Scroll 21min -> POST video -> Scroll 24min
+  23:43-23:59  Phone 2 | TikTok
+             Scroll 1min -> POST video -> Scroll 14min
+
+VENERDI' 27/02/2026
+--------------------------------------------------
+  21:56-21:57  Phone 3 | Instagram
+             ABORTED (1min) - opened and closed
+  21:59-22:30  Phone 3 | TikTok
+             Scroll 18min -> POST video -> Scroll 12min
+             [ROTATE PROXY: Phone 3 -> Phone 1]
+  22:31-22:48  Phone 1 | Instagram
+             Scroll 9min -> POST video -> Scroll 7min
+  22:49-23:08  Phone 1 | TikTok
+             Scroll 17min -> POST video -> Scroll 1min
+  23:09-23:15  Phone 1 | TikTok
+             Scroll 6min (no post - rest/browse)
+  23:16-23:46  Phone 1 | Instagram
+             Scroll 17min -> POST video -> Scroll 12min
+             [ROTATE PROXY: Phone 1 -> Phone 2]
+  23:54-23:56  Phone 2 | TikTok
+             ABORTED (2min) - opened and closed
+  23:57-23:59  Phone 2 | Instagram
+             Scroll 9min -> SAVED AS DRAFT (error) -> Scroll 9min
+  23:59-23:59  Phone 2 | Instagram
+             Scroll 10min -> POST video -> Scroll 9min
+  23:59-23:59  Phone 2 | TikTok
+             Scroll 2min -> POST video -> Scroll 22min
+
+SABATO 28/02/2026
+--------------------------------------------------
+  10:49-11:20  Phone 2 | TikTok
+             Scroll 17min -> POST video -> Scroll 13min
+  11:21-11:53  Phone 2 | Instagram
+             Scroll 18min -> POST video -> Scroll 13min
+  15:00-15:01  Phone 2 | TikTok
+             ABORTED (1min) - opened and closed
+  15:02-15:39  Phone 2 | Instagram
+             Scroll 8min -> POST video -> Scroll 28min
+             [ROTATE PROXY: Phone 2 -> Phone 1]
+  19:00-19:15  Phone 1 | TikTok
+             Scroll 5min -> POST video -> Scroll 9min
+  19:19-19:46  Phone 1 | Instagram
+             Scroll 27min (no post - rest/browse)
+  19:48-20:27  Phone 1 | Instagram
+             EXTENDED session (39min) - long scroll
+  20:32-21:02  Phone 1 | TikTok
+             Scroll 17min -> POST video -> Scroll 12min
+             [ROTATE PROXY: Phone 1 -> Phone 3]
+  21:03-21:13  Phone 3 | Instagram
+             Scroll 7min -> SAVED AS DRAFT (error) -> Scroll 2min
+  21:14-21:15  Phone 3 | TikTok
+             ABORTED (1min) - opened and closed
+  21:20-21:48  Phone 3 | Instagram
+             Scroll 21min -> POST video -> Scroll 6min
+  21:51-22:23  Phone 3 | TikTok
+             Scroll 15min -> POST video -> Scroll 16min
+
+DOMENICA 01/03/2026
+--------------------------------------------------
+  09:23-09:54  Phone 1 | TikTok
+             Scroll 19min -> POST video -> Scroll 11min
+  09:58-10:26  Phone 1 | Instagram
+             Scroll 19min -> POST video -> Scroll 8min
+             [ROTATE PROXY: Phone 1 -> Phone 3]
+  12:00-12:44  Phone 3 | TikTok
+             Scroll 27min -> POST video -> Scroll 16min
+  12:48-13:17  Phone 3 | Instagram
+             Scroll 17min -> POST video -> Scroll 11min
+             [ROTATE PROXY: Phone 3 -> Phone 1]
+  15:00-15:17  Phone 1 | TikTok
+             Scroll 17min (no post - rest/browse)
+  15:19-15:40  Phone 1 | Instagram
+             Scroll 13min -> POST video -> Scroll 7min
+             [ROTATE PROXY: Phone 1 -> Phone 2]
+  16:10-16:36  Phone 2 | TikTok
+             Scroll 18min -> POST video -> Scroll 7min
+  16:37-16:44  Phone 2 | Instagram
+             Scroll 7min (no post - rest/browse)
+             [ROTATE PROXY: Phone 2 -> Phone 3]
+  19:00-19:27  Phone 3 | TikTok
+             Scroll 24min -> POST video -> Scroll 2min
+  19:29-19:54  Phone 3 | Instagram
+             Scroll 12min -> POST video -> Scroll 12min
+             [ROTATE PROXY: Phone 3 -> Phone 2]
+  19:59-20:18  Phone 2 | TikTok
+             Scroll 19min (no post - rest/browse)
+  20:21-20:32  Phone 2 | Instagram
+             Scroll 11min (no post - rest/browse)
+
+============================================================
+  WEEKLY SUMMARY
+============================================================
+  Phone 1  Instagram: 10 posts, 14 sessions | Rest: Sat 28/02 | 1-post: Tue 24/02 | Events: 2 aborted
+  Phone 1     TikTok:  8 posts, 14 sessions | Rest: Thu 26/02 | 1-post: Sun 01/03 | Events: 2 drafts
+  Phone 2  Instagram:  9 posts, 14 sessions | Rest: Sun 01/03 | 1-post: Wed 25/02 | Events: 2 drafts
+  Phone 2     TikTok:  8 posts, 14 sessions | Rest: none | 1-post: Sun 01/03 | Events: 5 aborted
+  Phone 3  Instagram:  7 posts, 13 sessions | Rest: Mon 23/02 | 1-post: Tue 24/02 | Events: 1 drafts, 1 aborted
+  Phone 3     TikTok:  8 posts, 13 sessions | Rest: Tue 24/02 | 1-post: Wed 25/02 | Events: 1 aborted
