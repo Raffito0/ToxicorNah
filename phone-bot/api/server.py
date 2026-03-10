@@ -87,7 +87,7 @@ async def test_phone(phone_id: int):
         "connected": ctrl.is_connected(),
         "screen_on": ctrl.is_screen_on(),
         "current_app": ctrl.get_current_app(),
-        "ui_elements": len(ctrl.dump_ui(force=True)),
+        "screenshot_ok": ctrl.screenshot_bytes() != b"",
     }
 
 

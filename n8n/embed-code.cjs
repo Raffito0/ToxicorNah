@@ -40,6 +40,8 @@ const codeMap = {
   'save-to-content-library.js': 'Save to Content Library',
   'auto-produce.js': 'Auto Produce',
   'set-produce-context.js': 'Set Produce Context',
+  'harden-video.js': 'Harden Video',
+  'verify-hardening.js': 'Verify Hardening',
 };
 
 let totalUpdated = 0;

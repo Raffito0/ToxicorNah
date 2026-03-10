@@ -1,10 +1,11 @@
-"""Gemini Vision integration — the bot's brain for intelligent decisions.
+"""Gemini Vision integration -- the bot's brain for intelligent decisions.
 
 Used for:
 - Contextual comments (reads video caption/content, writes natural comment)
 - Error handling (detects popups, captchas, unexpected screens)
 - Content categorization (what type of video is this?)
-NOT used for finding buttons (that's done by UI tree parsing — free and fast).
+- Finding dynamic UI elements in upload flows (via find_element_by_vision)
+Routine navigation uses coordinate maps (core/coords.py) -- free and instant.
 """
 import base64
 import json

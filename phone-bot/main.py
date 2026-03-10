@@ -80,9 +80,9 @@ def test_devices(controllers: dict[int, ADBController]):
         else:
             log.warning("  Screenshot: FAILED")
 
-        # Test UI dump
-        elements = ctrl.dump_ui(force=True)
-        log.info("  UI elements: %d", len(elements))
+        # Test coord lookup
+        x, y = ctrl.get_coord("tiktok", "nav_home")
+        log.info("  Coord test (tiktok nav_home): %d, %d", x, y)
 
 
 async def run_today(controllers: dict[int, ADBController]):

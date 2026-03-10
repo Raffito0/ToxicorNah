@@ -702,26 +702,8 @@ if (!ffmpegSuccess || !fs.existsSync(outputFile)) {
   }];
 }
 
-// ── STEP 5: Clean metadata — mimic a mobile editing app (not a camera) ──
-// Video is clearly post-produced (screenshots, text, overlays), so camera metadata
-// would be contradictory and suspicious. Instead: strip everything, leave only
-// what CapCut/InShot would leave (handler names + creation_time, nothing else).
-const metaOutput = outputFile.replace('.mp4', '_meta.mp4');
-const creationTime = new Date().toISOString().replace('Z', '000Z');
-const metaCmd = 'ffmpeg -y -i ' + q(outputFile) + ' -c copy -map_metadata -1 -fflags +bitexact' +
-  ' -brand mp42' +
-  ' -metadata creation_time="' + creationTime + '"' +
-  ' -metadata:s:v handler_name="VideoHandler"' +
-  ' -metadata:s:a handler_name="SoundHandler"' +
-  ' -movflags +faststart ' + q(metaOutput);
-try {
-  execSync(metaCmd, { timeout: 60000 });
-  fs.renameSync(metaOutput, outputFile);
-} catch (metaErr) {
-  // Non-critical: if metadata injection fails, original file is still valid
-  assetWarnings.push('Metadata injection failed: ' + (metaErr.message || '').slice(0, 100));
-  if (fs.existsSync(metaOutput)) fs.unlinkSync(metaOutput);
-}
+// Step 5 removed — hardening + verification now in separate downstream Code nodes:
+// "Harden Video" (harden-video.js) and "Verify Hardening" (verify-hardening.js)
 
 const stats = fs.statSync(outputFile);
 const videoBase64 = fs.readFileSync(outputFile).toString('base64');
