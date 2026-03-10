@@ -7,6 +7,11 @@ const config: CapacitorConfig = {
   android: {
     backgroundColor: '#111111',
   },
+  ios: {
+    backgroundColor: '#111111',
+    contentInset: 'always',
+    preferredContentMode: 'mobile',
+  },
   plugins: {
     SplashScreen: {
       launchShowDuration: 0,

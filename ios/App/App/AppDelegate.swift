@@ -1,4 +1,5 @@
 import UIKit
+import WebKit
 import Capacitor
 
 @UIApplicationMain
@@ -34,9 +35,24 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        // Called when the app was launched with a url. Feel free to add additional processing here,
-        // but if you want the App API to support tracking app url opens, make sure to keep this call
+        // Handle toxicornah:// deep links (e.g. toxicornah://results?sid=xxx)
+        handleDeepLink(url)
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
+    }
+
+    private func handleDeepLink(_ url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let sid = components.queryItems?.first(where: { $0.name == "sid" })?.value,
+              !sid.isEmpty else { return }
+
+        // Wait for WebView to be ready, then inject sid (same as Android MainActivity)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            if let webView = self.window?.rootViewController?.view.subviews
+                .compactMap({ $0 as? WKWebView }).first {
+                let js = "window.__pendingSid = '\(sid)'; window.dispatchEvent(new CustomEvent('applink-sid', { detail: '\(sid)' }));"
+                webView.evaluateJavaScript(js, completionHandler: nil)
+            }
+        }
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
