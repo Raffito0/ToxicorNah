@@ -493,13 +493,21 @@ Completato:
 - **Session Flow Phases**: 5 fasi (Arrival → Warmup → Peak → Fatigue → Exit) in `config.SESSION_PHASES`, gestite da `SessionPhaseTracker` in `human.py`
 - **`verify_email` rimosso**: l'utente verifica email manualmente, rimosso da warmup.py (6 punti) + executor.py (2 punti)
 
-DA FARE (PROSSIMO TASK):
-- **~100+ `time.sleep(N)` con numeri letterali**: il buco piu grande rimasto. Ogni `time.sleep(2)` = pausa identica ogni volta = pattern rilevabile. Sparsi in tiktok.py (~40), instagram.py (~40), adb.py (~5), proxy.py (~3). DEVONO essere convertiti in `time.sleep(self.human.timing("param_name"))`
-- **`close_app_natural()` in adb.py**: ha delay fissi (0.8s, 1.0s, 0.5s) — serve accesso a HumanEngine
-- **Avatar hack in instagram.py**: calcola posizione avatar sottraendo 9% da like_icon Y — aggiungere coord esplicita in coords.py
+COMPLETATO (2026-03-10, sessione serale):
+- **Per-account Personality System**: 7 tratti comportamentali unici per account (reels_preference, story_affinity, double_tap_habit, explore_curiosity, boredom_rate, boredom_relief, switch_threshold). Persistiti in JSON, evolvono ~1.5% per sessione basandosi sul comportamento reale. Dopo ~60 sessioni (~1 mese) ogni account ha abitudini visibilmente diverse
+- **BoredomTracker**: Float 0.0-1.0 che sale con scroll passivo (contenuto fuori nicchia = +30% noia), scende con engagement (like/comment/follow). Quando supera switch_threshold della personalita' → trigger cambio Feed/Reels. Influenza anche pick_action() (piu' noia = piu' search/explore)
+- **Niche keywords per sessione**: executor.py ora campiona 6-10 keyword random dal pool di 21 per ogni sessione, cosi' ogni account cerca cose diverse
+- **11 magic numbers eliminati**: tutte le probabilita' hardcoded in browse_session() (double_tap 0.6/0.5, stories 0.25/0.30, feed/reels switch ogni 20 azioni, health check ogni 15, ecc.) sostituite con tratti personalita' o decisioni boredom-driven
+
+GIA' FIXATI (verificato 2026-03-10):
+- **`close_app_natural()`**: USA GIA' `_hw_delay()` log-normal, NON delay fissi
+- **Avatar hack**: USA GIA' `get_coord("instagram", "avatar_reel")` da coords.py, NON il calcolo 9%
+- **Gemini retry**: HA GIA' 2 tentativi con 3s pausa
+- **Niche keywords**: ORA passate anche a sessioni regolari (vedi sopra)
+
+DA FARE (phone-bot):
+- **~100+ `time.sleep(N)` con numeri letterali**: il buco piu grande rimasto. Sparsi in tiktok.py (~40), instagram.py (~40), adb.py (~5), proxy.py (~3). DEVONO essere convertiti in `time.sleep(self.human.timing("param_name"))`
 - **Proxy credentials in chiaro**: config.py ha username/password — spostare in env vars
-- **Niche keywords non passate** alle sessioni regolari (solo warmup)
-- **Gemini API senza retry**: se fallisce, commento saltato silenziosamente
 
 **FASE 3 — Proxy: NESSUNA MODIFICA NECESSARIA** (proxy mobile SOCKS5 USA = IP residenziale)
 
@@ -555,3 +563,95 @@ config.py HUMAN dict
 6. Ogni nuovo param: tuple `(mediana, sigma, min, max)`, mediana vicina al numero originale
 7. Sleep molto corti (< 0.1s) per sincronizzazione ADB possono restare fissi
 8. Verifica finale: `grep -rn "time.sleep(" phone-bot/` = ZERO numeri letterali
+
+## iOS App Build (2026-03-10) — IN CORSO
+
+### Contesto
+L'utente deve registrare body clips per TikTok/Instagram dall'app sul suo iPhone.
+L'app Android esiste gia' (Capacitor WebView). Serve la versione iOS identica.
+L'utente NON ha un Mac — usa MacInCloud (Mac remoto via RDP).
+
+### Architettura App
+- **Capacitor** wrappa la web app (React + Vite) in gusci nativi Android/iOS
+- Stessa codebase web per entrambe le piattaforme
+- `npm run build` → `dist/` → `npx cap copy ios` → Xcode build
+- Il progetto iOS esiste gia' in `ios/App/`
+
+### Cosa e' stato fatto (2026-03-10 sera):
+1. **capacitor.config.ts**: aggiunto config iOS (backgroundColor #111111, contentInset, preferredContentMode)
+2. **Info.plist**: registrato URL scheme `toxicornah://`, bloccato orientamento a solo Portrait
+3. **AppDelegate.swift**: aggiunto handler deep link per iOS — estrae `sid` da URL `toxicornah://results?sid=UUID`, inietta nel WebView via JavaScript (identico a Android MainActivity.java)
+4. **Web app buildata**: `npm run build` + `npx cap copy ios` eseguiti, asset web copiati in `ios/App/App/public/`
+5. **Tutto pushato su GitHub** (`github.com/Raffito0/ToxicorNah`, branch master)
+
+### Deep Link — come funziona:
+- n8n genera link `APP_URL/?sid=UUID` e lo manda su Telegram
+- Su Android: `MainActivity.java` intercetta il link → inietta `window.__pendingSid` + dispatcha evento `applink-sid`
+- Su iOS: `AppDelegate.swift` fa la stessa cosa tramite `handleDeepLink()` → WKWebView.evaluateJavaScript
+- `App.tsx` ascolta l'evento `applink-sid` → carica scenario da Supabase → mostra risultati
+- Il salvataggio scenari su Supabase e' gia' implementato in `telegram-callback-handler.js` (riga 700) e `save-to-supabase.js`
+
+### File iOS chiave:
+- `capacitor.config.ts` — config Capacitor (appId, webDir, iOS/Android settings)
+- `ios/App/App/AppDelegate.swift` — entry point iOS + deep link handler
+- `ios/App/App/Info.plist` — URL scheme, orientamento, bundle ID
+- `ios/App/App.xcodeproj` — progetto Xcode (aprire questo)
+- `ios/App/App/public/` — asset web (generati da `npx cap copy ios`)
+- `ios/App/CapApp-SPM/` — dipendenze Capacitor via Swift Package Manager
+
+### Bug di layout iOS:
+- L'utente ha visto bug di layout aprendo il link web su Chrome iPhone (rispetto ad Android)
+- I bug vanno identificati e fixati — verranno visti nel simulatore iPhone su MacInCloud
+- Anche l'app nativa Capacitor usa WKWebView, quindi gli stessi bug CSS si vedranno
+- Fix CSS nel codice web (`src/`) → `npm run build` → `npx cap copy ios` → rebuild in Xcode
+
+### MacInCloud Setup:
+- Piano scelto: **Managed Server** ($26/mese, 7 giorni di accesso/mese)
+- Preset: **Xcode/iOS Dev**
+- Platform: Mac Mini Silicon M2, 16GB RAM
+- Location: Europe Central (Frankfurt)
+- OS: macOS Sequoia 15.7.3 con Xcode 26.1
+- Accesso via Microsoft Remote Desktop (RDP)
+- VS Code installabile senza admin (drag-and-drop .app)
+- Claude Code via Terminal: `npx @anthropic-ai/claude-code`
+
+### Come installare .ipa su iPhone senza Apple Developer Program ($99):
+1. Su MacInCloud: Xcode → Product → Archive → Distribute → Development → Export .ipa
+2. Scaricare .ipa sul PC Windows
+3. Installare **AltStore** su Windows (altstore.io) + iTunes
+4. Collegare iPhone via USB → AltStore installa l'app
+5. iPhone: Impostazioni → Generali → Gestione Dispositivo → fidati del profilo
+6. L'app scade ogni 7 giorni, AltStore rinnova automaticamente (PC + iPhone stessa WiFi)
+
+## TODO — PROSSIMI STEP (da dove riprendere)
+
+### PRIORITA' 1: iOS App (body clips per video TikTok/Instagram)
+1. Comprare MacInCloud Managed Server ($26.99)
+2. Accedere al Mac via RDP
+3. Terminal:
+   ```
+   git clone https://github.com/Raffito0/ToxicorNah.git
+   cd ToxicorNah
+   npm install
+   npm run build
+   npx cap copy ios
+   npx cap open ios
+   ```
+4. Xcode: selezionare iPhone 16 simulatore → Play
+5. Verificare l'app nel simulatore — identificare bug di layout
+6. Fixare bug di layout (CSS in `src/`) con Claude Code
+7. Rebuild: `npm run build && npx cap copy ios` → Xcode Play
+8. Quando perfetta: Archive → Export .ipa
+9. Su Windows: AltStore → installare .ipa su iPhone
+10. Testare deep link da Telegram → app si apre con risultati
+11. Registrare body clips per i video
+
+### PRIORITA' 2: Phone-Bot (rimasto da fare)
+- Convertire ~100+ `time.sleep(N)` letterali in timing log-normal
+- Spostare proxy credentials in env vars
+
+### PRIORITA' 3: n8n Pipeline
+- Re-importare `unified-pipeline-fixed.json` su VPS
+- Pulire Video Runs con status='started'
+- Testare auto-produce (verificare 15 check hardening)
+- Importare `workflow-hook-batch.json` per hook pool Phone 1 e 3
