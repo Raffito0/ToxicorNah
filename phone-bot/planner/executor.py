@@ -19,7 +19,7 @@ from ..core.human import HumanEngine
 from ..core.proxy import ProxyQueue
 from ..actions.tiktok import TikTokBot
 from ..actions.instagram import InstagramBot
-from .warmup import AccountWarmupState, generate_warmup_sessions, assign_profile_setup_days
+from .warmup import AccountWarmupState, generate_warmup_sessions, generate_warmup_plan
 from delivery import get_next_video, download_video, push_to_phone, mark_posted, mark_draft, mark_skipped
 
 log = logging.getLogger(__name__)
@@ -57,20 +57,26 @@ class SessionExecutor:
 
     def init_warmup(self, account_name: str, platform: str, phone_id: int,
                     niche_keywords: list[str] = None):
-        """Initialize warmup for a new account."""
+        """Initialize warmup for a new account.
+        Generates a unique 5-8 day plan with dead days, lazy days,
+        non-monotonic engagement, and randomized profile setup.
+        """
         state = AccountWarmupState(
             account_name=account_name,
             platform=platform,
             phone_id=phone_id,
             start_date=date.today().isoformat(),
             current_day=1,
-            niche_keywords=niche_keywords or ["fyp", "viral", "trending"],
+            niche_keywords=niche_keywords or [
+                "toxic relationship", "red flags", "situationship",
+                "dating advice", "couples", "relationship tips",
+            ],
         )
-        assign_profile_setup_days(state)
+        generate_warmup_plan(state)
         self.warmup_states[account_name] = state
         self._save_warmup_state()
-        log.info("Warmup initialized for %s (day 1, pic=day %d, bio=day %d)",
-                 account_name, state.profile_pic_day, state.bio_day)
+        log.info("Warmup initialized for %s (%d days, pic=day %d, bio=day %d)",
+                 account_name, state.total_days, state.profile_pic_day, state.bio_day)
 
     def is_in_warmup(self, account_name: str) -> bool:
         """Check if an account is still in warmup phase."""
@@ -199,9 +205,10 @@ class SessionExecutor:
         adb = self.controllers[phone_id]
         human = self._get_human(account)
 
-        # Start the human engine for this session
+        # Start the human engine for this session (with duration for phase tracking)
         now = datetime.now()
-        human.start_session(hour=now.hour, weekday=now.weekday())
+        human.start_session(hour=now.hour, weekday=now.weekday(),
+                            duration_minutes=total_duration)
 
         # --- Handle session types ---
 
@@ -351,7 +358,8 @@ class SessionExecutor:
         adb = self.controllers[phone_id]
         human = self._get_human(account)
         now = datetime.now()
-        human.start_session(hour=now.hour, weekday=now.weekday())
+        human.start_session(hour=now.hour, weekday=now.weekday(),
+                            duration_minutes=duration)
 
         if platform == "tiktok":
             await self._warmup_tiktok(adb, human, session)
@@ -362,124 +370,165 @@ class SessionExecutor:
         log.info("=== Warmup session complete: %s day %d ===", account, day)
 
     async def _warmup_tiktok(self, adb: ADBController, human: HumanEngine, session: dict):
-        """Execute a TikTok warmup session."""
+        """Execute a TikTok warmup session.
+        Pre-loop tasks are shuffled per session. Scroll loop has full
+        micro-behaviors (zona morta, peek scroll, post-like pause, etc.)."""
         bot = TikTokBot(adb, human)
         actions = session["actions"]
         duration = session["duration_minutes"]
         niche_keywords = session.get("niche_keywords", [])
+        account_name = session["account_name"]
+        warmup_state = self.warmup_states.get(account_name)
+        n_searches = actions.get("search_niche", 0)
 
         if not bot.open_app():
             return
 
-        # Day 1: verify email
-        if actions.get("verify_email"):
-            log.info("Warmup: verifying email in settings")
-            bot.go_to_profile()
-            await asyncio.sleep(random.uniform(1, 2))
-            # Tap settings (3 dots or hamburger menu)
-            el = adb.find_element(content_desc="Settings") or \
-                 adb.find_element(content_desc="More options")
-            if el:
-                x, y = human.jitter_tap(*el.center)
-                adb.tap(x, y)
-                await asyncio.sleep(2)
-                # Look around settings briefly
-                await asyncio.sleep(random.uniform(3, 6))
-                adb.press_back()
-                await asyncio.sleep(1)
-                adb.press_back()
-                await asyncio.sleep(1)
+        # Behavior #10: Variable load reaction time
+        await asyncio.sleep(human.load_reaction_time())
 
-        # Explore app (day 1: click Live, Discover, etc.)
+        # --- Pre-loop tasks (SHUFFLED order per session) ---
+        pre_tasks = []
         if actions.get("explore_app"):
-            log.info("Warmup: exploring app features")
-            bot.go_to_fyp()
-            await asyncio.sleep(random.uniform(2, 4))
-
-            # Check out Discover/Search
-            bot.go_to_search()
-            await asyncio.sleep(random.uniform(3, 6))
-
-            # Go back to FYP
-            bot.go_to_fyp()
-            await asyncio.sleep(random.uniform(1, 2))
-
-        # Search niche keywords
-        n_searches = actions.get("search_niche", 0)
+            pre_tasks.append("explore_app")
         if n_searches and niche_keywords:
-            keywords_to_search = random.sample(
-                niche_keywords, min(n_searches, len(niche_keywords))
-            )
-            for kw in keywords_to_search:
-                log.info("Warmup: searching '%s'", kw)
-                bot.search_hashtag(kw)
-                # Watch a few videos from search results
-                await asyncio.sleep(random.uniform(5, 12))
-                bot.go_to_fyp()
-                await asyncio.sleep(random.uniform(2, 4))
-
-        # Profile setup (days 5-7, randomized per account)
-        account_name = session["account_name"]
-        warmup_state = self.warmup_states.get(account_name)
-
+            pre_tasks.append("search_niche")
         if session.get("set_profile_pic") and warmup_state:
-            profile_pic = self._get_profile_pic(session["phone_id"], "tiktok")
-            if profile_pic:
-                bot.set_profile_pic(profile_pic)
-                warmup_state.profile_pic_done = True
-                self._save_warmup_state()
-                await asyncio.sleep(random.uniform(3, 8))
-
+            pre_tasks.append("set_profile_pic")
         if session.get("set_bio") and warmup_state:
-            bio = self._get_bio(session["phone_id"], "tiktok")
-            if bio:
-                bot.set_bio(bio)
-                warmup_state.bio_done = True
-                self._save_warmup_state()
-                await asyncio.sleep(random.uniform(3, 8))
+            pre_tasks.append("set_bio")
 
-        # Main scroll + engagement loop
+        random.shuffle(pre_tasks)
+
+        for task in pre_tasks:
+            if task == "explore_app":
+                log.info("Warmup: exploring app features")
+                bot.go_to_fyp()
+                await asyncio.sleep(human.timing("t_explore_browse"))
+                bot.go_to_search()
+                await asyncio.sleep(human.timing("t_explore_browse"))
+                bot.go_to_fyp()
+                await asyncio.sleep(human.timing("t_nav_settle"))
+
+            elif task == "search_niche":
+                keywords_to_search = random.sample(
+                    niche_keywords, min(n_searches, len(niche_keywords))
+                )
+                for kw in keywords_to_search:
+                    log.info("Warmup: searching '%s'", kw)
+                    bot.search_hashtag(kw)
+                    await asyncio.sleep(human.timing("t_browse_results"))
+                    bot.go_to_fyp()
+                    await asyncio.sleep(human.timing("t_explore_browse"))
+
+            elif task == "set_profile_pic":
+                profile_pic = self._get_profile_pic(session["phone_id"], "tiktok")
+                if profile_pic:
+                    bot.set_profile_pic(profile_pic)
+                    warmup_state.profile_pic_done = True
+                    self._save_warmup_state()
+                    await asyncio.sleep(human.timing("t_profile_settle"))
+
+            elif task == "set_bio":
+                bio = self._get_bio(session["phone_id"], "tiktok")
+                if bio:
+                    bot.set_bio(bio)
+                    warmup_state.bio_done = True
+                    self._save_warmup_state()
+                    await asyncio.sleep(human.timing("t_profile_settle"))
+
+        # --- Main scroll + engagement loop (with micro-behaviors) ---
+        bot.go_to_fyp()
+        await asyncio.sleep(2)
+
         likes_left = actions.get("like", 0)
         comments_left = actions.get("comment", 0)
-        shares_left = actions.get("share", 0)
         follows_left = actions.get("follow", 0)
 
         start = time.time()
         total_seconds = duration * 60
 
         while (time.time() - start) < total_seconds:
+            # Behavior #1: Zona morta
+            if human.should_zona_morta():
+                zm_dur = human.zona_morta_duration()
+                log.debug("Warmup zona morta: %.0fs", zm_dur)
+                await asyncio.sleep(zm_dur)
+                continue
+
+            # Interruption
+            if human.should_interrupt():
+                await human.do_interruption(adb)
+                continue
+
             # Watch current video
             watch_time = human.watch_duration()
             await asyncio.sleep(watch_time)
 
-            # Like (if allowed)
-            if likes_left > 0 and random.random() < 0.35:
+            # Pick ONE engagement action (weighted random, respecting limits)
+            options = ["scroll"]
+            weights = [0.40]
+            if likes_left > 0:
+                options.append("like")
+                weights.append(0.35)
+            if comments_left > 0:
+                options.append("comment")
+                weights.append(0.15)
+            if follows_left > 0:
+                options.append("follow")
+                weights.append(0.10)
+
+            action = random.choices(options, weights=weights, k=1)[0]
+
+            if action == "like":
                 bot.like_video()
                 likes_left -= 1
-                await asyncio.sleep(human.action_delay())
+                # Behavior #3: Post-like pause
+                await asyncio.sleep(human.post_like_pause())
 
-            # Comment (if allowed)
-            if comments_left > 0 and random.random() < 0.15:
+            elif action == "comment":
+                # Behavior #9: Double-open comments
+                if human.should_double_open_comments():
+                    bot.open_comments()
+                    await asyncio.sleep(human.timing("t_double_open_1"))
+                    adb.press_back()
+                    await asyncio.sleep(human.timing("t_double_open_2"))
                 await bot.comment_with_ai()
                 comments_left -= 1
-                await asyncio.sleep(human.action_delay())
 
-            # Follow (if allowed)
-            if follows_left > 0 and random.random() < 0.10:
+            elif action == "follow":
                 bot.follow_creator()
                 follows_left -= 1
-                await asyncio.sleep(human.action_delay())
 
-            # Scroll to next
-            bot.scroll_fyp()
+            # Scroll to next (with micro-behaviors)
+            if human.should_micro_scroll():
+                sw = human.humanize_swipe(
+                    adb.screen_w // 2, adb.screen_h * 3 // 4,
+                    adb.screen_w // 2, adb.screen_h // 2,
+                )
+                adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
+                await asyncio.sleep(human.timing("t_micro_scroll"))
+            elif human.should_peek_scroll():
+                bot.peek_scroll()
+            elif human.should_rewatch():
+                bot.scroll_fyp()
+                await asyncio.sleep(human.timing("t_rewatch"))
+                sw = human.humanize_swipe(
+                    adb.screen_w // 2, adb.screen_h // 4,
+                    adb.screen_w // 2, adb.screen_h * 3 // 4,
+                )
+                adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
+                await asyncio.sleep(human.watch_duration())
+            else:
+                bot.scroll_fyp()
+
             await asyncio.sleep(human.action_delay())
 
-        # Post on day 7
+        # Post on last day
         if session.get("can_post"):
             if session.get("use_camera_trick"):
                 await self._tiktok_camera_trick_post(adb, human, bot, session)
             else:
-                # Normal post
                 video_info = get_next_video(session["phone_id"], "tiktok")
                 if video_info:
                     local_path = download_video(video_info["video_url"])
@@ -487,76 +536,86 @@ class SessionExecutor:
                         bot.post_video(local_path, video_info.get("caption", ""))
                         mark_posted(video_info["record_id"], "tiktok")
 
+        # Behavior #11: Background at end
+        if human.should_end_in_background():
+            bg_time = human.bg_end_duration()
+            log.debug("Warmup background end: %.0fs", bg_time)
+            adb.press_home()
+            await asyncio.sleep(bg_time)
+
         bot.close_app()
 
     async def _warmup_instagram(self, adb: ADBController, human: HumanEngine, session: dict):
-        """Execute an Instagram warmup session."""
+        """Execute an Instagram warmup session.
+        Pre-loop tasks are shuffled per session. Scroll loop has full
+        micro-behaviors (zona morta, peek scroll, post-like pause, etc.)."""
         bot = InstagramBot(adb, human)
         actions = session["actions"]
         duration = session["duration_minutes"]
         niche_keywords = session.get("niche_keywords", [])
+        account_name = session["account_name"]
+        warmup_state = self.warmup_states.get(account_name)
+        n_searches = actions.get("search_niche", 0)
 
         if not bot.open_app():
             return
 
-        # Explore tab (early days)
+        # Behavior #10: Variable load reaction time
+        await asyncio.sleep(human.load_reaction_time())
+
+        # --- Pre-loop tasks (SHUFFLED order per session) ---
+        pre_tasks = []
         if actions.get("explore_tab"):
-            log.info("Warmup: exploring Explore tab")
-            bot.go_to_explore()
-            await asyncio.sleep(random.uniform(5, 10))
-
-        # Search niche
-        n_searches = actions.get("search_niche", 0)
+            pre_tasks.append("explore_tab")
         if n_searches and niche_keywords:
-            keywords_to_search = random.sample(
-                niche_keywords, min(n_searches, len(niche_keywords))
-            )
-            for kw in keywords_to_search:
-                log.info("Warmup: searching '%s' on IG", kw)
-                bot.go_to_explore()
-                await asyncio.sleep(1)
-                # Tap search bar and type
-                el = adb.find_element(text="Search") or adb.find_element(content_desc="Search")
-                if el:
-                    x, y = human.jitter_tap(*el.center)
-                    adb.tap(x, y)
-                    await asyncio.sleep(1)
-                    for char in kw:
-                        adb.type_text(char)
-                        await asyncio.sleep(human.typing_delay())
-                    adb.press_enter()
-                    await asyncio.sleep(random.uniform(5, 10))
-                bot.go_to_reels()
-                await asyncio.sleep(2)
-
-        # Profile setup (days 5-7, randomized per account)
-        account_name = session["account_name"]
-        warmup_state = self.warmup_states.get(account_name)
-
+            pre_tasks.append("search_niche")
         if session.get("set_profile_pic") and warmup_state:
-            profile_pic = self._get_profile_pic(session["phone_id"], "instagram")
-            if profile_pic:
-                bot.set_profile_pic(profile_pic)
-                warmup_state.profile_pic_done = True
-                self._save_warmup_state()
-                await asyncio.sleep(random.uniform(3, 8))
-
+            pre_tasks.append("set_profile_pic")
         if session.get("set_bio") and warmup_state:
-            bio = self._get_bio(session["phone_id"], "instagram")
-            if bio:
-                bot.set_bio(bio)
-                warmup_state.bio_done = True
-                self._save_warmup_state()
-                await asyncio.sleep(random.uniform(3, 8))
+            pre_tasks.append("set_bio")
 
-        # Start on Reels or Feed
-        if actions.get("scroll_reels") and random.random() < 0.6:
+        random.shuffle(pre_tasks)
+
+        for task in pre_tasks:
+            if task == "explore_tab":
+                log.info("Warmup: exploring Explore tab")
+                bot.go_to_explore()
+                await asyncio.sleep(human.timing("t_browse_results"))
+
+            elif task == "search_niche":
+                keywords_to_search = random.sample(
+                    niche_keywords, min(n_searches, len(niche_keywords))
+                )
+                for kw in keywords_to_search:
+                    log.info("Warmup: searching '%s' on IG", kw)
+                    bot.search_keyword(kw)
+                    bot.go_to_reels()
+                    await asyncio.sleep(human.timing("t_explore_browse"))
+
+            elif task == "set_profile_pic":
+                profile_pic = self._get_profile_pic(session["phone_id"], "instagram")
+                if profile_pic:
+                    bot.set_profile_pic(profile_pic)
+                    warmup_state.profile_pic_done = True
+                    self._save_warmup_state()
+                    await asyncio.sleep(human.timing("t_profile_settle"))
+
+            elif task == "set_bio":
+                bio = self._get_bio(session["phone_id"], "instagram")
+                if bio:
+                    bot.set_bio(bio)
+                    warmup_state.bio_done = True
+                    self._save_warmup_state()
+                    await asyncio.sleep(human.timing("t_profile_settle"))
+
+        # --- Start on Reels or Feed (random) ---
+        if random.random() < 0.6:
             bot.go_to_reels()
         else:
             bot.go_to_feed()
         await asyncio.sleep(2)
 
-        # Main scroll + engagement loop
+        # --- Main scroll + engagement loop (with micro-behaviors) ---
         likes_left = actions.get("like", 0)
         comments_left = actions.get("comment", 0)
         follows_left = actions.get("follow", 0)
@@ -565,28 +624,90 @@ class SessionExecutor:
         total_seconds = duration * 60
 
         while (time.time() - start) < total_seconds:
+            # Behavior #1: Zona morta
+            if human.should_zona_morta():
+                zm_dur = human.zona_morta_duration()
+                log.debug("Warmup zona morta: %.0fs", zm_dur)
+                await asyncio.sleep(zm_dur)
+                continue
+
+            # Interruption
+            if human.should_interrupt():
+                await human.do_interruption(adb)
+                continue
+
+            # Watch current video
             watch_time = human.watch_duration()
             await asyncio.sleep(watch_time)
 
-            if likes_left > 0 and random.random() < 0.35:
+            # Pick ONE engagement action (weighted random, respecting limits)
+            options = ["scroll"]
+            weights = [0.40]
+            if likes_left > 0:
+                options.append("like")
+                weights.append(0.35)
+            if comments_left > 0:
+                options.append("comment")
+                weights.append(0.15)
+            if follows_left > 0:
+                options.append("follow")
+                weights.append(0.10)
+
+            action = random.choices(options, weights=weights, k=1)[0]
+
+            if action == "like":
                 bot.like_post()
                 likes_left -= 1
-                await asyncio.sleep(human.action_delay())
+                # Behavior #3: Post-like pause
+                await asyncio.sleep(human.post_like_pause())
 
-            if comments_left > 0 and random.random() < 0.15:
+            elif action == "comment":
+                # Behavior #9: Double-open comments
+                if human.should_double_open_comments():
+                    bot.open_comments()
+                    await asyncio.sleep(human.timing("t_double_open_1"))
+                    adb.press_back()
+                    await asyncio.sleep(human.timing("t_double_open_2"))
                 await bot.comment_with_ai()
                 comments_left -= 1
-                await asyncio.sleep(human.action_delay())
 
-            if follows_left > 0 and random.random() < 0.10:
+            elif action == "follow":
                 bot.follow_user()
                 follows_left -= 1
-                await asyncio.sleep(human.action_delay())
 
-            bot.scroll_reels()
+            # Scroll to next (with micro-behaviors)
+            if human.should_micro_scroll():
+                sw = human.humanize_swipe(
+                    adb.screen_w // 2, adb.screen_h * 3 // 4,
+                    adb.screen_w // 2, adb.screen_h // 2,
+                )
+                adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
+                await asyncio.sleep(human.timing("t_micro_scroll"))
+            elif human.should_peek_scroll():
+                # Inline peek scroll for IG
+                mid_y = adb.screen_h // 2
+                sw = human.humanize_swipe(
+                    adb.screen_w // 2, adb.screen_h * 3 // 4,
+                    adb.screen_w // 2, mid_y,
+                )
+                adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
+                await asyncio.sleep(human.timing("t_micro_scroll"))
+                adb.swipe(sw["x2"], sw["y2"], sw["x1"], sw["y1"], sw["duration"])
+            elif human.should_rewatch():
+                bot.scroll_reels()
+                await asyncio.sleep(human.timing("t_rewatch"))
+                sw = human.humanize_swipe(
+                    adb.screen_w // 2, adb.screen_h // 4,
+                    adb.screen_w // 2, adb.screen_h * 3 // 4,
+                )
+                adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
+                await asyncio.sleep(human.watch_duration())
+            else:
+                bot.scroll_reels()
+
             await asyncio.sleep(human.action_delay())
 
-        # Post on day 7
+        # Post on last day
         if session.get("can_post"):
             video_info = get_next_video(session["phone_id"], "instagram")
             if video_info:
@@ -594,6 +715,13 @@ class SessionExecutor:
                 if local_path:
                     bot.post_reel(local_path, video_info.get("caption", ""))
                     mark_posted(video_info["record_id"], "instagram")
+
+        # Behavior #11: Background at end
+        if human.should_end_in_background():
+            bg_time = human.bg_end_duration()
+            log.debug("Warmup background end: %.0fs", bg_time)
+            adb.press_home()
+            await asyncio.sleep(bg_time)
 
         bot.close_app()
 
@@ -614,98 +742,85 @@ class SessionExecutor:
             return
 
         now = datetime.now()
-        cam_name = f"VID_{now.strftime('%Y%m%d_%H%M%S')}_{random.randint(100,999)}.mp4"
-        device_video_path = f"/sdcard/DCIM/Camera/{cam_name}"
+        vid_name = f"video_{now.strftime('%Y%m%d%H%M%S')}_{random.randint(100, 999)}.mp4"
+        device_video_path = f"/sdcard/Download/{vid_name}"
         adb.push_file(local_path, device_video_path)
         await asyncio.sleep(2)
-        adb.shell(f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://{device_video_path}"')
+        adb.shell(
+            f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE '
+            f'-d "file://{device_video_path}"'
+        )
         await asyncio.sleep(2)
 
-        # Step 1: Open TikTok camera
-        el = adb.find_element(content_desc="Create") or \
-             adb.find_element(resource_id="com.zhiliaoapp.musically:id/bottom_tab_icon_big")
-        if el:
-            x, y = human.jitter_tap(*el.center)
-            adb.tap(x, y)
-        else:
-            x, y = human.jitter_tap(adb.screen_w // 2, adb.screen_h - 60)
-            adb.tap(x, y)
+        # Step 1: Open TikTok camera (Create button)
+        x, y = adb.get_coord("tiktok", "nav_create")
+        x, y = human.jitter_tap(x, y)
+        adb.tap(x, y)
         await asyncio.sleep(3)
 
         # Step 2: Make sure we're on Camera mode (not Upload)
-        el = adb.find_element(text="Camera")
-        if el:
-            x, y = human.jitter_tap(*el.center)
-            adb.tap(x, y)
-            await asyncio.sleep(1)
+        x, y = adb.get_coord("tiktok", "camera_tab")
+        x, y = human.jitter_tap(x, y)
+        adb.tap(x, y)
+        await asyncio.sleep(1)
 
         # Step 3: Record for a few seconds (filming desk/whatever)
-        record_btn = adb.find_element(content_desc="Record") or \
-                     adb.find_element(resource_id="com.zhiliaoapp.musically:id/record_button")
-        if record_btn:
-            x, y = human.jitter_tap(*record_btn.center)
-            adb.tap(x, y)
-            # Record for video duration (approx)
-            await asyncio.sleep(random.uniform(12, 18))
-            # Stop recording
+        x, y = adb.get_coord("tiktok", "record_btn")
+        x, y = human.jitter_tap(x, y)
+        adb.tap(x, y)
+        await asyncio.sleep(human.timing("t_camera_record"))
+        # Stop recording
+        adb.tap(x, y)
+        await asyncio.sleep(2)
+
+        # Step 4: Go to edit (Next/Done button -- use Vision for this dynamic element)
+        coords = adb.wait_for_screen("Next or Done button", timeout=5)
+        if coords:
+            x, y = human.jitter_tap(*coords)
             adb.tap(x, y)
             await asyncio.sleep(2)
 
-        # Step 4: Go to edit
-        el = adb.wait_for_element(text="Next", timeout=5) or \
-             adb.find_element(content_desc="Done")
-        if el:
-            x, y = human.jitter_tap(*el.center)
+        # Step 5: Find and tap Overlay/Effects (use Vision -- position varies)
+        coords = adb.find_on_screen("Overlay or Effects button")
+        if coords:
+            x, y = human.jitter_tap(*coords)
             adb.tap(x, y)
             await asyncio.sleep(2)
 
-        # Step 5: Find and tap Overlay/Effects
-        el = adb.find_element(text="Overlay") or \
-             adb.find_element(text="Effects") or \
-             adb.find_element(content_desc="Overlay")
-        if el:
-            x, y = human.jitter_tap(*el.center)
-            adb.tap(x, y)
-            await asyncio.sleep(2)
-
-            # Select "Add overlay" or gallery
-            el = adb.find_element(text="Add overlay") or \
-                 adb.find_element(content_desc="Add")
-            if el:
-                x, y = human.jitter_tap(*el.center)
+            # "Add overlay" button (use Vision)
+            coords = adb.find_on_screen("Add overlay or Add button")
+            if coords:
+                x, y = human.jitter_tap(*coords)
                 adb.tap(x, y)
                 await asyncio.sleep(2)
 
-            # Select the video from gallery (most recent)
-            x, y = human.jitter_tap(adb.screen_w // 4, adb.screen_h // 3)
+            # Select the video from gallery (most recent = top-left)
+            x, y = adb.get_coord("tiktok", "gallery_first")
+            x, y = human.jitter_tap(x, y)
             adb.tap(x, y)
             await asyncio.sleep(2)
 
         # Step 6: Tap Next to go to caption screen
-        el = adb.wait_for_element(text="Next", timeout=5)
-        if el:
-            x, y = human.jitter_tap(*el.center)
+        coords = adb.wait_for_screen("Next button", timeout=5)
+        if coords:
+            x, y = human.jitter_tap(*coords)
             adb.tap(x, y)
             await asyncio.sleep(2)
 
         # Step 7: Add caption
         caption = video_info.get("caption", "")
         if caption:
-            el = adb.find_element(text="Describe your video") or \
-                 adb.find_element(resource_id="com.zhiliaoapp.musically:id/description")
-            if el:
-                x, y = human.jitter_tap(*el.center)
-                adb.tap(x, y)
-                await asyncio.sleep(0.5)
-                for char in caption:
-                    adb.type_text(char)
-                    await asyncio.sleep(human.typing_delay())
-                await asyncio.sleep(1)
+            x, y = adb.get_coord("tiktok", "upload_caption")
+            x, y = human.jitter_tap(x, y)
+            adb.tap(x, y)
+            await asyncio.sleep(0.5)
+            human.type_with_errors(adb, caption)
+            await asyncio.sleep(1)
 
-        # Step 8: Post
-        el = adb.wait_for_element(text="Post", timeout=5)
-        if el:
-            x, y = human.jitter_tap(*el.center)
+        # Step 8: Post (use Vision for Post button)
+        coords = adb.wait_for_screen("Post button", timeout=5)
+        if coords:
+            x, y = human.jitter_tap(*coords)
             adb.tap(x, y)
             log.info("Warmup: video posted with camera trick!")
             await asyncio.sleep(5)
@@ -741,7 +856,7 @@ class SessionExecutor:
                         break
                     await self.execute_warmup_session(session)
                     # Gap between warmup sessions on same phone
-                    await asyncio.sleep(random.uniform(60, 180))
+                    await asyncio.sleep(self._get_human(name).timing("t_session_gap"))
 
                 # Advance warmup day
                 state.advance_day()

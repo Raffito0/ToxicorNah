@@ -117,7 +117,7 @@
 - **VO**: ElevenLabs v3 (primary), Fish.audio s1 (backup) — `TTS_PROVIDER` toggle in code
 - **Approvals**: every AI asset → Telegram inline keyboard → Wait node → Workflow 2 callback
 - Airtable tables: Video Templates (`tblmyK72H7PlJeskQ`), Music Library (`tblrI9FPHxkfgyrii`)
-- Key code files: `parse-video-message.js`, `save-clip.js`, `prepare-production.js`, `generate-hook.js`, `generate-outro.js`, `generate-voiceover.js`, `extract-frame.js`, `img-to-video.js`, `assemble-video.js`, `auto-produce.js`, `set-produce-context.js`
+- Key code files: `parse-video-message.js`, `save-clip.js`, `prepare-production.js`, `generate-hook.js`, `generate-outro.js`, `generate-voiceover.js`, `extract-frame.js`, `img-to-video.js`, `assemble-video.js`, `harden-video.js`, `verify-hardening.js`, `auto-produce.js`, `set-produce-context.js`
 - Chat Screenshot concept: hook = manual clip (not Puppeteer), HAS outro (from pool)
 - Before After concept: hook = 3 AI images (1s each) OR manual 3s clip
 - **Hook types renamed**: `kling_lipsync` → `speaking`, `kling_motion` → `reaction`. Kling no longer used for hooks — all via Sora 2
@@ -373,29 +373,56 @@ Creato modulo Python per bridge Content Library → telefoni fisici. **Testato e
 - `sort[0][field]` come parametro urlencode causa 422 — rimuoverlo
 - Formula: `AND(FIND('Phone 1', {content_label}), {platform_status_tiktok}='pending')` funziona
 
-### Anti-Detection Video Hardening (assemble-video.js)
-Analisi completa 360 gradi di tutti i rischi ban/shadowban su TikTok e Instagram.
+### Anti-Detection Video Hardening (3-node pipeline, 2026-03-10)
+Sistema completo anti-fingerprint. Pipeline: `assemble-video.js` → `harden-video.js` → `verify-hardening.js`
 
-**Fix applicati (tutti embedded in unified-pipeline-fixed.json):**
+**Architettura a 3 nodi:**
+1. **assemble-video.js** — encoding con `-flags +bitexact` (previene Lavc version string in AAC fill elements)
+2. **harden-video.js** — 3-pass post-processing (SEI strip → container clean → binary patch)
+3. **verify-hardening.js** — 15-check verification engine con auto-retry
 
-| Fix | Cosa fa |
-|-----|---------|
-| `-map_metadata -1` | Strip TUTTI i metadata globali |
-| `-fflags +bitexact` | Rimuove encoder string muxer (Lavf) |
-| `-flags +bitexact` | Rimuove x264 SEI version string dal bitstream video |
-| `-brand mp42` | ftyp atom = CapCut/InShot style (non default FFmpeg `isom`) |
-| `-profile:v high -level 4.0` | Profilo encoding esplicito e coerente |
-| `-ar 48000` | Sample rate 48kHz (come camera Android, non 44.1kHz da CD/MP3) |
-| `-ac 2` | Audio stereo (non mono — ogni video da telefono e stereo) |
-| `handler_name=VideoHandler/SoundHandler` | Standard Android |
-| `creation_time` | Timestamp ISO corrente |
-| Hook STS audio 48kHz | Era 44100, fixato a 48000 |
-| Telegram fileName pulito | `VID_YYYYMMDD_HHMMSS.mp4` (non `scenarioName_final.mp4`) |
+**harden-video.js — 3 pass:**
+- **Pass A**: `filter_units=remove_types=6` — strip SEI NAL units (x264 encoder info embedded nel bitstream H.264)
+- **Pass B**: `-c copy -map_metadata -1 -fflags +bitexact -brand isom -use_editlist 0 -movflags +faststart` + handler_name + creation_time
+  - `-use_editlist 0`: previene edts/elst atoms (fingerprint FFmpeg-unique, DFRWS 2014 forensic paper)
+  - `-fflags +bitexact`: previene Lavf version in (C)too atom
+  - `-brand isom`: ftyp major_brand neutro (non mp42)
+- **Pass C**: Binary patch ftyp `minor_version` da 512 (default FFmpeg) a 0 — 4 bytes a offset 12
 
-**Metadata approach: editing app style, NOT camera style.**
-Il video e chiaramente post-prodotto (screenshot, testo, overlay) — mettere metadata camera Samsung sarebbe CONTRADDITTORIO e piu sospetto. Il video ora ha solo handler names + creation_time, identico a export CapCut/InShot.
+**verify-hardening.js — 15 check (era 13):**
+- L1: ftyp brand=isom, **minor_version=0** (NEW), **no edts atoms** (NEW), no Lavf/(C)too, handler names, creation_time
+- L2: Full mdat scan in **256KB overlapping chunks** (era solo primi 64KB) — cerca x264/Lavc/libx264/FFmpeg/Lavf
+- L3: moov ordering
+- Auto-retry con `retryHarden()` se check falliscono (include `-use_editlist 0` + minor_version patch)
 
-**Step 5 in assemble-video.js**: secondo pass FFmpeg con `-c copy` che ri-wrappa il video con metadata puliti. Graceful fallback se fallisce.
+**Fingerprint FFmpeg identificati e fixati (55 totali, ~15 actionable):**
+
+| Fingerprint | Fix | Dove |
+|-------------|-----|------|
+| x264 SEI NAL units | `filter_units=remove_types=6` | harden Pass A |
+| Lavf muxer string in (C)too | `-fflags +bitexact` | harden Pass B |
+| Container metadata (udta, ilst) | `-map_metadata -1` | harden Pass B |
+| edts/elst atoms | `-use_editlist 0` | harden Pass B |
+| ftyp minor_version=512 | Binary patch offset 12 → 0 | harden Pass C |
+| AAC fill element encoder string | `-flags +bitexact` | assemble-video.js (encoding time) |
+| handler_name=Lavf/Apple | Explicit VideoHandler/SoundHandler | harden Pass B |
+| Audio mono 44100Hz | `-ar 48000 -ac 2` | assemble-video.js |
+| Telegram fileName | `VID_YYYYMMDD_HHMMSS.mp4` | assemble-video.js |
+
+**IMPORTANTE**: `-flags +bitexact` DEVE essere presente durante l'encoding in assemble-video.js (gia su linee 610, 655, 681). Il hardening post-processo NON puo rimuovere stringhe embed nell'audio AAC — solo il flag durante encoding le previene.
+
+**Research findings (2026-03-10):**
+- TikTok e Instagram ri-encodano OGNI video uploadato — container metadata originali vengono distrutti
+- Zero casi documentati di shadowban causato da fingerprint FFmpeg
+- CapCut mimicry puo essere controproducente — TikTok flagga metadata CapCut negativamente ("not original to platform")
+- Approccio migliore: metadata neutri/puliti, non imitazione di app specifiche
+- `-brand isom` (neutro) preferito a `-brand mp42` (CapCut-specific)
+
+**Key files:**
+- `n8n/code/harden-video.js` — 3-pass hardening
+- `n8n/code/verify-hardening.js` — 15-check verification + auto-retry
+- `deep_forensic_analysis.cjs` — 20+ check diagnostic tool (locale, non in pipeline)
+- `test_full_hardening.cjs` — test script locale per verifica
 
 ### Anti-Detection Delivery (adb_push.py + config.py)
 - File naming Samsung: `VID_YYYYMMDD_HHMMSS_NNN.mp4`
@@ -426,12 +453,13 @@ Il video e chiaramente post-prodotto (screenshot, testo, overlay) — mettere me
 - **CRITICO**: deve implementare anti-Appium detection (randomizzare touch, hide instrumentation, pause naturali)
 
 ### PROSSIMI STEP (da dove continuare):
-1. **Re-importare `unified-pipeline-fixed.json`** su n8n VPS — contiene TUTTI i fix (encoding, anti-detection, VO race condition, speaking outro, extractHookLastFrame, topic routing, stereo 48kHz, metadata clean)
+1. **Re-importare `unified-pipeline-fixed.json`** su n8n VPS — contiene TUTTI i fix (encoding, anti-detection, 3-pass hardening, 15-check verify, VO race condition, speaking outro, extractHookLastFrame, topic routing, stereo 48kHz, metadata clean)
 2. **Disattivare e riattivare** il workflow (registra webhook Telegram)
 3. **Pulire Video Runs** con `status='started'` (Airtable MCP: `list_records` con `filterByFormula: {status}='started'` sulla tabella Video Runs, poi `update_records` con `status='cancelled'`)
-4. **Testare auto-produce** — verificare che i video finali abbiano:
+4. **Testare auto-produce** — verificare che i video finali passino tutti 15 check di verify-hardening:
+   - ftyp brand=isom, minor_version=0, no edts atoms
+   - Zero stringhe x264/Lavc/FFmpeg nel mdat (full scan)
    - Audio stereo 48kHz
-   - Nessun metadata FFmpeg/x264 (controllare con `ffprobe -show_format -show_streams video.mp4`)
    - fileName pulito su Telegram (`VID_...mp4`)
 5. **Importare `workflow-hook-batch.json`** su n8n per generare hook pool per Phone 1 e 3
 6. **Continuare automation software** (altra chat) — integrazione delivery module, anti-Appium
@@ -440,3 +468,90 @@ Il video e chiaramente post-prodotto (screenshot, testo, overlay) — mettere me
 - **SEMPRE pulire Video Runs** con `status='started'` prima di ritestare, senza chiedere
 - **MAI usare CLI** per importare workflow — l'utente importa manualmente dalla UI di n8n
 - **MAI pushare su remote** senza chiedere
+
+## Phone-Bot Anti-Detection Rewrite (phone-bot/)
+
+### Cos'e il phone-bot
+Software Python che automatizza TikTok + Instagram su telefoni fisici Samsung via ADB.
+Simula comportamento umano: scroll, like, comment, follow, post video.
+
+### Piano di riscrittura anti-detection
+Piano completo in `C:\Users\trmlsn\.claude\plans\wondrous-watching-stallman.md` (5 fasi).
+
+### Stato completamento (aggiornato 2026-03-10):
+
+**FASE 1 — Eliminare comandi ADB rilevabili: COMPLETATA**
+- 1A: Rimosso `uiautomator dump` (rilevabile). Creato `core/coords.py` con mappe coordinate normalizzate. Tutti gli elementi UI trovati via coordinate + Gemini Vision per casi dinamici
+- 1B: Sostituito `monkey -p` con `am start -n` (APP_ACTIVITIES in config.py)
+- 1C: `close_app_natural()` = Home → Recent Apps → swipe up. `_force_stop()` solo come fallback privato
+
+**FASE 2 — Human Behavior Engine: IN CORSO**
+
+Completato:
+- **Log-normal timing**: TUTTE le chiamate `random.uniform(X, Y)` per timing convertite in distribuzioni log-normal via `_timing()` / `human.timing()`. 27 parametri timing in `config.py` come tuple `(mediana, sigma, min, max)`. Distribuzioni pesanti = la maggior parte dei valori vicino alla mediana, pause lunghe occasionali = umano
+- **14 micro-comportamenti**: tutti implementati (zona morta, errori digitazione, pausa post-like, peek scroll, re-watch, primo video lungo, speed ramp, micro-scroll, doppia apertura commenti, tempo reazione caricamento, background a fine sessione, like burst, azione correlata post-like, fasi sessione)
+- **Session Flow Phases**: 5 fasi (Arrival → Warmup → Peak → Fatigue → Exit) in `config.SESSION_PHASES`, gestite da `SessionPhaseTracker` in `human.py`
+- **`verify_email` rimosso**: l'utente verifica email manualmente, rimosso da warmup.py (6 punti) + executor.py (2 punti)
+
+DA FARE (PROSSIMO TASK):
+- **~100+ `time.sleep(N)` con numeri letterali**: il buco piu grande rimasto. Ogni `time.sleep(2)` = pausa identica ogni volta = pattern rilevabile. Sparsi in tiktok.py (~40), instagram.py (~40), adb.py (~5), proxy.py (~3). DEVONO essere convertiti in `time.sleep(self.human.timing("param_name"))`
+- **`close_app_natural()` in adb.py**: ha delay fissi (0.8s, 1.0s, 0.5s) — serve accesso a HumanEngine
+- **Avatar hack in instagram.py**: calcola posizione avatar sottraendo 9% da like_icon Y — aggiungere coord esplicita in coords.py
+- **Proxy credentials in chiaro**: config.py ha username/password — spostare in env vars
+- **Niche keywords non passate** alle sessioni regolari (solo warmup)
+- **Gemini API senza retry**: se fallisce, commento saltato silenziosamente
+
+**FASE 3 — Proxy: NESSUNA MODIFICA NECESSARIA** (proxy mobile SOCKS5 USA = IP residenziale)
+
+**FASE 4 — Fix Upload Flow: COMPLETATA** (sessione precedente)
+- Path media: `/sdcard/Download/video_NNNN.mp4` (non Camera)
+- Search keywords: niche keywords dal config
+
+**FASE 5 — Warmup: COMPLETATA**
+- Durata 5-8 giorni randomizzata per account
+- Zero likes giorni 1-2 (regola assoluta)
+- Dead days (1-2, niente app) + lazy days (scroll breve, zero engagement)
+- Engagement non-monotonico (alcuni giorni meno del precedente)
+- Profile pic/bio su giorni random diversi per account
+- Ogni account schedule DIVERSO
+- Camera overlay trick per primo post TikTok
+
+### File principali phone-bot:
+```
+phone-bot/
+  config.py           — Config centrale (27 timing params log-normal, phones, accounts, proxy)
+  core/
+    adb.py            — Comandi ADB (tap, swipe, open/close app, screenshot)
+    coords.py         — Mappe coordinate UI per TikTok + Instagram (normalizzate a screen w/h)
+    human.py          — Engine comportamento umano (timing log-normal, 14 micro-behaviors, 5 fasi sessione)
+    gemini.py         — Gemini Vision API per analisi UI dinamica
+    proxy.py          — Rotazione proxy SOCKS5
+  actions/
+    tiktok.py         — Automazione TikTok (browse, like, comment, follow, post)
+    instagram.py      — Automazione Instagram (stessa struttura di tiktok.py)
+  planner/
+    executor.py       — Esecuzione sessioni (warmup + regolari)
+    warmup.py         — Generazione piano warmup (5-8 giorni rampa graduale)
+```
+
+### Architettura timing:
+```
+config.py HUMAN dict
+  27 tuple: (median, sigma, min, max)
+    → core/human.py: _timing(name) → _lognormal(median, sigma, min, max)
+        → HumanEngine.timing(name) — API pubblica
+        → 12 metodi interni (action_delay, watch_duration, etc.)
+    → actions/tiktok.py: self.human.timing("t_app_load") etc.
+    → actions/instagram.py: stesso pattern
+    → planner/executor.py: human.timing("t_session_gap") etc.
+```
+
+### Come fixare i `time.sleep(N)` rimanenti:
+1. Leggere ogni file (tiktok.py, instagram.py, adb.py, proxy.py)
+2. Per ogni `time.sleep(numero_letterale)`, determinare COSA sta aspettando
+3. Mapparlo a un param timing esistente O crearne uno nuovo in config.HUMAN
+4. Sostituire con `time.sleep(self.human.timing("param_name"))`
+5. Per adb.py: la classe ADB non ha accesso a HumanEngine — passarlo come argomento O aggiungere metodo `_delay()` diretto
+6. Ogni nuovo param: tuple `(mediana, sigma, min, max)`, mediana vicina al numero originale
+7. Sleep molto corti (< 0.1s) per sincronizzazione ADB possono restare fissi
+8. Verifica finale: `grep -rn "time.sleep(" phone-bot/` = ZERO numeri letterali

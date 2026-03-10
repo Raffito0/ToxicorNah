@@ -1,14 +1,20 @@
-"""Human Behavior Engine — makes every interaction indistinguishable from a real person.
+"""Human Behavior Engine -- makes every interaction indistinguishable from a real person.
 
-5 layers of humanization:
-1. Fatigue     — engagement drops over session duration
-2. Rabbit holes — deep profile visits after interesting videos
-3. Interruptions — random pauses, app switches, screen locks
-4. Memory      — remembers liked content, stays consistent
-5. Mood        — daily energy/social multipliers affect everything
+7 layers of humanization:
+1. Log-normal timing    -- heavy-tailed delays (mostly fast, occasional long pauses)
+2. Session Flow Phases  -- Arrival -> Warmup -> Peak -> Fatigue -> Exit
+3. Fatigue              -- engagement drops over session duration
+4. Rabbit holes         -- deep profile visits after interesting videos
+5. Interruptions        -- random pauses, app switches, screen locks
+6. Memory               -- remembers liked content, stays consistent
+7. Mood                 -- daily energy/social multipliers affect everything
+
+Plus 14 human-like micro-behaviors (typing errors, zona morta, like bursts, etc.)
 """
+import asyncio
 import math
 import random
+import string
 import time
 import logging
 from dataclasses import dataclass, field
@@ -22,24 +28,61 @@ H = config.HUMAN
 
 
 # =============================================================================
-# Layer 5: Daily Mood (set once per session)
+# QWERTY adjacency map for typing errors
 # =============================================================================
+
+_QWERTY_ADJACENT = {
+    'q': 'wa', 'w': 'qeas', 'e': 'wrds', 'r': 'etdf', 't': 'ryfg',
+    'y': 'tugh', 'u': 'yijh', 'i': 'uojk', 'o': 'iplk', 'p': 'ol',
+    'a': 'qwsz', 's': 'awedxz', 'd': 'serfcx', 'f': 'drtgvc',
+    'g': 'ftyhbv', 'h': 'gyujnb', 'j': 'huiknm', 'k': 'jiolm',
+    'l': 'kop', 'z': 'asx', 'x': 'zsdc', 'c': 'xdfv', 'v': 'cfgb',
+    'b': 'vghn', 'n': 'bhjm', 'm': 'njk',
+}
+
+
+def _nearby_char(c: str) -> str:
+    """Return a plausible typo for a character (adjacent key on QWERTY)."""
+    adj = _QWERTY_ADJACENT.get(c.lower(), "")
+    if adj:
+        return random.choice(adj)
+    return random.choice(string.ascii_lowercase)
+
+
+def _lognormal(median: float, sigma: float, minimum: float = 0.0,
+               maximum: float = float('inf')) -> float:
+    """Sample from a log-normal distribution with given median and sigma.
+    Clamped to [minimum, maximum]."""
+    mu = math.log(max(median, 0.001))
+    val = random.lognormvariate(mu, sigma)
+    return max(minimum, min(maximum, val))
+
+
+def _timing(name: str) -> float:
+    """Sample from a log-normal timing param: (median, sigma, min, max).
+    All timing parameters in config.HUMAN use this format."""
+    p = H[name]
+    return _lognormal(p[0], p[1], p[2], p[3])
+
+
+# =============================================================================
+# Layer 7: Daily Mood
+# =============================================================================
+
 @dataclass
 class DailyMood:
     """Determines how active/social the account is today."""
-    energy: float = 1.0       # overall activity multiplier (0.7-1.3)
-    social: float = 1.0       # comment/follow probability multiplier (0.5-1.5)
-    patience: float = 1.0     # how long before skipping videos (0.6-1.4)
+    energy: float = 1.0
+    social: float = 1.0
+    patience: float = 1.0
     description: str = "normal"
 
     @classmethod
     def generate(cls, hour: int = 12, weekday: int = 2) -> "DailyMood":
-        """Generate mood based on time of day and day of week."""
         energy = random.uniform(*H["mood_energy_range"])
         social = random.uniform(*H["mood_social_range"])
         patience = random.uniform(0.6, 1.4)
 
-        # Morning = lower energy, evening = higher
         if hour < 9:
             energy *= 0.85
             social *= 0.7
@@ -47,12 +90,10 @@ class DailyMood:
             energy *= 1.1
             social *= 1.15
 
-        # Friday/Saturday night = more active
         if weekday in (4, 5) and hour >= 19:
             energy *= 1.2
             social *= 1.3
 
-        # Monday morning = sluggish
         if weekday == 0 and hour < 12:
             energy *= 0.8
             patience *= 0.7
@@ -68,14 +109,15 @@ class DailyMood:
 
 
 # =============================================================================
-# Layer 4: Content Memory (remembers what you liked)
+# Layer 6: Content Memory
 # =============================================================================
+
 @dataclass
 class ContentMemory:
     """Tracks liked content categories to maintain consistency."""
-    liked_categories: dict = field(default_factory=dict)   # {"cooking": 5, "dance": 3}
+    liked_categories: dict = field(default_factory=dict)
     disliked_categories: dict = field(default_factory=dict)
-    recent_creators: list = field(default_factory=list)    # last 20 creators interacted with
+    recent_creators: list = field(default_factory=list)
     session_likes: int = 0
     session_comments: int = 0
 
@@ -90,26 +132,23 @@ class ContentMemory:
     def record_skip(self, category: str):
         self.disliked_categories[category] = self.disliked_categories.get(category, 0) + 1
 
-    def should_like(self, category: str, base_prob: float) -> float:
-        """Adjust like probability based on content memory.
-        If you liked cooking before, you're more likely to like cooking again."""
+    def like_affinity(self, category: str, base_prob: float) -> float:
+        """Adjust like probability based on content memory."""
         likes = self.liked_categories.get(category, 0)
         dislikes = self.disliked_categories.get(category, 0)
-
         if likes > 3:
-            base_prob *= 1.3  # more likely to engage with familiar content
+            base_prob *= 1.3
         elif dislikes > 3:
-            base_prob *= 0.6  # less likely with disliked content
-
+            base_prob *= 0.6
         return min(0.95, max(0.05, base_prob))
 
 
 # =============================================================================
-# Layer 1: Session Fatigue
+# Layer 3: Session Fatigue
 # =============================================================================
+
 @dataclass
 class FatigueTracker:
-    """Tracks engagement decay over session duration."""
     session_start: float = 0.0
     fatigue_start_min: float = 10.0
 
@@ -124,73 +163,176 @@ class FatigueTracker:
 
     @property
     def fatigue_level(self) -> float:
-        """0.0 = fresh, 1.0 = very fatigued. Ramps up after fatigue_start_min."""
+        """0.0 = fresh, 1.0 = very fatigued."""
         mins = self.minutes_active
         if mins < self.fatigue_start_min:
             return 0.0
-        # Sigmoid-ish ramp: reaches ~0.8 at 25 min, ~0.95 at 35 min
         x = (mins - self.fatigue_start_min) / 15.0
         return min(1.0, x / (1 + x))
 
     def adjust_like_prob(self, base_prob: float) -> float:
-        """Reduce like probability as fatigue increases."""
         drop = H["fatigue_like_drop"]
         factor = 1.0 - (self.fatigue_level * (1.0 - drop))
         return base_prob * factor
 
     def adjust_watch_time(self, base_seconds: float) -> float:
-        """Reduce watch time when fatigued (skip videos faster)."""
         speed_boost = H["fatigue_scroll_speed_boost"]
         factor = 1.0 + (self.fatigue_level * (speed_boost - 1.0))
         return max(1.0, base_seconds / factor)
 
-    def should_comment(self, base_prob: float) -> float:
-        """Comments drop sharply with fatigue."""
-        return base_prob * max(0.1, 1.0 - self.fatigue_level * 0.9)
+
+# =============================================================================
+# Layer 2: Session Flow Phases
+# =============================================================================
+
+class SessionPhaseTracker:
+    """Tracks which phase of the session we're in.
+    Phases: arrival -> warmup -> peak -> fatigue -> exit
+    Durations are randomized and scaled to fit the total session length.
+    """
+    PHASES = ["arrival", "warmup", "peak", "fatigue", "exit"]
+
+    def __init__(self, total_duration_minutes: float):
+        self.start_time = time.time()
+        self.total_duration = total_duration_minutes
+        self.boundaries = {}
+        self._build_phases()
+
+    def _build_phases(self):
+        raw_durations = {}
+        for phase in self.PHASES:
+            cfg = config.SESSION_PHASES[phase]
+            raw_durations[phase] = random.uniform(*cfg["duration_range"])
+
+        # Scale to fit total session duration
+        total_raw = sum(raw_durations.values())
+        scale = self.total_duration / total_raw
+
+        cumulative = 0.0
+        for phase in self.PHASES:
+            start = cumulative
+            cumulative += raw_durations[phase] * scale
+            self.boundaries[phase] = (start, cumulative)
+
+    @property
+    def elapsed_minutes(self) -> float:
+        return (time.time() - self.start_time) / 60
+
+    @property
+    def current_phase(self) -> str:
+        elapsed = self.elapsed_minutes
+        for phase in self.PHASES:
+            start, end = self.boundaries[phase]
+            if start <= elapsed < end:
+                return phase
+        return "exit"
+
+    def get_mix(self) -> dict:
+        """Get engagement mix for current phase with slight randomization."""
+        phase = self.current_phase
+        base = config.SESSION_PHASES[phase]["engagement"]
+        mix = {}
+        for action, weight in base.items():
+            mix[action] = weight * random.uniform(0.8, 1.2)
+        # Normalize
+        total = sum(mix.values())
+        if total > 0:
+            mix = {k: v / total for k, v in mix.items()}
+        return mix
+
+
+# =============================================================================
+# Like Burst Tracker (Behavior #12)
+# =============================================================================
+
+class LikeBurstTracker:
+    """Tracks like burst state -- clustered likes with gaps between them."""
+
+    def __init__(self):
+        self.in_burst = False
+        self.burst_remaining = 0
+        self.skip_remaining = 0
+        self.just_liked = False
+
+    def process(self, base_should_like: bool) -> bool:
+        """Decide whether to like, applying burst logic."""
+        # In skip mode: don't like
+        if self.skip_remaining > 0:
+            self.skip_remaining -= 1
+            self.just_liked = False
+            return False
+
+        # In burst mode: always like
+        if self.in_burst and self.burst_remaining > 0:
+            self.burst_remaining -= 1
+            if self.burst_remaining == 0:
+                self.in_burst = False
+                self.skip_remaining = random.randint(*H["like_burst_skip"])
+            self.just_liked = True
+            return True
+
+        # Normal mode: maybe start a burst
+        if base_should_like:
+            if random.random() < H["like_burst_prob"]:
+                self.in_burst = True
+                self.burst_remaining = random.randint(*H["like_burst_count"]) - 1
+            self.just_liked = True
+            return True
+
+        self.just_liked = False
+        return False
 
 
 # =============================================================================
 # Main Human Engine
 # =============================================================================
+
 class HumanEngine:
-    """Wraps all 5 human behavior layers into a unified interface.
+    """Wraps all 7 human behavior layers + 14 micro-behaviors into a unified interface.
 
     Usage:
         engine = HumanEngine()
-        engine.start_session(hour=20, weekday=4)
+        engine.start_session(hour=20, weekday=4, duration_minutes=18)
 
         # Before every tap:
         x, y = engine.jitter_tap(540, 1200)
 
-        # Before every swipe:
-        params = engine.humanize_swipe(540, 1800, 540, 600)
+        # Between actions:
+        delay = engine.action_delay()
 
-        # Decide whether to like:
-        if engine.should_like("dance", creator="@username"):
-            ...
+        # Pick next action (phase-aware):
+        action = engine.pick_action()
 
-        # Wait between actions:
-        await engine.wait_between_actions()
-
-        # Check for interruption:
-        if engine.should_interrupt():
-            await engine.do_interruption(adb)
+        # Check for behaviors:
+        if engine.should_zona_morta():
+            await asyncio.sleep(engine.zona_morta_duration())
     """
 
     def __init__(self):
         self.mood = DailyMood()
         self.memory = ContentMemory()
         self.fatigue = FatigueTracker()
+        self.phase: Optional[SessionPhaseTracker] = None
+        self.burst = LikeBurstTracker()
         self._session_active = False
+        self._video_count = 0
+        self._zona_morta_next = 0.0
 
-    def start_session(self, hour: int = 12, weekday: int = 2):
+    def start_session(self, hour: int = 12, weekday: int = 2,
+                      duration_minutes: float = 15.0):
         """Initialize all layers for a new session."""
         self.mood = DailyMood.generate(hour=hour, weekday=weekday)
         self.fatigue = FatigueTracker()
         self.fatigue.start()
+        self.phase = SessionPhaseTracker(duration_minutes)
+        self.burst = LikeBurstTracker()
         self._session_active = True
-        log.info("Session started | mood=%s energy=%.2f social=%.2f",
-                 self.mood.description, self.mood.energy, self.mood.social)
+        self._video_count = 0
+        self._zona_morta_next = time.time() + _timing("zona_morta_interval")
+        log.info("Session started | mood=%s energy=%.2f social=%.2f | %.0f min | phases=%s",
+                 self.mood.description, self.mood.energy, self.mood.social,
+                 duration_minutes,
+                 {p: f"{s:.1f}-{e:.1f}" for p, (s, e) in self.phase.boundaries.items()})
 
     def end_session(self):
         self._session_active = False
@@ -213,8 +355,11 @@ class HumanEngine:
     # --- Layer 1: Swipe Humanization ---------------------------------------
 
     def humanize_swipe(self, x1: int, y1: int, x2: int, y2: int) -> dict:
-        """Add human-like variance to a swipe gesture."""
-        duration = random.randint(*H["swipe_duration_range"])
+        """Add human-like variance to a swipe gesture (log-normal duration)."""
+        duration = int(_lognormal(
+            H["swipe_duration_median"], H["swipe_duration_sigma"],
+            minimum=120, maximum=800
+        ))
         jitter = H["swipe_y_jitter"]
         drift = random.randint(*H["swipe_x_drift_range"])
 
@@ -226,95 +371,128 @@ class HumanEngine:
             "duration": duration,
         }
 
-    # --- Layer 1: Timing ---------------------------------------------------
+    # --- Layer 1: Timing (all log-normal) ----------------------------------
 
     def action_delay(self) -> float:
-        """Random delay between actions (log-normal distribution)."""
-        base = random.uniform(*H["between_action_range"])
+        """Random delay between actions (log-normal, heavy tail)."""
+        base = _lognormal(
+            H["action_delay_median"], H["action_delay_sigma"],
+            minimum=0.2, maximum=20.0
+        )
         # Apply mood energy (tired = slower)
         delay = base / self.mood.energy
 
         # Micro-pause (random hesitation)
         if random.random() < H["micro_pause_prob"]:
-            delay += random.uniform(0.05, 0.2)
+            delay += _timing("micro_pause")
 
-        # Fatigue makes you slightly slower (zoning out)
+        # Fatigue makes you slightly slower
         delay *= (1 + self.fatigue.fatigue_level * 0.3)
+
+        # Speed ramp: slower at session start (Behavior #7)
+        if self.fatigue.minutes_active < H["speed_ramp_minutes"]:
+            delay *= H["speed_ramp_slow_factor"]
 
         return max(0.2, delay)
 
     def typing_delay(self) -> float:
-        """Delay between keystrokes when typing."""
-        base = random.uniform(*H["typing_speed_range"])
-        # Occasional longer pause (thinking what to type)
+        """Delay between keystrokes (log-normal)."""
+        base = _lognormal(
+            H["typing_median"], H["typing_sigma"],
+            minimum=0.04, maximum=3.0
+        )
+        # Occasional longer pause (thinking)
         if random.random() < 0.08:
-            base += random.uniform(0.3, 1.0)
+            base += _timing("t_thinking")
         return base
 
     def reading_delay(self) -> float:
-        """Pause before commenting (reading the content first)."""
-        return random.uniform(*H["reading_pause_range"]) * self.mood.patience
+        """Pause before commenting (log-normal)."""
+        return _lognormal(
+            H["reading_median"], H["reading_sigma"],
+            minimum=0.5, maximum=15.0
+        ) * self.mood.patience
 
     def watch_duration(self, video_length: float = 15.0) -> float:
         """How long to watch a video before scrolling.
-        Some videos: watch fully. Some: skip after 2-3s."""
-        # 30% chance of watching full video
-        if random.random() < 0.30 * self.mood.patience:
-            watch = video_length * random.uniform(0.85, 1.1)
-        # 40% watch half
-        elif random.random() < 0.60:
-            watch = video_length * random.uniform(0.3, 0.6)
-        # 30% skip quickly
-        else:
-            watch = random.uniform(1.5, 4.0)
+        Heavy-tailed: most quick, some half, some full, rare 30-60s."""
+        self._video_count += 1
 
-        return self.fatigue.adjust_watch_time(watch)
+        # Behavior #6: First video always longer
+        if self._video_count == 1:
+            return _timing("first_video_watch")
+
+        # 30% full video
+        if random.random() < 0.30 * self.mood.patience:
+            watch = video_length * random.uniform(*H["watch_full_mult"])
+        # 40% medium watch
+        elif random.random() < 0.60:
+            watch = _timing("watch_medium")
+        # 30% quick skip
+        else:
+            watch = _timing("watch_short")
+
+        watch = self.fatigue.adjust_watch_time(watch)
+
+        # Behavior #7: Speed ramp (slow start)
+        if self.fatigue.minutes_active < H["speed_ramp_minutes"]:
+            watch *= H["speed_ramp_slow_factor"]
+
+        return watch
+
+    def load_reaction_time(self) -> float:
+        """Behavior #10: Variable delay after app/page loads."""
+        return _timing("load_reaction")
 
     # --- Layer 2: Engagement Decisions -------------------------------------
 
     def should_like(self, category: str = "unknown", creator: str = "") -> bool:
-        """Decide whether to like the current video."""
-        base_prob = 0.35  # 30-50% base like rate
-        base_prob *= self.mood.energy
+        """Decide whether to like. Uses burst tracker (Behavior #12)."""
+        base_prob = 0.35 * self.mood.energy
         base_prob = self.fatigue.adjust_like_prob(base_prob)
-        base_prob = self.memory.should_like(category, base_prob)
-        return random.random() < base_prob
+        base_prob = self.memory.like_affinity(category, base_prob)
+        raw_decision = random.random() < base_prob
+        return self.burst.process(raw_decision)
 
     def should_comment(self) -> bool:
-        """Decide whether to comment on the current video."""
+        """Decide whether to comment. Boosted after liking (Behavior #13)."""
         base_prob = 0.08 * self.mood.social
-        base_prob = self.fatigue.should_comment(base_prob)
+        # Correlated post-like engagement
+        if self.burst.just_liked:
+            base_prob *= H["post_like_comment_boost"]
+        base_prob *= max(0.1, 1.0 - self.fatigue.fatigue_level * 0.9)
         return random.random() < base_prob
 
     def should_follow(self, creator: str = "") -> bool:
-        """Decide whether to follow the current creator."""
+        """Decide whether to follow. Boosted after liking (Behavior #13)."""
         if creator in self.memory.recent_creators:
-            return False  # don't follow someone you already interacted with
+            return False
         base_prob = 0.04 * self.mood.social
+        if self.burst.just_liked:
+            base_prob *= H["post_like_follow_boost"]
         base_prob *= max(0.2, 1.0 - self.fatigue.fatigue_level * 0.7)
         return random.random() < base_prob
 
-    # --- Layer 2: Rabbit Holes ---------------------------------------------
+    def post_like_pause(self) -> float:
+        """Behavior #3: Pause on same video after liking before scrolling."""
+        return _timing("post_like_pause")
+
+    # --- Layer 4: Rabbit Holes ---------------------------------------------
 
     def should_rabbit_hole(self) -> bool:
-        """Decide whether to visit a creator's profile (deep dive)."""
         prob = H["rabbit_hole_prob"] * self.mood.patience
-        # Less likely when fatigued
         prob *= max(0.2, 1.0 - self.fatigue.fatigue_level * 0.6)
         return random.random() < prob
 
     def rabbit_hole_depth(self) -> int:
-        """How many videos to watch on a creator's profile."""
         return random.randint(*H["rabbit_hole_videos_range"])
 
-    # --- Layer 3: Interruptions --------------------------------------------
+    # --- Layer 5: Interruptions --------------------------------------------
 
     def should_interrupt(self) -> bool:
-        """Per-minute chance of a random interruption."""
         return random.random() < H["interruption_prob"]
 
     def interruption_type(self) -> str:
-        """What kind of interruption: 'pause', 'app_switch', or 'lock_screen'."""
         roll = random.random()
         if roll < H["app_switch_prob"]:
             return "app_switch"
@@ -324,58 +502,107 @@ class HumanEngine:
             return "pause"
 
     def interruption_duration(self) -> float:
-        """How long the interruption lasts (seconds)."""
-        return random.uniform(*H["interruption_duration_range"])
+        return _timing("interruption_duration")
 
     async def do_interruption(self, adb):
         """Execute an interruption on the device."""
         itype = self.interruption_type()
         duration = self.interruption_duration()
-
         log.info("Interruption: %s for %.0fs", itype, duration)
 
         if itype == "app_switch":
-            # Go home, wait, come back
             adb.press_home()
             await asyncio.sleep(duration)
-            adb.press_back()  # return to previous app via recents
-
+            adb.press_back()
         elif itype == "lock_screen":
-            # Lock screen, wait, unlock
             adb.shell("input keyevent KEYCODE_POWER")
             await asyncio.sleep(duration)
             adb.unlock_screen()
-
         else:
-            # Just pause (stare at screen)
             await asyncio.sleep(duration)
 
-    # --- Layer 5: Engagement Mix -------------------------------------------
+    # --- Layer 2: Phase-Aware Action Selection -----------------------------
 
-    def session_engagement_mix(self) -> dict:
-        """Generate randomized engagement mix for this session.
-        Each value is the proportion of time spent on that activity."""
-        mix = {}
-        for action, base_pct in config.ENGAGEMENT_MIX.items():
-            # +/-30% randomization
-            variation = random.uniform(0.7, 1.3)
-            mix[action] = base_pct * variation
+    def pick_action(self) -> str:
+        """Pick next action based on session flow phase.
+        Replaces the old pick_action(mix) -- phases are tracked internally.
+        """
+        if self.phase:
+            mix = self.phase.get_mix()
+        else:
+            # Fallback: balanced default mix
+            mix = {
+                "scroll_fyp": 0.60, "like": 0.20, "comment": 0.10,
+                "search_explore": 0.05, "follow": 0.03, "profile_visit": 0.02,
+            }
 
-        # Apply mood: social mood = more comments/follows
-        mix["comment"] *= self.mood.social
-        mix["follow"] *= self.mood.social
-        mix["like"] *= self.mood.energy
+        # Apply mood modifiers
+        mix["comment"] = mix.get("comment", 0) * self.mood.social
+        mix["follow"] = mix.get("follow", 0) * self.mood.social
+        mix["like"] = mix.get("like", 0) * self.mood.energy
 
-        # Normalize to 1.0
-        total = sum(mix.values())
-        return {k: v / total for k, v in mix.items()}
-
-    def pick_action(self, mix: dict) -> str:
-        """Pick next action based on engagement mix weights."""
         actions = list(mix.keys())
         weights = list(mix.values())
         return random.choices(actions, weights=weights, k=1)[0]
 
+    # --- 14 Human-Like Behaviors -------------------------------------------
 
-# Need asyncio import for do_interruption
-import asyncio
+    def should_zona_morta(self) -> bool:
+        """Behavior #1: Dead zone -- stare at screen, no touch.
+        Checked periodically (every 5-10 min)."""
+        now = time.time()
+        if now < self._zona_morta_next:
+            return False
+        # Schedule next check
+        self._zona_morta_next = now + _timing("zona_morta_interval")
+        return random.random() < H["zona_morta_prob"]
+
+    def zona_morta_duration(self) -> float:
+        """How long the zona morta lasts."""
+        return _timing("zona_morta_duration")
+
+    def type_with_errors(self, adb, text: str):
+        """Behavior #2: Type with occasional errors (backspace + retype).
+        ~10% typo rate makes typing pattern look human."""
+        import time as _time
+        for char in text:
+            if char.isalpha() and random.random() < H["typo_rate"]:
+                # Type wrong char
+                adb.type_text(_nearby_char(char))
+                _time.sleep(self.typing_delay())
+                # Notice mistake, pause
+                _time.sleep(_timing("t_typo_notice"))
+                # Backspace
+                adb.shell("input keyevent KEYCODE_DEL")
+                _time.sleep(_timing("t_typo_backspace"))
+            adb.type_text(char)
+            _time.sleep(self.typing_delay())
+
+    def should_peek_scroll(self) -> bool:
+        """Behavior #4: Scroll halfway and come back (8-12%)."""
+        return random.random() < H["peek_scroll_prob"]
+
+    def should_rewatch(self) -> bool:
+        """Behavior #5: Scroll forward then back to re-watch previous video (5%)."""
+        return random.random() < H["rewatch_prob"]
+
+    def should_micro_scroll(self) -> bool:
+        """Behavior #8: Incomplete swipe that doesn't change video (2-3%)."""
+        return random.random() < H["micro_scroll_prob"]
+
+    def should_double_open_comments(self) -> bool:
+        """Behavior #9: Open comments, close, re-open (3%)."""
+        return random.random() < H["double_comment_prob"]
+
+    def should_end_in_background(self) -> bool:
+        """Behavior #11: End session by going to background (fell asleep, 5%)."""
+        return random.random() < H["bg_end_prob"]
+
+    def bg_end_duration(self) -> float:
+        """How long to stay in background before closing."""
+        return _timing("bg_end_duration")
+
+    def timing(self, name: str) -> float:
+        """Sample from a log-normal timing config parameter.
+        Use this for inline delays instead of random.uniform()."""
+        return _timing(name)
