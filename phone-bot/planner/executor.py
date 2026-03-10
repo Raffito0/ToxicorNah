@@ -265,12 +265,19 @@ class SessionExecutor:
         """Rest-only session: just scroll, no posting."""
         log.info("Rest-only session — scrolling for %.1f min", duration_min)
 
+        session_keywords = random.sample(
+            config.NICHE_KEYWORDS_POOL,
+            k=random.randint(6, min(10, len(config.NICHE_KEYWORDS_POOL))),
+        )
+
         if platform == "tiktok":
             bot = TikTokBot(adb, human)
-            await bot.browse_session(duration_minutes=duration_min, should_post=False)
+            await bot.browse_session(duration_minutes=duration_min, should_post=False,
+                                     niche_keywords=session_keywords)
         else:
             bot = InstagramBot(adb, human)
-            await bot.browse_session(duration_minutes=duration_min, should_post=False)
+            await bot.browse_session(duration_minutes=duration_min, should_post=False,
+                                     niche_keywords=session_keywords)
 
     async def _execute_normal(self, adb: ADBController, human: HumanEngine,
                                platform: str, duration_min: float,
@@ -312,6 +319,11 @@ class SessionExecutor:
                 mark_skipped(video_info["record_id"], platform)
             should_post = False
 
+        session_keywords = random.sample(
+            config.NICHE_KEYWORDS_POOL,
+            k=random.randint(6, min(10, len(config.NICHE_KEYWORDS_POOL))),
+        )
+
         if platform == "tiktok":
             bot = TikTokBot(adb, human)
             await bot.browse_session(
@@ -321,6 +333,7 @@ class SessionExecutor:
                 caption=caption,
                 pre_scroll_minutes=pre_minutes,
                 post_scroll_minutes=post_minutes,
+                niche_keywords=session_keywords,
             )
         else:
             bot = InstagramBot(adb, human)
@@ -331,6 +344,7 @@ class SessionExecutor:
                 caption=caption,
                 pre_scroll_minutes=pre_minutes,
                 post_scroll_minutes=post_minutes,
+                niche_keywords=session_keywords,
             )
 
         # Mark video as posted in Airtable
