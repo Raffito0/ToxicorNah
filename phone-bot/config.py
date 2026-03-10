@@ -244,6 +244,21 @@ SESSION_PHASES = {
     },
 }
 
+# --- Personality System (per-account, persistent, evolves over time) -----------
+# Each trait has a (min, max) range. Initial value sampled randomly, then drifts
+# slowly based on actual behavior (max PERSONALITY_DRIFT per session).
+PERSONALITY_RANGES = {
+    "reels_preference": (0.20, 0.80),     # IG: probability of choosing Reels over Feed
+    "story_affinity": (0.05, 0.50),       # IG: probability of watching stories
+    "double_tap_habit": (0.25, 0.90),     # TT+IG: probability of double-tap vs heart icon
+    "explore_curiosity": (0.03, 0.20),    # TT+IG: base tendency to search/explore
+    "boredom_rate": (0.06, 0.18),         # how fast boredom accumulates per passive scroll
+    "boredom_relief": (0.25, 0.55),       # how much engagement (like/comment) reduces boredom
+    "switch_threshold": (0.55, 0.85),     # boredom level that triggers IG view switch
+}
+
+PERSONALITY_DRIFT = 0.015  # max trait shift per session (~1.5%)
+
 # --- Paths --------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")

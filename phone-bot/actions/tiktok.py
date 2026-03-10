@@ -107,8 +107,8 @@ class TikTokBot:
         self.adb.swipe(sw["x2"], sw["y2"], sw["x1"], sw["y1"], sw["duration"])
 
     def like_video(self):
-        """Like the current video. Randomly uses double-tap or heart icon."""
-        if random.random() < 0.6:
+        """Like the current video. Uses double-tap or heart icon based on personality."""
+        if random.random() < self.human.personality.double_tap_habit:
             # Double-tap center (more human)
             cx, cy = self.adb.get_coord("tiktok", "video_center")
             x, y = self.human.jitter_tap(cx, cy)
@@ -438,13 +438,14 @@ class TikTokBot:
         post_after = pre_scroll_minutes * 60 if should_post else float('inf')
         category = "unknown"
         action_count = 0
+        health_interval = random.randint(12, 20)
 
         while (time.time() - start) < total_seconds:
             elapsed = time.time() - start
 
-            # Periodic health check (every ~15 actions)
+            # Periodic health check (randomized interval)
             action_count += 1
-            if action_count % 15 == 0:
+            if action_count % health_interval == 0:
                 self._check_health()
 
             # --- Post video at the right time ---
@@ -485,6 +486,15 @@ class TikTokBot:
                 else:
                     category = "unknown"  # reset stale category each scroll
 
+                # Update boredom based on content relevance
+                niche_match = None
+                if category != "unknown":
+                    pool = niche_keywords or config.NICHE_KEYWORDS_POOL
+                    cat_lower = category.lower()
+                    niche_match = any(kw.lower() in cat_lower or cat_lower in kw.lower()
+                                      for kw in pool)
+                self.human.on_scroll(niche_match)
+
                 # Behavior #8: Micro-scroll (incomplete swipe)
                 if self.human.should_micro_scroll():
                     sw = self.human.humanize_swipe(
@@ -515,6 +525,7 @@ class TikTokBot:
                 if self.human.should_like(category):
                     self.like_video()
                     self.human.memory.record_like(category)
+                    self.human.on_engage()
                     # Behavior #3: Post-like pause
                     await asyncio.sleep(self.human.post_like_pause())
 
@@ -527,15 +538,19 @@ class TikTokBot:
                         self.adb.press_back()
                         await asyncio.sleep(self.human.timing("t_double_open_2"))
                     await self.comment_with_ai()
+                    self.human.on_engage()
 
             elif action == "follow":
                 if self.human.should_follow():
                     self.follow_creator()
+                    self.human.on_engage()
 
             elif action == "search_explore":
                 pool = niche_keywords or config.NICHE_KEYWORDS_POOL
                 keywords = random.sample(pool, min(6, len(pool)))
                 self.search_hashtag(random.choice(keywords))
+                self.human._session_stats["searches_done"] = \
+                    self.human._session_stats.get("searches_done", 0) + 1
                 await asyncio.sleep(self.human.timing("t_search_browse"))
                 self.go_to_fyp()
 

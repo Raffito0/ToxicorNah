@@ -99,8 +99,8 @@ class InstagramBot:
         self.scroll_feed()
 
     def like_post(self):
-        """Like the current post/reel. Uses double-tap or heart icon."""
-        if random.random() < 0.5:
+        """Like the current post/reel. Uses double-tap or heart icon based on personality."""
+        if random.random() < self.human.personality.double_tap_habit:
             # Double-tap center
             cx, cy = self.adb.get_coord("instagram", "video_center")
             x, y = self.human.jitter_tap(cx, cy)
@@ -219,7 +219,8 @@ class InstagramBot:
         """Watch a few stories from the Feed's story bar at the top.
         Real users do this -- not watching stories at all is suspicious."""
         if count <= 0:
-            count = random.randint(2, 5)
+            hi = max(3, int(3 + self.human.personality.story_affinity * 6))
+            count = random.randint(2, hi)
 
         log.info("Watching %d stories", count)
 
@@ -429,16 +430,18 @@ class InstagramBot:
         # Behavior #10: Variable load reaction time
         time.sleep(self.human.load_reaction_time())
 
-        # 50/50 start on Feed vs Reels
-        if random.random() < 0.5:
+        # Start on Feed or Reels based on personality preference
+        if random.random() < self.human.personality.reels_preference:
             self.go_to_reels()
             current_view = "reels"
         else:
             self.go_to_feed()
             current_view = "feed"
-            # Maybe watch stories at session start (25%)
-            if random.random() < 0.25:
+            # Maybe watch stories at session start (personality-driven)
+            if random.random() < self.human.personality.story_affinity:
                 self.watch_stories()
+                self.human._session_stats["stories_watched"] = \
+                    self.human._session_stats.get("stories_watched", 0) + 1
         time.sleep(self.human.timing("t_nav_settle"))
 
         start = time.time()
@@ -446,28 +449,30 @@ class InstagramBot:
         post_done = False
         post_after = pre_scroll_minutes * 60 if should_post else float('inf')
         action_count = 0
+        health_interval = random.randint(12, 20)
         category = "unknown"
 
         while (time.time() - start) < total_seconds:
             elapsed = time.time() - start
 
-            # Periodic health check (every ~15 actions)
+            # Periodic health check (randomized interval)
             action_count += 1
-            if action_count % 15 == 0:
+            if action_count % health_interval == 0:
                 self._check_health()
 
-            # Feed <-> Reels switch (15% chance every ~20 actions)
-            if action_count % 20 == 0 and random.random() < 0.15:
-                old_view = current_view
+            # Feed <-> Reels switch (boredom-driven, not fixed timer)
+            if self.human.wants_view_switch():
                 if current_view == "feed":
                     self.go_to_reels()
                     current_view = "reels"
                 else:
                     self.go_to_feed()
                     current_view = "feed"
-                    # Switched to Feed — maybe watch stories (30%)
-                    if random.random() < 0.30:
+                    # Switched to Feed — maybe watch stories (personality-driven)
+                    if random.random() < self.human.personality.story_affinity:
                         self.watch_stories()
+                        self.human._session_stats["stories_watched"] = \
+                            self.human._session_stats.get("stories_watched", 0) + 1
                 time.sleep(self.human.timing("t_nav_settle"))
 
             if should_post and not post_done and elapsed >= post_after:
@@ -507,6 +512,15 @@ class InstagramBot:
                 else:
                     category = "unknown"
 
+                # Update boredom based on content relevance
+                niche_match = None
+                if category != "unknown":
+                    pool = niche_keywords or config.NICHE_KEYWORDS_POOL
+                    cat_lower = category.lower()
+                    niche_match = any(kw.lower() in cat_lower or cat_lower in kw.lower()
+                                      for kw in pool)
+                self.human.on_scroll(niche_match)
+
                 # Behavior #8: Micro-scroll (incomplete swipe)
                 if self.human.should_micro_scroll():
                     sw = self.human.humanize_swipe(
@@ -543,6 +557,11 @@ class InstagramBot:
                 if self.human.should_like(category):
                     self.like_post()
                     self.human.memory.record_like(category)
+                    self.human.on_engage()
+                    # Track which view got the like (for personality drift)
+                    stat_key = "reels_likes" if current_view == "reels" else "feed_likes"
+                    self.human._session_stats[stat_key] = \
+                        self.human._session_stats.get(stat_key, 0) + 1
                     await asyncio.sleep(self.human.post_like_pause())
 
             elif action == "comment":
@@ -553,15 +572,19 @@ class InstagramBot:
                         self.adb.press_back()
                         await asyncio.sleep(self.human.timing("t_double_open_2"))
                     await self.comment_with_ai()
+                    self.human.on_engage()
 
             elif action == "follow":
                 if self.human.should_follow():
                     self.follow_user()
+                    self.human.on_engage()
 
             elif action == "search_explore":
                 pool = niche_keywords or config.NICHE_KEYWORDS_POOL
                 keywords = random.sample(pool, min(6, len(pool)))
                 self.search_keyword(random.choice(keywords))
+                self.human._session_stats["searches_done"] = \
+                    self.human._session_stats.get("searches_done", 0) + 1
                 # Return to whatever view we were in
                 if current_view == "feed":
                     self.go_to_feed()

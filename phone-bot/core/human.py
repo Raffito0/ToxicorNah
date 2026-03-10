@@ -162,6 +162,145 @@ class ContentMemory:
 
 
 # =============================================================================
+# Layer 8: Personality (per-account, persistent, drifts over time)
+# =============================================================================
+
+@dataclass
+class Personality:
+    """Per-account behavioral identity. Generated once, drifts slowly over sessions.
+
+    Each account develops its own habits: some prefer Reels, some double-tap,
+    some watch stories often. These traits evolve based on actual behavior --
+    like a real person whose habits shift over weeks and months.
+    """
+    reels_preference: float = 0.50
+    story_affinity: float = 0.25
+    double_tap_habit: float = 0.60
+    explore_curiosity: float = 0.10
+    boredom_rate: float = 0.12
+    boredom_relief: float = 0.40
+    switch_threshold: float = 0.70
+    sessions_count: int = 0
+
+    @classmethod
+    def generate(cls) -> "Personality":
+        """Create a new personality with random traits within configured ranges."""
+        ranges = config.PERSONALITY_RANGES
+        return cls(**{
+            trait: random.uniform(*bounds)
+            for trait, bounds in ranges.items()
+        })
+
+    def drift(self, session_stats: dict):
+        """Evolve traits slightly based on what happened this session.
+        Called at end of every session. Small shifts compound over weeks."""
+        rate = config.PERSONALITY_DRIFT
+        ranges = config.PERSONALITY_RANGES
+        self.sessions_count += 1
+
+        # Reels preference: drift toward where more likes happened
+        reels_likes = session_stats.get("reels_likes", 0)
+        feed_likes = session_stats.get("feed_likes", 0)
+        total_likes = reels_likes + feed_likes
+        if total_likes > 0:
+            reels_ratio = reels_likes / total_likes
+            if reels_ratio > 0.6:
+                self.reels_preference += random.uniform(0, rate)
+            elif reels_ratio < 0.4:
+                self.reels_preference -= random.uniform(0, rate)
+
+        # Story affinity: drift based on whether stories were watched
+        if session_stats.get("stories_watched", 0) > 0:
+            self.story_affinity += random.uniform(0, rate * 0.5)
+        else:
+            self.story_affinity -= random.uniform(0, rate * 0.3)
+
+        # Explore curiosity: drift based on search usage
+        if session_stats.get("searches_done", 0) > 0:
+            self.explore_curiosity += random.uniform(0, rate * 0.5)
+        else:
+            self.explore_curiosity -= random.uniform(0, rate * 0.2)
+
+        # Clamp all traits to valid ranges
+        for trait, (lo, hi) in ranges.items():
+            val = getattr(self, trait)
+            setattr(self, trait, round(max(lo, min(hi, val)), 4))
+
+    def to_dict(self) -> dict:
+        return {
+            "reels_preference": self.reels_preference,
+            "story_affinity": self.story_affinity,
+            "double_tap_habit": self.double_tap_habit,
+            "explore_curiosity": self.explore_curiosity,
+            "boredom_rate": self.boredom_rate,
+            "boredom_relief": self.boredom_relief,
+            "switch_threshold": self.switch_threshold,
+            "sessions_count": self.sessions_count,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Personality":
+        p = cls()
+        for trait in config.PERSONALITY_RANGES:
+            if trait in d:
+                setattr(p, trait, d[trait])
+        p.sessions_count = d.get("sessions_count", 0)
+        return p
+
+
+# =============================================================================
+# Layer 9: Boredom Tracker (drives view switches and exploration)
+# =============================================================================
+
+class BoredomTracker:
+    """Tracks boredom during a session. Replaces fixed timers for view switches.
+
+    Boredom rises with passive scrolling, drops with engagement (like/comment/follow).
+    Interesting content (niche match) slows boredom buildup.
+    When boredom exceeds the personality's switch_threshold, triggers a view change.
+    """
+
+    def __init__(self, personality: Personality):
+        self.personality = personality
+        self.level = 0.0  # 0.0 = engaged, 1.0 = very bored
+
+    def on_scroll(self, niche_match: bool = None):
+        """Boredom increases with each passive scroll.
+        niche_match: True = interesting content, False = boring, None = unknown.
+        """
+        rate = self.personality.boredom_rate
+        if niche_match is True:
+            rate *= 0.4   # interesting content = much slower boredom
+        elif niche_match is False:
+            rate *= 1.3   # boring content = faster boredom
+        # Add noise so boredom growth is never linear
+        self.level += rate * random.uniform(0.6, 1.4)
+        self.level = min(1.0, self.level)
+
+    def on_engage(self):
+        """Engagement (like, comment, follow) relieves boredom."""
+        relief = self.personality.boredom_relief * random.uniform(0.7, 1.3)
+        self.level = max(0.0, self.level - relief)
+
+    def wants_switch(self) -> bool:
+        """Should we switch views (Feed<->Reels)?
+        Probability rises steeply once boredom passes the personality threshold.
+        """
+        threshold = self.personality.switch_threshold
+        if self.level >= threshold:
+            excess = self.level - threshold
+            prob = min(0.8, excess * 3)  # steep rise past threshold
+            if random.random() < prob:
+                self.level *= 0.4  # partial reset after switching
+                return True
+        return False
+
+    def reset(self):
+        """Full reset (e.g. after posting a video)."""
+        self.level = random.uniform(0.0, 0.15)
+
+
+# =============================================================================
 # Layer 3: Session Fatigue
 # =============================================================================
 
@@ -330,15 +469,19 @@ class HumanEngine:
         self.account_name = account_name
         self.mood = DailyMood()
         self.memory = ContentMemory()
+        self.personality = Personality.generate()
+        self.boredom = BoredomTracker(self.personality)
         self.fatigue = FatigueTracker()
         self.phase: Optional[SessionPhaseTracker] = None
         self.burst = LikeBurstTracker()
         self._session_active = False
         self._video_count = 0
         self._zona_morta_next = 0.0
-        # Load persisted memory for this account
+        self._session_stats = {}
+        # Load persisted memory + personality for this account
         if account_name:
             self._load_memory()
+            self.boredom = BoredomTracker(self.personality)
 
     def start_session(self, hour: int = 12, weekday: int = 2,
                       duration_minutes: float = 15.0):
@@ -348,16 +491,27 @@ class HumanEngine:
         self.fatigue.start()
         self.phase = SessionPhaseTracker(duration_minutes)
         self.burst = LikeBurstTracker()
+        self.boredom = BoredomTracker(self.personality)
         self._session_active = True
         self._video_count = 0
         self._zona_morta_next = time.time() + _timing("zona_morta_interval")
-        log.info("Session started | mood=%s energy=%.2f social=%.2f | %.0f min | phases=%s",
+        self._session_stats = {
+            "reels_likes": 0, "feed_likes": 0,
+            "stories_watched": 0, "searches_done": 0,
+        }
+        log.info("Session started | mood=%s energy=%.2f social=%.2f | %.0f min | "
+                 "personality: reels=%.0f%% stories=%.0f%% dbl_tap=%.0f%% | phases=%s",
                  self.mood.description, self.mood.energy, self.mood.social,
                  duration_minutes,
+                 self.personality.reels_preference * 100,
+                 self.personality.story_affinity * 100,
+                 self.personality.double_tap_habit * 100,
                  {p: f"{s:.1f}-{e:.1f}" for p, (s, e) in self.phase.boundaries.items()})
 
     def end_session(self):
         self._session_active = False
+        # Evolve personality based on session behavior
+        self.personality.drift(self._session_stats)
         if self.account_name:
             self._save_memory()
 
@@ -369,16 +523,25 @@ class HumanEngine:
         if os.path.exists(path):
             try:
                 with open(path, "r") as f:
-                    self.memory = ContentMemory.from_dict(json.load(f))
-                log.debug("Loaded memory for %s", self.account_name)
+                    data = json.load(f)
+                self.memory = ContentMemory.from_dict(data)
+                if "personality" in data:
+                    self.personality = Personality.from_dict(data["personality"])
+                    log.debug("Loaded personality for %s (sessions=%d)",
+                              self.account_name, self.personality.sessions_count)
+                else:
+                    log.debug("No personality found for %s, using generated",
+                              self.account_name)
             except (json.JSONDecodeError, OSError) as e:
                 log.warning("Failed to load memory for %s: %s", self.account_name, e)
 
     def _save_memory(self):
         path = self._memory_path()
         try:
+            data = self.memory.to_dict()
+            data["personality"] = self.personality.to_dict()
             with open(path, "w") as f:
-                json.dump(self.memory.to_dict(), f)
+                json.dump(data, f)
         except OSError as e:
             log.warning("Failed to save memory for %s: %s", self.account_name, e)
 
@@ -577,13 +740,12 @@ class HumanEngine:
     # --- Layer 2: Phase-Aware Action Selection -----------------------------
 
     def pick_action(self) -> str:
-        """Pick next action based on session flow phase.
-        Replaces the old pick_action(mix) -- phases are tracked internally.
+        """Pick next action based on session flow phase + boredom level.
+        When bored, exploration and profile visits get boosted naturally.
         """
         if self.phase:
             mix = self.phase.get_mix()
         else:
-            # Fallback: balanced default mix
             mix = {
                 "scroll_fyp": 0.60, "like": 0.20, "comment": 0.10,
                 "search_explore": 0.05, "follow": 0.03, "profile_visit": 0.02,
@@ -594,9 +756,30 @@ class HumanEngine:
         mix["follow"] = mix.get("follow", 0) * self.mood.social
         mix["like"] = mix.get("like", 0) * self.mood.energy
 
+        # Apply boredom: high boredom boosts exploration, reduces passive scrolling
+        if self.boredom.level > 0.4:
+            boredom_boost = 1 + (self.boredom.level - 0.4) * 3
+            mix["search_explore"] = mix.get("search_explore", 0) * boredom_boost
+            mix["profile_visit"] = mix.get("profile_visit", 0) * boredom_boost
+            mix["scroll_fyp"] = mix.get("scroll_fyp", 0) / boredom_boost
+
         actions = list(mix.keys())
         weights = list(mix.values())
         return random.choices(actions, weights=weights, k=1)[0]
+
+    # --- Boredom-Driven Decisions ------------------------------------------
+
+    def on_scroll(self, niche_match: bool = None):
+        """Record a passive scroll (increases boredom)."""
+        self.boredom.on_scroll(niche_match)
+
+    def on_engage(self):
+        """Record an engagement action like/comment/follow (decreases boredom)."""
+        self.boredom.on_engage()
+
+    def wants_view_switch(self) -> bool:
+        """Should we switch views? Boredom-driven (Instagram Feed<->Reels)."""
+        return self.boredom.wants_switch()
 
     # --- 14 Human-Like Behaviors -------------------------------------------
 
