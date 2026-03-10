@@ -216,7 +216,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         async function testPhone(id) {
             const res = await fetch(`/api/test/${id}`, {method: 'POST'});
             const data = await res.json();
-            addLog(`Phone ${id}: connected=${data.connected}, screen=${data.screen_on}, elements=${data.ui_elements}`);
+            addLog(`Phone ${id}: connected=${data.connected}, screen=${data.screen_on}, screenshot=${data.screenshot_ok}`);
         }
 
         function addLog(msg) {
@@ -249,4 +249,4 @@ def start_dashboard(controllers: dict[int, ADBController], port: int = 8080):
     _executor = SessionExecutor(controllers, _proxy)
 
     log.info("Starting dashboard at http://localhost:%d", port)
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="127.0.0.1", port=port)

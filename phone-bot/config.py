@@ -5,24 +5,24 @@ import os
 PHONES = [
     {
         "id": 1,
-        "name": "Samsung S22",
-        "model": "SM-S901B",
+        "name": "Galaxy S9+",
+        "model": "SM-G965F",
         "adb_serial": None,  # auto-detected on startup
-        "screen_w": 1080,
-        "screen_h": 2340,
-    },
-    {
-        "id": 2,
-        "name": "Galaxy S9",
-        "model": "SM-G960F",
-        "adb_serial": None,
         "screen_w": 1080,
         "screen_h": 2220,
     },
     {
+        "id": 2,
+        "name": "Samsung S22",
+        "model": "SM-S901B",
+        "adb_serial": None,
+        "screen_w": 1080,
+        "screen_h": 2340,
+    },
+    {
         "id": 3,
-        "name": "Galaxy S9+",
-        "model": "SM-G965F",
+        "name": "Galaxy S9",
+        "model": "SM-G960F",
         "adb_serial": None,
         "screen_w": 1080,
         "screen_h": 2220,
@@ -50,15 +50,18 @@ ACCOUNTS = [
 ]
 
 # --- Proxy (SOCKS5 via SSTap + MyPublicWiFi) ----------------------------------
+_proxy_user = os.getenv("PROXY_USERNAME", "")
+_proxy_pass = os.getenv("PROXY_PASSWORD", "")
+_proxy_token = os.getenv("PROXY_ROTATION_TOKEN", "")
 PROXY = {
     "host": "sinister.services",
     "port": 20002,
-    "username": "CY9NRSRY",
-    "password": "CY9NRSRY",
-    "rotation_url": "http://sinister.services/selling/rotate?token=a4803a26a87c41699f3c5d10e7bdc292",
-    "socks5_url": "socks5://CY9NRSRY:CY9NRSRY@sinister.services:20002",
-    "hotspot_ssid": "PhoneBot_Proxy",
-    "hotspot_password": "",  # set your MyPublicWiFi password
+    "username": _proxy_user,
+    "password": _proxy_pass,
+    "rotation_url": f"https://sinister.services/selling/rotate?token={_proxy_token}",
+    "socks5_url": f"socks5://{_proxy_user}:{_proxy_pass}@sinister.services:20002",
+    "hotspot_ssid": os.getenv("HOTSPOT_SSID", "PhoneBot_Proxy"),
+    "hotspot_password": os.getenv("HOTSPOT_PASSWORD", ""),
 }
 
 # --- Airtable (Content Library) -----------------------------------------------
@@ -177,7 +180,28 @@ HUMAN = {
     "t_typo_notice": (0.5, 0.3, 0.15, 1.5),       # noticing a typo
     "t_typo_backspace": (0.18, 0.3, 0.05, 0.6),   # backspace before retype
     "t_thinking": (0.5, 0.4, 0.15, 2.0),          # thinking pause while typing
+    "t_file_push": (2.0, 0.3, 1.0, 5),            # after adb push + media scan
+    "t_upload_load": (3.0, 0.3, 1.5, 7),           # after tapping create/upload button
+    "t_post_upload": (5.0, 0.3, 3, 12),            # after tapping Post/Share (upload processing)
+    "t_key_settle": (0.3, 0.3, 0.1, 0.8),          # after longpress DEL or single key
+    "t_proxy_settle": (2.5, 0.3, 1, 6),            # after proxy IP rotation
+    "t_wifi_connect": (3.5, 0.3, 2, 8),            # after wifi connect command
+    "t_confirm_save": (3.0, 0.3, 1.5, 7),          # after confirm/save button (profile, upload)
+    "t_poll_check": (1.0, 0.3, 0.5, 3),            # polling loop check interval
+    "t_caption_input": (0.5, 0.3, 0.2, 1.5),       # after tapping caption field
+    "t_story_watch": (3.0, 0.5, 1.0, 12),          # watching each story slide
 }
+
+# --- Niche Keywords Pool (per-session random sampling, avoids all accounts = same queries) ---
+NICHE_KEYWORDS_POOL = [
+    "toxic relationship", "red flags", "situationship",
+    "dating advice", "couples", "relationship tips",
+    "boyfriend check", "girlfriend goals", "love advice",
+    "talking stage", "toxic ex", "heartbreak",
+    "relationship goals", "couple goals", "breakup",
+    "dating red flags", "toxic traits", "relationship drama",
+    "single life", "dating fails", "love language",
+]
 
 # --- Session Flow Phases (replaces flat ENGAGEMENT_MIX) -----------------------
 # Each phase has a duration range (minutes) and engagement weights.

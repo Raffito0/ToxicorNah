@@ -36,6 +36,7 @@ class SessionExecutor:
         self.human_engines: dict[str, HumanEngine] = {}  # per account
         self.warmup_states: dict[str, AccountWarmupState] = {}
         self._running = False
+        self._pending_record = None
         self._load_warmup_state()
 
     # --- Warmup State Persistence ------------------------------------------
@@ -86,7 +87,7 @@ class SessionExecutor:
     def _get_human(self, account_name: str) -> HumanEngine:
         """Get or create a HumanEngine for an account."""
         if account_name not in self.human_engines:
-            self.human_engines[account_name] = HumanEngine()
+            self.human_engines[account_name] = HumanEngine(account_name=account_name)
         return self.human_engines[account_name]
 
     # --- Profile Content Lookup --------------------------------------------
@@ -279,6 +280,7 @@ class SessionExecutor:
         """Normal/extended session: scroll → post → scroll."""
         video_path = ""
         caption = ""
+        self._pending_record = None  # reset per session
 
         if should_post and post_outcome == "posted":
             # Fetch video from Content Library via delivery module
@@ -332,7 +334,7 @@ class SessionExecutor:
             )
 
         # Mark video as posted in Airtable
-        if should_post and video_path and hasattr(self, '_pending_record'):
+        if should_post and video_path and self._pending_record:
             mark_posted(self._pending_record, platform)
 
     # --- Warmup Session Execution ------------------------------------------
@@ -439,7 +441,7 @@ class SessionExecutor:
 
         # --- Main scroll + engagement loop (with micro-behaviors) ---
         bot.go_to_fyp()
-        await asyncio.sleep(2)
+        await asyncio.sleep(human.timing("t_nav_settle"))
 
         likes_left = actions.get("like", 0)
         comments_left = actions.get("comment", 0)
@@ -458,36 +460,35 @@ class SessionExecutor:
 
             # Interruption
             if human.should_interrupt():
-                await human.do_interruption(adb)
+                await human.do_interruption(adb, "com.zhiliaoapp.musically")
                 continue
 
             # Watch current video
             watch_time = human.watch_duration()
             await asyncio.sleep(watch_time)
 
-            # Pick ONE engagement action (weighted random, respecting limits)
+            # Pick ONE engagement action (jittered weights, respecting limits)
+            _j = lambda base: base * random.uniform(0.75, 1.25)
             options = ["scroll"]
-            weights = [0.40]
+            weights = [_j(0.40)]
             if likes_left > 0:
                 options.append("like")
-                weights.append(0.35)
+                weights.append(_j(0.35))
             if comments_left > 0:
                 options.append("comment")
-                weights.append(0.15)
+                weights.append(_j(0.15))
             if follows_left > 0:
                 options.append("follow")
-                weights.append(0.10)
+                weights.append(_j(0.10))
 
             action = random.choices(options, weights=weights, k=1)[0]
 
             if action == "like":
                 bot.like_video()
                 likes_left -= 1
-                # Behavior #3: Post-like pause
                 await asyncio.sleep(human.post_like_pause())
 
             elif action == "comment":
-                # Behavior #9: Double-open comments
                 if human.should_double_open_comments():
                     bot.open_comments()
                     await asyncio.sleep(human.timing("t_double_open_1"))
@@ -526,15 +527,18 @@ class SessionExecutor:
 
         # Post on last day
         if session.get("can_post"):
-            if session.get("use_camera_trick"):
-                await self._tiktok_camera_trick_post(adb, human, bot, session)
-            else:
-                video_info = get_next_video(session["phone_id"], "tiktok")
-                if video_info:
-                    local_path = download_video(video_info["video_url"])
-                    if local_path:
-                        bot.post_video(local_path, video_info.get("caption", ""))
-                        mark_posted(video_info["record_id"], "tiktok")
+            try:
+                if session.get("use_camera_trick"):
+                    await self._tiktok_camera_trick_post(adb, human, bot, session)
+                else:
+                    video_info = get_next_video(session["phone_id"], "tiktok")
+                    if video_info:
+                        local_path = download_video(video_info["video_url"])
+                        if local_path:
+                            bot.post_video(local_path, video_info.get("caption", ""))
+                            mark_posted(video_info["record_id"], "tiktok")
+            except Exception as e:
+                log.error("Warmup TikTok post failed: %s", e, exc_info=True)
 
         # Behavior #11: Background at end
         if human.should_end_in_background():
@@ -613,7 +617,10 @@ class SessionExecutor:
             bot.go_to_reels()
         else:
             bot.go_to_feed()
-        await asyncio.sleep(2)
+            # Watch stories sometimes during warmup (20% — real users do this)
+            if random.random() < 0.20:
+                bot.watch_stories(count=random.randint(1, 3))
+        await asyncio.sleep(human.timing("t_nav_settle"))
 
         # --- Main scroll + engagement loop (with micro-behaviors) ---
         likes_left = actions.get("like", 0)
@@ -633,36 +640,35 @@ class SessionExecutor:
 
             # Interruption
             if human.should_interrupt():
-                await human.do_interruption(adb)
+                await human.do_interruption(adb, "com.instagram.android")
                 continue
 
             # Watch current video
             watch_time = human.watch_duration()
             await asyncio.sleep(watch_time)
 
-            # Pick ONE engagement action (weighted random, respecting limits)
+            # Pick ONE engagement action (jittered weights, respecting limits)
+            _j = lambda base: base * random.uniform(0.75, 1.25)
             options = ["scroll"]
-            weights = [0.40]
+            weights = [_j(0.40)]
             if likes_left > 0:
                 options.append("like")
-                weights.append(0.35)
+                weights.append(_j(0.35))
             if comments_left > 0:
                 options.append("comment")
-                weights.append(0.15)
+                weights.append(_j(0.15))
             if follows_left > 0:
                 options.append("follow")
-                weights.append(0.10)
+                weights.append(_j(0.10))
 
             action = random.choices(options, weights=weights, k=1)[0]
 
             if action == "like":
                 bot.like_post()
                 likes_left -= 1
-                # Behavior #3: Post-like pause
                 await asyncio.sleep(human.post_like_pause())
 
             elif action == "comment":
-                # Behavior #9: Double-open comments
                 if human.should_double_open_comments():
                     bot.open_comments()
                     await asyncio.sleep(human.timing("t_double_open_1"))
@@ -709,12 +715,15 @@ class SessionExecutor:
 
         # Post on last day
         if session.get("can_post"):
-            video_info = get_next_video(session["phone_id"], "instagram")
-            if video_info:
-                local_path = download_video(video_info["video_url"])
-                if local_path:
-                    bot.post_reel(local_path, video_info.get("caption", ""))
-                    mark_posted(video_info["record_id"], "instagram")
+            try:
+                video_info = get_next_video(session["phone_id"], "instagram")
+                if video_info:
+                    local_path = download_video(video_info["video_url"])
+                    if local_path:
+                        bot.post_reel(local_path, video_info.get("caption", ""))
+                        mark_posted(video_info["record_id"], "instagram")
+            except Exception as e:
+                log.error("Warmup Instagram post failed: %s", e, exc_info=True)
 
         # Behavior #11: Background at end
         if human.should_end_in_background():
@@ -745,24 +754,24 @@ class SessionExecutor:
         vid_name = f"video_{now.strftime('%Y%m%d%H%M%S')}_{random.randint(100, 999)}.mp4"
         device_video_path = f"/sdcard/Download/{vid_name}"
         adb.push_file(local_path, device_video_path)
-        await asyncio.sleep(2)
+        await asyncio.sleep(human.timing("t_file_push"))
         adb.shell(
             f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE '
             f'-d "file://{device_video_path}"'
         )
-        await asyncio.sleep(2)
+        await asyncio.sleep(human.timing("t_file_push"))
 
         # Step 1: Open TikTok camera (Create button)
         x, y = adb.get_coord("tiktok", "nav_create")
         x, y = human.jitter_tap(x, y)
         adb.tap(x, y)
-        await asyncio.sleep(3)
+        await asyncio.sleep(human.timing("t_upload_load"))
 
         # Step 2: Make sure we're on Camera mode (not Upload)
         x, y = adb.get_coord("tiktok", "camera_tab")
         x, y = human.jitter_tap(x, y)
         adb.tap(x, y)
-        await asyncio.sleep(1)
+        await asyncio.sleep(human.timing("t_nav_settle"))
 
         # Step 3: Record for a few seconds (filming desk/whatever)
         x, y = adb.get_coord("tiktok", "record_btn")
@@ -771,41 +780,41 @@ class SessionExecutor:
         await asyncio.sleep(human.timing("t_camera_record"))
         # Stop recording
         adb.tap(x, y)
-        await asyncio.sleep(2)
+        await asyncio.sleep(human.timing("t_nav_settle"))
 
         # Step 4: Go to edit (Next/Done button -- use Vision for this dynamic element)
         coords = adb.wait_for_screen("Next or Done button", timeout=5)
         if coords:
             x, y = human.jitter_tap(*coords)
             adb.tap(x, y)
-            await asyncio.sleep(2)
+            await asyncio.sleep(human.timing("t_nav_settle"))
 
         # Step 5: Find and tap Overlay/Effects (use Vision -- position varies)
         coords = adb.find_on_screen("Overlay or Effects button")
         if coords:
             x, y = human.jitter_tap(*coords)
             adb.tap(x, y)
-            await asyncio.sleep(2)
+            await asyncio.sleep(human.timing("t_nav_settle"))
 
             # "Add overlay" button (use Vision)
             coords = adb.find_on_screen("Add overlay or Add button")
             if coords:
                 x, y = human.jitter_tap(*coords)
                 adb.tap(x, y)
-                await asyncio.sleep(2)
+                await asyncio.sleep(human.timing("t_nav_settle"))
 
             # Select the video from gallery (most recent = top-left)
             x, y = adb.get_coord("tiktok", "gallery_first")
             x, y = human.jitter_tap(x, y)
             adb.tap(x, y)
-            await asyncio.sleep(2)
+            await asyncio.sleep(human.timing("t_nav_settle"))
 
         # Step 6: Tap Next to go to caption screen
         coords = adb.wait_for_screen("Next button", timeout=5)
         if coords:
             x, y = human.jitter_tap(*coords)
             adb.tap(x, y)
-            await asyncio.sleep(2)
+            await asyncio.sleep(human.timing("t_nav_settle"))
 
         # Step 7: Add caption
         caption = video_info.get("caption", "")
@@ -813,9 +822,9 @@ class SessionExecutor:
             x, y = adb.get_coord("tiktok", "upload_caption")
             x, y = human.jitter_tap(x, y)
             adb.tap(x, y)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(human.timing("t_caption_input"))
             human.type_with_errors(adb, caption)
-            await asyncio.sleep(1)
+            await asyncio.sleep(human.timing("t_post_typing"))
 
         # Step 8: Post (use Vision for Post button)
         coords = adb.wait_for_screen("Post button", timeout=5)
@@ -823,7 +832,7 @@ class SessionExecutor:
             x, y = human.jitter_tap(*coords)
             adb.tap(x, y)
             log.info("Warmup: video posted with camera trick!")
-            await asyncio.sleep(5)
+            await asyncio.sleep(human.timing("t_post_upload"))
             mark_posted(video_info["record_id"], "tiktok")
 
         # Clean up
@@ -854,7 +863,11 @@ class SessionExecutor:
                 for session in sessions:
                     if not self._running:
                         break
-                    await self.execute_warmup_session(session)
+                    try:
+                        await self.execute_warmup_session(session)
+                    except Exception as e:
+                        log.error("Warmup session %s crashed: %s",
+                                  session.get("account_name", "?"), e, exc_info=True)
                     # Gap between warmup sessions on same phone
                     await asyncio.sleep(self._get_human(name).timing("t_session_gap"))
 
@@ -892,7 +905,11 @@ class SessionExecutor:
                 if start_time_str:
                     await self._wait_until(start_time_str)
 
-                await self.execute_session(session)
+                try:
+                    await self.execute_session(session)
+                except Exception as e:
+                    log.error("Session %s crashed: %s",
+                              session.get("account_name", "?"), e, exc_info=True)
 
                 gap = session.get("gap_after_minutes", 0)
                 if gap > 0:
@@ -910,6 +927,9 @@ class SessionExecutor:
             if now.hour > target_h or (now.hour == target_h and now.minute >= target_m):
                 return
             remaining = (target_h * 60 + target_m) - (now.hour * 60 + now.minute)
+            if remaining < 0:
+                # Past target time (day-wrap or already passed) -- don't wait
+                return
             log.info("Waiting %d min until %s...", remaining, time_str)
             await asyncio.sleep(min(remaining * 60, 60))  # check every minute
 

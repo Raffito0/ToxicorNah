@@ -12,7 +12,9 @@
 Plus 14 human-like micro-behaviors (typing errors, zona morta, like bursts, etc.)
 """
 import asyncio
+import json
 import math
+import os
 import random
 import string
 import time
@@ -114,7 +116,8 @@ class DailyMood:
 
 @dataclass
 class ContentMemory:
-    """Tracks liked content categories to maintain consistency."""
+    """Tracks liked content categories to maintain consistency.
+    Persists across sessions via save/load JSON."""
     liked_categories: dict = field(default_factory=dict)
     disliked_categories: dict = field(default_factory=dict)
     recent_creators: list = field(default_factory=list)
@@ -141,6 +144,21 @@ class ContentMemory:
         elif dislikes > 3:
             base_prob *= 0.6
         return min(0.95, max(0.05, base_prob))
+
+    def to_dict(self) -> dict:
+        return {
+            "liked_categories": self.liked_categories,
+            "disliked_categories": self.disliked_categories,
+            "recent_creators": self.recent_creators,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ContentMemory":
+        return cls(
+            liked_categories=d.get("liked_categories", {}),
+            disliked_categories=d.get("disliked_categories", {}),
+            recent_creators=d.get("recent_creators", []),
+        )
 
 
 # =============================================================================
@@ -308,7 +326,8 @@ class HumanEngine:
             await asyncio.sleep(engine.zona_morta_duration())
     """
 
-    def __init__(self):
+    def __init__(self, account_name: str = ""):
+        self.account_name = account_name
         self.mood = DailyMood()
         self.memory = ContentMemory()
         self.fatigue = FatigueTracker()
@@ -317,6 +336,9 @@ class HumanEngine:
         self._session_active = False
         self._video_count = 0
         self._zona_morta_next = 0.0
+        # Load persisted memory for this account
+        if account_name:
+            self._load_memory()
 
     def start_session(self, hour: int = 12, weekday: int = 2,
                       duration_minutes: float = 15.0):
@@ -336,6 +358,29 @@ class HumanEngine:
 
     def end_session(self):
         self._session_active = False
+        if self.account_name:
+            self._save_memory()
+
+    def _memory_path(self) -> str:
+        return os.path.join(config.DATA_DIR, f"memory_{self.account_name}.json")
+
+    def _load_memory(self):
+        path = self._memory_path()
+        if os.path.exists(path):
+            try:
+                with open(path, "r") as f:
+                    self.memory = ContentMemory.from_dict(json.load(f))
+                log.debug("Loaded memory for %s", self.account_name)
+            except (json.JSONDecodeError, OSError) as e:
+                log.warning("Failed to load memory for %s: %s", self.account_name, e)
+
+    def _save_memory(self):
+        path = self._memory_path()
+        try:
+            with open(path, "w") as f:
+                json.dump(self.memory.to_dict(), f)
+        except OSError as e:
+            log.warning("Failed to save memory for %s: %s", self.account_name, e)
 
     # --- Layer 1: Tap Jitter -----------------------------------------------
 
@@ -422,13 +467,13 @@ class HumanEngine:
         if self._video_count == 1:
             return _timing("first_video_watch")
 
-        # 30% full video
-        if random.random() < 0.30 * self.mood.patience:
+        # Single roll determines watch type (not multiple random() calls)
+        roll = random.random()
+        full_threshold = 0.30 * self.mood.patience
+        if roll < full_threshold:
             watch = video_length * random.uniform(*H["watch_full_mult"])
-        # 40% medium watch
-        elif random.random() < 0.60:
+        elif roll < full_threshold + 0.40:
             watch = _timing("watch_medium")
-        # 30% quick skip
         else:
             watch = _timing("watch_short")
 
@@ -504,8 +549,10 @@ class HumanEngine:
     def interruption_duration(self) -> float:
         return _timing("interruption_duration")
 
-    async def do_interruption(self, adb):
-        """Execute an interruption on the device."""
+    async def do_interruption(self, adb, current_app: str = ""):
+        """Execute an interruption on the device.
+        current_app: package name to reopen after app_switch (e.g. TIKTOK_PKG).
+        """
         itype = self.interruption_type()
         duration = self.interruption_duration()
         log.info("Interruption: %s for %.0fs", itype, duration)
@@ -513,11 +560,17 @@ class HumanEngine:
         if itype == "app_switch":
             adb.press_home()
             await asyncio.sleep(duration)
-            adb.press_back()
+            # Re-open the app (press_back from home screen does nothing)
+            if current_app:
+                adb.open_app(current_app)
+                await asyncio.sleep(_timing("t_app_load"))
+            else:
+                adb.press_back()
         elif itype == "lock_screen":
             adb.shell("input keyevent KEYCODE_POWER")
             await asyncio.sleep(duration)
             adb.unlock_screen()
+            # After unlock, last app returns to foreground automatically
         else:
             await asyncio.sleep(duration)
 
@@ -564,19 +617,18 @@ class HumanEngine:
     def type_with_errors(self, adb, text: str):
         """Behavior #2: Type with occasional errors (backspace + retype).
         ~10% typo rate makes typing pattern look human."""
-        import time as _time
         for char in text:
             if char.isalpha() and random.random() < H["typo_rate"]:
                 # Type wrong char
                 adb.type_text(_nearby_char(char))
-                _time.sleep(self.typing_delay())
+                time.sleep(self.typing_delay())
                 # Notice mistake, pause
-                _time.sleep(_timing("t_typo_notice"))
+                time.sleep(_timing("t_typo_notice"))
                 # Backspace
                 adb.shell("input keyevent KEYCODE_DEL")
-                _time.sleep(_timing("t_typo_backspace"))
+                time.sleep(_timing("t_typo_backspace"))
             adb.type_text(char)
-            _time.sleep(self.typing_delay())
+            time.sleep(self.typing_delay())
 
     def should_peek_scroll(self) -> bool:
         """Behavior #4: Scroll halfway and come back (8-12%)."""

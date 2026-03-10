@@ -7,8 +7,16 @@ How it works:
 4. When switching phones: disconnect current → rotate proxy IP → connect next
 """
 import logging
+import math
+import random
 import time
 import httpx
+
+
+def _hw_delay(median: float, sigma: float = 0.3, lo: float = 0.1, hi: float = 10.0) -> float:
+    """Hardware-level log-normal delay."""
+    val = random.lognormvariate(math.log(max(median, 0.01)), sigma)
+    return max(lo, min(hi, val))
 
 from .. import config
 from .adb import ADBController
@@ -45,10 +53,16 @@ class ProxyQueue:
         if self.active_phone_id:
             self.disconnect_current()
 
-        # Step 2: Rotate proxy IP
+        # Step 2: Rotate proxy IP (retry once on failure)
         if rotate_ip:
-            self._rotate_proxy_ip()
-            time.sleep(2)  # wait for new IP to stabilize
+            if not self._rotate_proxy_ip():
+                log.warning("Proxy rotation failed, retrying in 3s...")
+                time.sleep(_hw_delay(3.0, 0.3, 1, 6))
+                if not self._rotate_proxy_ip():
+                    log.error("Proxy rotation failed twice -- aborting phone switch "
+                              "(risk: two phones on same IP)")
+                    return False
+            time.sleep(_hw_delay(2.5, 0.3, 1, 6))  # wait for new IP to stabilize
 
         # Step 3: Connect new phone
         ctrl = self.controllers.get(phone_id)
@@ -61,7 +75,7 @@ class ProxyQueue:
 
         log.info("Connecting Phone %d to WiFi '%s'...", phone_id, ssid)
         ctrl.connect_wifi(ssid, password)
-        time.sleep(3)  # wait for connection
+        time.sleep(_hw_delay(3.5, 0.3, 2, 8))  # wait for connection
 
         # Verify connection
         connected_ssid = ctrl.get_wifi_ssid()
@@ -82,7 +96,7 @@ class ProxyQueue:
         if ctrl:
             log.info("Disconnecting Phone %d from WiFi", self.active_phone_id)
             ctrl.disconnect_wifi()
-            time.sleep(1)
+            time.sleep(_hw_delay(1.0, 0.3, 0.3, 3))
 
         self.active_phone_id = None
 
@@ -95,14 +109,20 @@ class ProxyQueue:
                 log.warning("Failed to disconnect Phone %d: %s", phone_id, e)
         self.active_phone_id = None
 
-    def _rotate_proxy_ip(self):
-        """Call the proxy rotation URL to get a new IP."""
+    def _rotate_proxy_ip(self) -> bool:
+        """Call the proxy rotation URL to get a new IP. Returns True on success."""
         url = self._proxy_config["rotation_url"]
         try:
             resp = httpx.get(url, timeout=10)
-            log.info("Proxy IP rotated: %s", resp.text.strip()[:100])
+            if resp.status_code == 200:
+                log.info("Proxy IP rotated: %s", resp.text.strip()[:100])
+                return True
+            log.warning("Proxy rotation returned status %d: %s",
+                        resp.status_code, resp.text.strip()[:100])
+            return False
         except Exception as e:
             log.warning("Proxy rotation failed: %s", e)
+            return False
 
     def switch_to_phone(self, phone_id: int) -> bool:
         """High-level: switch proxy connection from current phone to another."""

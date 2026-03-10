@@ -14,6 +14,7 @@ import random
 import time
 from datetime import datetime
 
+from .. import config
 from ..core.adb import ADBController
 from ..core.human import HumanEngine
 from ..core import gemini
@@ -42,7 +43,7 @@ class TikTokBot:
             if TIKTOK_PKG in self.adb.get_current_app():
                 log.info("TikTok is open")
                 return True
-            time.sleep(1)
+            time.sleep(self.human.timing("t_poll_check"))
 
         log.warning("TikTok didn't open in time")
         return False
@@ -50,28 +51,38 @@ class TikTokBot:
     def close_app(self):
         """Close TikTok naturally."""
         self.adb.close_tiktok()
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def go_to_fyp(self):
         """Navigate to the For You Page (home tab)."""
         x, y = self.adb.get_coord("tiktok", "nav_home")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(1.5)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def go_to_profile(self):
         """Navigate to own profile tab."""
         x, y = self.adb.get_coord("tiktok", "nav_profile")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def go_to_search(self):
         """Open the Discover/Search page."""
         x, y = self.adb.get_coord("tiktok", "nav_friends")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+    def _check_health(self) -> bool:
+        """Verify TikTok is still in foreground. Recovers if lost."""
+        current = self.adb.get_current_app()
+        if current and TIKTOK_PKG not in current:
+            log.warning("TikTok lost focus (current: %s), recovering", current)
+            self.open_app()
+            self.go_to_fyp()
+            return False
+        return True
 
     # --- Core Actions ------------------------------------------------------
 
@@ -119,7 +130,7 @@ class TikTokBot:
         x, y = self.adb.get_coord("tiktok", "comment_icon")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def write_comment(self, text: str):
         """Type and post a comment."""
@@ -136,7 +147,7 @@ class TikTokBot:
 
         # Post comment (Enter key is most reliable)
         self.adb.press_enter()
-        time.sleep(1.5)
+        time.sleep(self.human.timing("t_post_typing"))
 
         # Close comments
         self.adb.press_back()
@@ -172,12 +183,12 @@ class TikTokBot:
         x, y = self.adb.get_coord("tiktok", "username")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2.5)
+        time.sleep(self.human.timing("t_profile_settle"))
 
     async def rabbit_hole(self):
         """Visit creator profile and watch several of their videos."""
         self.visit_creator_profile()
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         n_videos = self.human.rabbit_hole_depth()
         log.info("Rabbit hole: watching %d videos on profile", n_videos)
@@ -188,7 +199,7 @@ class TikTokBot:
                 grid_y = self.adb.screen_h // 2
                 x, y = self.human.jitter_tap(self.adb.screen_w // 4, grid_y)
                 self.adb.tap(x, y)
-                time.sleep(2)
+                time.sleep(self.human.timing("t_nav_settle"))
             else:
                 self.scroll_fyp()
 
@@ -200,27 +211,27 @@ class TikTokBot:
 
         # Go back to FYP
         self.adb.press_back()
-        time.sleep(0.5)
+        time.sleep(self.human.timing("micro_pause"))
         self.adb.press_back()
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def search_hashtag(self, hashtag: str):
         """Search for a hashtag and browse results."""
         self.go_to_search()
-        time.sleep(1.5)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Tap search bar
         x, y = self.adb.get_coord("tiktok", "search_bar")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Type hashtag with human-like errors
         self.human.type_with_errors(self.adb, hashtag)
 
-        time.sleep(0.5)
+        time.sleep(self.human.timing("micro_pause"))
         self.adb.press_enter()
-        time.sleep(2.5)
+        time.sleep(self.human.timing("t_browse_results"))
 
     # --- Profile Setup -----------------------------------------------------
 
@@ -231,54 +242,56 @@ class TikTokBot:
         # Push image to phone
         device_path = f"/sdcard/DCIM/profile_{random.randint(1000, 9999)}.jpg"
         self.adb.push_file(image_path, device_path)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_file_push"))
         self.adb.shell(
             f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE '
             f'-d "file://{device_path}"'
         )
-        time.sleep(2)
+        time.sleep(self.human.timing("t_file_push"))
 
-        # Navigate: Profile -> Edit profile
-        self.go_to_profile()
-        time.sleep(self.human.timing("t_nav_settle"))
+        try:
+            # Navigate: Profile -> Edit profile
+            self.go_to_profile()
+            time.sleep(self.human.timing("t_nav_settle"))
 
-        # Tap Edit profile button
-        x, y = self.adb.get_coord("tiktok", "edit_profile_btn")
-        x, y = self.human.jitter_tap(x, y)
-        self.adb.tap(x, y)
-        time.sleep(2)
-
-        # Tap avatar area to change photo
-        x, y = self.adb.get_coord("tiktok", "avatar_edit")
-        x, y = self.human.jitter_tap(x, y)
-        self.adb.tap(x, y)
-        time.sleep(2)
-
-        # "Select from gallery" -- use Vision (text varies per version)
-        coords = self.adb.find_on_screen("Select from gallery or Choose from library button")
-        if coords:
-            x, y = self.human.jitter_tap(*coords)
+            # Tap Edit profile button
+            x, y = self.adb.get_coord("tiktok", "edit_profile_btn")
+            x, y = self.human.jitter_tap(x, y)
             self.adb.tap(x, y)
-            time.sleep(2)
+            time.sleep(self.human.timing("t_nav_settle"))
 
-        # Select most recent photo (top-left of gallery grid)
-        x, y = self.adb.get_coord("tiktok", "gallery_first")
-        x, y = self.human.jitter_tap(x, y)
-        self.adb.tap(x, y)
-        time.sleep(2)
-
-        # Confirm/Save -- use Vision (text varies: Save, Confirm, Done)
-        coords = self.adb.wait_for_screen("Save or Confirm or Done button", timeout=5)
-        if coords:
-            x, y = self.human.jitter_tap(*coords)
+            # Tap avatar area to change photo
+            x, y = self.adb.get_coord("tiktok", "avatar_edit")
+            x, y = self.human.jitter_tap(x, y)
             self.adb.tap(x, y)
-            time.sleep(3)
+            time.sleep(self.human.timing("t_nav_settle"))
 
-        # Go back
-        self.adb.press_back()
-        time.sleep(1)
-        self.adb.shell(f'rm "{device_path}"')
-        log.info("TikTok profile pic set")
+            # "Select from gallery" -- use Vision (text varies per version)
+            coords = self.adb.find_on_screen("Select from gallery or Choose from library button")
+            if coords:
+                x, y = self.human.jitter_tap(*coords)
+                self.adb.tap(x, y)
+                time.sleep(self.human.timing("t_nav_settle"))
+
+            # Select most recent photo (top-left of gallery grid)
+            x, y = self.adb.get_coord("tiktok", "gallery_first")
+            x, y = self.human.jitter_tap(x, y)
+            self.adb.tap(x, y)
+            time.sleep(self.human.timing("t_nav_settle"))
+
+            # Confirm/Save -- use Vision (text varies: Save, Confirm, Done)
+            coords = self.adb.wait_for_screen("Save or Confirm or Done button", timeout=5)
+            if coords:
+                x, y = self.human.jitter_tap(*coords)
+                self.adb.tap(x, y)
+                time.sleep(self.human.timing("t_confirm_save"))
+
+            # Go back
+            self.adb.press_back()
+            time.sleep(self.human.timing("t_nav_settle"))
+            log.info("TikTok profile pic set")
+        finally:
+            self.adb.shell(f'rm "{device_path}"')
 
     def set_bio(self, bio_text: str):
         """Set bio/description during warmup."""
@@ -291,17 +304,17 @@ class TikTokBot:
         x, y = self.adb.get_coord("tiktok", "edit_profile_btn")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Tap Bio field
         x, y = self.adb.get_coord("tiktok", "bio_field")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Clear existing text
         self.adb.shell("input keyevent --longpress KEYCODE_DEL")
-        time.sleep(0.3)
+        time.sleep(self.human.timing("t_key_settle"))
 
         # Type bio with human-like errors
         self.human.type_with_errors(self.adb, bio_text)
@@ -311,10 +324,10 @@ class TikTokBot:
         x, y = self.adb.get_coord("tiktok", "save_btn")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_confirm_save"))
 
         self.adb.press_back()
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
         log.info("TikTok bio set: %s", bio_text[:40])
 
     # --- Video Posting -----------------------------------------------------
@@ -329,68 +342,75 @@ class TikTokBot:
         device_path = f"/sdcard/Download/{vid_name}"
         log.info("Pushing video to device: %s", device_path)
         self.adb.push_file(video_path, device_path)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_file_push"))
 
         # Trigger media scan
         self.adb.shell(
             f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE '
             f'-d "file://{device_path}"'
         )
-        time.sleep(2)
+        time.sleep(self.human.timing("t_file_push"))
 
         # Step 2: Tap + (create) button
         x, y = self.adb.get_coord("tiktok", "nav_create")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(3)
+        time.sleep(self.human.timing("t_upload_load"))
 
         # Step 3: Tap "Upload" tab
         x, y = self.adb.get_coord("tiktok", "upload_tab")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Step 4: Select most recent video (top-left of gallery)
         x, y = self.adb.get_coord("tiktok", "gallery_first")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(1.5)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Step 5: Tap Next (top-right)
         x, y = self.adb.get_coord("tiktok", "upload_next_btn")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Step 6: May need to tap Next again (editing screen)
         x, y = self.adb.get_coord("tiktok", "edit_next_btn")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Step 7: Add caption
         if caption:
             x, y = self.adb.get_coord("tiktok", "upload_caption")
             x, y = self.human.jitter_tap(x, y)
             self.adb.tap(x, y)
-            time.sleep(0.5)
+            time.sleep(self.human.timing("t_caption_input"))
 
             self.adb.shell("input keyevent --longpress KEYCODE_DEL")
-            time.sleep(0.3)
+            time.sleep(self.human.timing("t_key_settle"))
 
             self.human.type_with_errors(self.adb, caption)
-            time.sleep(1)
+            time.sleep(self.human.timing("t_post_typing"))
 
         # Step 8: Tap Post (top-right or bottom)
         x, y = self.adb.get_coord("tiktok", "upload_post_btn")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        log.info("Video posted on TikTok!")
-        time.sleep(5)
+        time.sleep(self.human.timing("t_post_upload"))
 
-        # Clean up
-        self.adb.shell(f'rm "{device_path}"')
-        return True
+        # Verify post: check we're back on TikTok (not stuck in error dialog)
+        # Wait briefly and re-check to catch delayed error popups
+        time.sleep(self.human.timing("t_nav_settle"))
+        current = self.adb.get_current_app()
+        if current and TIKTOK_PKG in current:
+            log.info("Video posted on TikTok!")
+            self.adb.shell(f'rm "{device_path}"')
+            return True
+        else:
+            log.warning("Post may have failed (current app: %s), keeping video on device", current)
+            return False
 
     # --- High-Level Session Actions ----------------------------------------
 
@@ -410,16 +430,22 @@ class TikTokBot:
         time.sleep(self.human.load_reaction_time())
 
         self.go_to_fyp()
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         start = time.time()
         total_seconds = duration_minutes * 60
         post_done = False
         post_after = pre_scroll_minutes * 60 if should_post else float('inf')
         category = "unknown"
+        action_count = 0
 
         while (time.time() - start) < total_seconds:
             elapsed = time.time() - start
+
+            # Periodic health check (every ~15 actions)
+            action_count += 1
+            if action_count % 15 == 0:
+                self._check_health()
 
             # --- Post video at the right time ---
             if should_post and not post_done and elapsed >= post_after:
@@ -428,7 +454,7 @@ class TikTokBot:
                     post_done = True
                     if success:
                         self.go_to_fyp()
-                        time.sleep(2)
+                        time.sleep(self.human.timing("t_nav_settle"))
                     continue
 
             # Behavior #1: Zona morta (dead stare, no touch)
@@ -440,7 +466,7 @@ class TikTokBot:
 
             # --- Check for interruption (Layer 5) ---
             if self.human.should_interrupt():
-                await self.human.do_interruption(self.adb)
+                await self.human.do_interruption(self.adb, TIKTOK_PKG)
                 continue
 
             # --- Pick next action based on session flow phase ---
@@ -450,12 +476,14 @@ class TikTokBot:
                 watch_time = self.human.watch_duration()
                 await asyncio.sleep(watch_time)
 
-                # Maybe categorize with Gemini (10% of videos)
-                if random.random() < 0.10:
+                # Categorize with Gemini (25% of videos for better memory)
+                if random.random() < 0.25:
                     screenshot = self.adb.screenshot_bytes()
                     if screenshot:
                         info = gemini.categorize_video(screenshot)
                         category = info.get("category", "unknown")
+                else:
+                    category = "unknown"  # reset stale category each scroll
 
                 # Behavior #8: Micro-scroll (incomplete swipe)
                 if self.human.should_micro_scroll():
@@ -505,10 +533,8 @@ class TikTokBot:
                     self.follow_creator()
 
             elif action == "search_explore":
-                keywords = niche_keywords or [
-                    "toxic relationship", "red flags", "situationship",
-                    "dating advice", "couples", "relationship tips",
-                ]
+                pool = niche_keywords or config.NICHE_KEYWORDS_POOL
+                keywords = random.sample(pool, min(6, len(pool)))
                 self.search_hashtag(random.choice(keywords))
                 await asyncio.sleep(self.human.timing("t_search_browse"))
                 self.go_to_fyp()

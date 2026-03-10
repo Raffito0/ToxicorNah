@@ -13,19 +13,32 @@ Usage:
 import argparse
 import asyncio
 import logging
+import logging.handlers
+import os
 import subprocess
 import sys
 
-from config import ADB_PATH, PHONES, ACCOUNTS
+from config import ADB_PATH, PHONES, ACCOUNTS, LOGS_DIR, GEMINI, AIRTABLE
 from core.adb import ADBController
 from core.proxy import ProxyQueue
 from planner.executor import SessionExecutor
 
+# Console + rotating file log
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
+_file_handler = logging.handlers.RotatingFileHandler(
+    os.path.join(LOGS_DIR, "phone_bot.log"),
+    maxBytes=5 * 1024 * 1024,  # 5 MB
+    backupCount=3,
+    encoding="utf-8",
+)
+_file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+))
+logging.getLogger().addHandler(_file_handler)
 log = logging.getLogger("phone_bot")
 
 
@@ -124,6 +137,14 @@ def init_warmup(controllers: dict[int, ADBController], phone_filter: int = None)
     log.info("Warmup initialized! Run 'python main.py' daily for 7 days.")
 
 
+def _check_api_keys():
+    """Warn at startup if critical API keys are missing."""
+    if not GEMINI.get("api_key"):
+        log.warning("GEMINI_API_KEY not set -- AI comments and categorization will fail")
+    if not AIRTABLE.get("api_key"):
+        log.warning("AIRTABLE_API_KEY not set -- Content Library delivery will fail")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Phone Bot — TikTok & Instagram Automation")
     parser.add_argument("--test", action="store_true", help="Test device connections")
@@ -132,6 +153,7 @@ def main():
     parser.add_argument("--phone", type=int, help="Filter to specific phone ID (1-4)")
     args = parser.parse_args()
 
+    _check_api_keys()
     log.info("Discovering connected devices...")
     controllers = discover_devices()
 

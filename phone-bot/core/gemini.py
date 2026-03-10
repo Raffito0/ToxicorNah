@@ -22,11 +22,16 @@ log = logging.getLogger(__name__)
 # Rate limiting: max ~10 calls/minute for free tier
 _last_call_time = 0
 _MIN_INTERVAL = 6.0  # seconds between API calls
+_initialized = False
 
 
 def _init():
+    global _initialized
+    if _initialized:
+        return
     if config.GEMINI["api_key"]:
         genai.configure(api_key=config.GEMINI["api_key"])
+        _initialized = True
 
 
 def _rate_limit():
@@ -39,7 +44,8 @@ def _rate_limit():
 
 
 def _call_vision(image_bytes: bytes, prompt: str, max_tokens: int = 256) -> str:
-    """Send a screenshot + prompt to Gemini Vision and return the response."""
+    """Send a screenshot + prompt to Gemini Vision and return the response.
+    Retries once on failure with 3s backoff."""
     _init()
     _rate_limit()
 
@@ -49,32 +55,43 @@ def _call_vision(image_bytes: bytes, prompt: str, max_tokens: int = 256) -> str:
         "data": image_bytes,
     }
 
-    try:
-        response = model.generate_content(
-            [prompt, image_part],
-            generation_config={"max_output_tokens": max_tokens, "temperature": 0.7},
-        )
-        return response.text.strip()
-    except Exception as e:
-        log.error("Gemini API error: %s", e)
-        return ""
+    for attempt in range(2):
+        try:
+            response = model.generate_content(
+                [prompt, image_part],
+                generation_config={"max_output_tokens": max_tokens, "temperature": 0.7},
+            )
+            return response.text.strip()
+        except Exception as e:
+            if attempt == 0:
+                log.warning("Gemini vision call failed (retrying in 3s): %s", e)
+                time.sleep(3)
+            else:
+                log.error("Gemini vision call failed after retry: %s", e)
+    return ""
 
 
 def _call_text(prompt: str, max_tokens: int = 256) -> str:
-    """Text-only Gemini call (no screenshot needed)."""
+    """Text-only Gemini call (no screenshot needed).
+    Retries once on failure with 3s backoff."""
     _init()
     _rate_limit()
 
     model = genai.GenerativeModel(config.GEMINI["model"])
-    try:
-        response = model.generate_content(
-            prompt,
-            generation_config={"max_output_tokens": max_tokens, "temperature": 0.8},
-        )
-        return response.text.strip()
-    except Exception as e:
-        log.error("Gemini API error: %s", e)
-        return ""
+    for attempt in range(2):
+        try:
+            response = model.generate_content(
+                prompt,
+                generation_config={"max_output_tokens": max_tokens, "temperature": 0.8},
+            )
+            return response.text.strip()
+        except Exception as e:
+            if attempt == 0:
+                log.warning("Gemini text call failed (retrying in 3s): %s", e)
+                time.sleep(3)
+            else:
+                log.error("Gemini text call failed after retry: %s", e)
+    return ""
 
 
 # =============================================================================

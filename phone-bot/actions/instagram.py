@@ -10,6 +10,7 @@ import random
 import time
 from datetime import datetime
 
+from .. import config
 from ..core.adb import ADBController
 from ..core.human import HumanEngine
 from ..core import gemini
@@ -37,41 +38,51 @@ class InstagramBot:
             if INSTAGRAM_PKG in self.adb.get_current_app():
                 log.info("Instagram is open")
                 return True
-            time.sleep(1)
+            time.sleep(self.human.timing("t_poll_check"))
 
         log.warning("Instagram didn't open in time")
         return False
 
     def close_app(self):
         self.adb.close_instagram()
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def go_to_feed(self):
         """Navigate to the home feed."""
         x, y = self.adb.get_coord("instagram", "nav_home")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(1.5)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def go_to_reels(self):
         """Navigate to the Reels tab."""
         x, y = self.adb.get_coord("instagram", "nav_reels")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def go_to_explore(self):
         """Navigate to Explore/Search."""
         x, y = self.adb.get_coord("instagram", "nav_search")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def go_to_profile(self):
         x, y = self.adb.get_coord("instagram", "nav_profile")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+    def _check_health(self) -> bool:
+        """Verify Instagram is still in foreground. Recovers if lost."""
+        current = self.adb.get_current_app()
+        if current and INSTAGRAM_PKG not in current:
+            log.warning("Instagram lost focus (current: %s), recovering", current)
+            self.open_app()
+            self.go_to_reels()
+            return False
+        return True
 
     # --- Core Actions ------------------------------------------------------
 
@@ -110,7 +121,7 @@ class InstagramBot:
         x, y = self.adb.get_coord("instagram", "comment_icon")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def write_comment(self, text: str):
         # Tap comment input
@@ -126,7 +137,7 @@ class InstagramBot:
 
         # Post (Enter key is most reliable)
         self.adb.press_enter()
-        time.sleep(1.5)
+        time.sleep(self.human.timing("t_post_typing"))
         self.adb.press_back()
         log.debug("Posted comment on IG: %s", text[:30])
 
@@ -146,12 +157,9 @@ class InstagramBot:
         self.human.memory.session_comments += 1
 
     def follow_user(self):
-        """Follow creator -- tap avatar area (same as TikTok in Reels view)."""
-        # In Reels view, avatar with + is on the right side
-        x, y = self.adb.get_coord("instagram", "like_icon")
-        # Avatar is above like icon
-        avatar_y = y - int(self.adb.screen_h * 0.09)
-        x, y = self.human.jitter_tap(x, avatar_y)
+        """Follow creator -- tap avatar with + overlay in Reels view."""
+        x, y = self.adb.get_coord("instagram", "avatar_reel")
+        x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
         time.sleep(self.human.action_delay())
         log.debug("Followed user on IG")
@@ -161,12 +169,12 @@ class InstagramBot:
         x, y = self.adb.get_coord("instagram", "username_reel")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2.5)
+        time.sleep(self.human.timing("t_profile_settle"))
 
     async def rabbit_hole(self):
         """Visit a profile and browse their content."""
         self.visit_profile()
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         n = self.human.rabbit_hole_depth()
         log.info("IG rabbit hole: browsing %d posts", n)
@@ -174,7 +182,7 @@ class InstagramBot:
         # Tap first post in grid
         x, y = self.human.jitter_tap(self.adb.screen_w // 4, self.adb.screen_h // 2)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         for _ in range(n):
             watch = self.human.watch_duration(10)
@@ -185,25 +193,57 @@ class InstagramBot:
             await asyncio.sleep(self.human.action_delay())
 
         self.adb.press_back()
-        time.sleep(0.5)
+        time.sleep(self.human.timing("micro_pause"))
         self.adb.press_back()
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
 
     def search_keyword(self, keyword: str):
         """Search for a keyword on Instagram Explore."""
         self.go_to_explore()
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Tap search bar
         x, y = self.adb.get_coord("instagram", "search_bar")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         self.human.type_with_errors(self.adb, keyword)
 
         self.adb.press_enter()
         time.sleep(self.human.timing("t_browse_results"))
+
+    # --- Stories -----------------------------------------------------------
+
+    def watch_stories(self, count: int = 0):
+        """Watch a few stories from the Feed's story bar at the top.
+        Real users do this -- not watching stories at all is suspicious."""
+        if count <= 0:
+            count = random.randint(2, 5)
+
+        log.info("Watching %d stories", count)
+
+        # Tap 2nd or 3rd story circle (skip "Your Story" at position 1)
+        circle = random.choice(["story_row_second", "story_row_third"])
+        x, y = self.adb.get_coord("instagram", circle)
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        for i in range(count):
+            # Watch the story slide
+            time.sleep(self.human.timing("t_story_watch"))
+
+            # Tap right side to advance to next story
+            x, y = self.adb.get_coord("instagram", "story_tap_next")
+            x, y = self.human.jitter_tap(x, y)
+            self.adb.tap(x, y)
+            time.sleep(self.human.timing("micro_pause"))
+
+        # Exit stories
+        self.adb.press_back()
+        time.sleep(self.human.timing("t_nav_settle"))
+        log.debug("Watched %d stories", count)
 
     # --- Profile Setup -----------------------------------------------------
 
@@ -213,55 +253,57 @@ class InstagramBot:
 
         device_path = f"/sdcard/DCIM/profile_{random.randint(1000, 9999)}.jpg"
         self.adb.push_file(image_path, device_path)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_file_push"))
         self.adb.shell(
             f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE '
             f'-d "file://{device_path}"'
         )
-        time.sleep(2)
+        time.sleep(self.human.timing("t_file_push"))
 
-        # Navigate: Profile -> Edit profile
-        self.go_to_profile()
-        time.sleep(self.human.timing("t_nav_settle"))
+        try:
+            # Navigate: Profile -> Edit profile
+            self.go_to_profile()
+            time.sleep(self.human.timing("t_nav_settle"))
 
-        # Tap Edit profile
-        x, y = self.adb.get_coord("instagram", "edit_profile_btn")
-        x, y = self.human.jitter_tap(x, y)
-        self.adb.tap(x, y)
-        time.sleep(2)
-
-        # Tap avatar area
-        x, y = self.adb.get_coord("instagram", "avatar_edit")
-        x, y = self.human.jitter_tap(x, y)
-        self.adb.tap(x, y)
-        time.sleep(2)
-
-        # "New profile photo" / "Choose from library" -- use Vision
-        coords = self.adb.find_on_screen(
-            "New profile photo or Choose from library button"
-        )
-        if coords:
-            x, y = self.human.jitter_tap(*coords)
+            # Tap Edit profile
+            x, y = self.adb.get_coord("instagram", "edit_profile_btn")
+            x, y = self.human.jitter_tap(x, y)
             self.adb.tap(x, y)
-            time.sleep(2)
+            time.sleep(self.human.timing("t_nav_settle"))
 
-        # Select most recent photo
-        x, y = self.adb.get_coord("instagram", "gallery_first")
-        x, y = self.human.jitter_tap(x, y)
-        self.adb.tap(x, y)
-        time.sleep(2)
-
-        # Confirm -- Vision for Done/Next button
-        coords = self.adb.wait_for_screen("Done or Next button", timeout=5)
-        if coords:
-            x, y = self.human.jitter_tap(*coords)
+            # Tap avatar area
+            x, y = self.adb.get_coord("instagram", "avatar_edit")
+            x, y = self.human.jitter_tap(x, y)
             self.adb.tap(x, y)
-            time.sleep(3)
+            time.sleep(self.human.timing("t_nav_settle"))
 
-        self.adb.press_back()
-        time.sleep(1)
-        self.adb.shell(f'rm "{device_path}"')
-        log.info("Instagram profile pic set")
+            # "New profile photo" / "Choose from library" -- use Vision
+            coords = self.adb.find_on_screen(
+                "New profile photo or Choose from library button"
+            )
+            if coords:
+                x, y = self.human.jitter_tap(*coords)
+                self.adb.tap(x, y)
+                time.sleep(self.human.timing("t_nav_settle"))
+
+            # Select most recent photo
+            x, y = self.adb.get_coord("instagram", "gallery_first")
+            x, y = self.human.jitter_tap(x, y)
+            self.adb.tap(x, y)
+            time.sleep(self.human.timing("t_nav_settle"))
+
+            # Confirm -- Vision for Done/Next button
+            coords = self.adb.wait_for_screen("Done or Next button", timeout=5)
+            if coords:
+                x, y = self.human.jitter_tap(*coords)
+                self.adb.tap(x, y)
+                time.sleep(self.human.timing("t_confirm_save"))
+
+            self.adb.press_back()
+            time.sleep(self.human.timing("t_nav_settle"))
+            log.info("Instagram profile pic set")
+        finally:
+            self.adb.shell(f'rm "{device_path}"')
 
     def set_bio(self, bio_text: str):
         """Set bio during warmup."""
@@ -274,16 +316,16 @@ class InstagramBot:
         x, y = self.adb.get_coord("instagram", "edit_profile_btn")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Tap Bio field
         x, y = self.adb.get_coord("instagram", "bio_field")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         self.adb.shell("input keyevent --longpress KEYCODE_DEL")
-        time.sleep(0.3)
+        time.sleep(self.human.timing("t_key_settle"))
 
         self.human.type_with_errors(self.adb, bio_text)
         time.sleep(self.human.timing("t_post_typing"))
@@ -292,10 +334,10 @@ class InstagramBot:
         x, y = self.adb.get_coord("instagram", "save_btn")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_confirm_save"))
 
         self.adb.press_back()
-        time.sleep(1)
+        time.sleep(self.human.timing("t_nav_settle"))
         log.info("Instagram bio set: %s", bio_text[:40])
 
     # --- Video Posting (Reels) ---------------------------------------------
@@ -308,63 +350,71 @@ class InstagramBot:
         device_path = f"/sdcard/Download/{vid_name}"
         log.info("Pushing reel to device: %s", device_path)
         self.adb.push_file(video_path, device_path)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_file_push"))
 
         self.adb.shell(
             f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE '
             f'-d "file://{device_path}"'
         )
-        time.sleep(2)
+        time.sleep(self.human.timing("t_file_push"))
 
         # Tap + (create) button
         x, y = self.adb.get_coord("instagram", "nav_create")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(3)
+        time.sleep(self.human.timing("t_upload_load"))
 
         # Switch to REEL tab
         x, y = self.adb.get_coord("instagram", "reel_tab")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Select video from gallery
         x, y = self.adb.get_coord("instagram", "gallery_first")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Tap Next (top-right)
         x, y = self.adb.get_coord("instagram", "upload_next_btn")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Skip editing, tap Next again
         x, y = self.adb.get_coord("instagram", "upload_next_btn")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(2)
+        time.sleep(self.human.timing("t_nav_settle"))
 
         # Add caption
         if caption:
             x, y = self.adb.get_coord("instagram", "upload_caption")
             x, y = self.human.jitter_tap(x, y)
             self.adb.tap(x, y)
-            time.sleep(0.5)
+            time.sleep(self.human.timing("t_caption_input"))
 
             self.human.type_with_errors(self.adb, caption)
-            time.sleep(1)
+            time.sleep(self.human.timing("t_post_typing"))
 
         # Share (top-right)
         x, y = self.adb.get_coord("instagram", "upload_share_btn")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        log.info("Reel posted on Instagram!")
-        time.sleep(5)
+        time.sleep(self.human.timing("t_post_upload"))
 
-        self.adb.shell(f'rm "{device_path}"')
-        return True
+        # Verify post: check we're back on Instagram (not stuck in error dialog)
+        # Wait briefly and re-check to catch delayed error popups
+        time.sleep(self.human.timing("t_nav_settle"))
+        current = self.adb.get_current_app()
+        if current and INSTAGRAM_PKG in current:
+            log.info("Reel posted on Instagram!")
+            self.adb.shell(f'rm "{device_path}"')
+            return True
+        else:
+            log.warning("Post may have failed (current app: %s), keeping video on device", current)
+            return False
 
     # --- High-Level Session ------------------------------------------------
 
@@ -382,17 +432,43 @@ class InstagramBot:
         # 50/50 start on Feed vs Reels
         if random.random() < 0.5:
             self.go_to_reels()
+            current_view = "reels"
         else:
             self.go_to_feed()
-        time.sleep(2)
+            current_view = "feed"
+            # Maybe watch stories at session start (25%)
+            if random.random() < 0.25:
+                self.watch_stories()
+        time.sleep(self.human.timing("t_nav_settle"))
 
         start = time.time()
         total_seconds = duration_minutes * 60
         post_done = False
         post_after = pre_scroll_minutes * 60 if should_post else float('inf')
+        action_count = 0
+        category = "unknown"
 
         while (time.time() - start) < total_seconds:
             elapsed = time.time() - start
+
+            # Periodic health check (every ~15 actions)
+            action_count += 1
+            if action_count % 15 == 0:
+                self._check_health()
+
+            # Feed <-> Reels switch (15% chance every ~20 actions)
+            if action_count % 20 == 0 and random.random() < 0.15:
+                old_view = current_view
+                if current_view == "feed":
+                    self.go_to_reels()
+                    current_view = "reels"
+                else:
+                    self.go_to_feed()
+                    current_view = "feed"
+                    # Switched to Feed — maybe watch stories (30%)
+                    if random.random() < 0.30:
+                        self.watch_stories()
+                time.sleep(self.human.timing("t_nav_settle"))
 
             if should_post and not post_done and elapsed >= post_after:
                 if video_path:
@@ -400,7 +476,8 @@ class InstagramBot:
                     post_done = True
                     if success:
                         self.go_to_reels()
-                        time.sleep(2)
+                        current_view = "reels"
+                        time.sleep(self.human.timing("t_nav_settle"))
                     continue
 
             # Behavior #1: Zona morta (dead stare, no touch)
@@ -411,7 +488,7 @@ class InstagramBot:
                 continue
 
             if self.human.should_interrupt():
-                await self.human.do_interruption(self.adb)
+                await self.human.do_interruption(self.adb, INSTAGRAM_PKG)
                 continue
 
             # --- Pick next action based on session flow phase ---
@@ -420,6 +497,15 @@ class InstagramBot:
             if action == "scroll_fyp":
                 watch_time = self.human.watch_duration()
                 await asyncio.sleep(watch_time)
+
+                # Categorize with Gemini (15% for IG memory)
+                if random.random() < 0.15:
+                    screenshot = self.adb.screenshot_bytes()
+                    if screenshot:
+                        info = gemini.categorize_video(screenshot)
+                        category = info.get("category", "unknown")
+                else:
+                    category = "unknown"
 
                 # Behavior #8: Micro-scroll (incomplete swipe)
                 if self.human.should_micro_scroll():
@@ -443,7 +529,6 @@ class InstagramBot:
                 elif self.human.should_rewatch():
                     self.scroll_reels()
                     await asyncio.sleep(self.human.timing("t_rewatch"))
-                    # Scroll back up
                     sw = self.human.humanize_swipe(
                         self.adb.screen_w // 2, self.adb.screen_h // 4,
                         self.adb.screen_w // 2, self.adb.screen_h * 3 // 4,
@@ -455,15 +540,13 @@ class InstagramBot:
                 await asyncio.sleep(self.human.action_delay())
 
             elif action == "like":
-                if self.human.should_like():
+                if self.human.should_like(category):
                     self.like_post()
-                    self.human.memory.record_like("unknown")
-                    # Behavior #3: Post-like pause
+                    self.human.memory.record_like(category)
                     await asyncio.sleep(self.human.post_like_pause())
 
             elif action == "comment":
                 if self.human.should_comment():
-                    # Behavior #9: Double-open comments (open, close, reopen)
                     if self.human.should_double_open_comments():
                         self.open_comments()
                         await asyncio.sleep(self.human.timing("t_double_open_1"))
@@ -476,12 +559,14 @@ class InstagramBot:
                     self.follow_user()
 
             elif action == "search_explore":
-                keywords = niche_keywords or [
-                    "toxic relationship", "red flags", "situationship",
-                    "dating advice", "couples", "relationship tips",
-                ]
+                pool = niche_keywords or config.NICHE_KEYWORDS_POOL
+                keywords = random.sample(pool, min(6, len(pool)))
                 self.search_keyword(random.choice(keywords))
-                self.go_to_reels()
+                # Return to whatever view we were in
+                if current_view == "feed":
+                    self.go_to_feed()
+                else:
+                    self.go_to_reels()
 
             elif action == "profile_visit":
                 if self.human.should_rabbit_hole():

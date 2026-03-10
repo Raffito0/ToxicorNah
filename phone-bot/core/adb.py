@@ -8,9 +8,17 @@ Screenshots via `adb exec-out screencap -p` for Gemini Vision when needed.
 NO uiautomator, NO APKs, NO accessibility services.
 """
 import logging
+import math
+import random
 import re
 import subprocess
 import time
+
+
+def _hw_delay(median: float, sigma: float = 0.3, lo: float = 0.1, hi: float = 5.0) -> float:
+    """Hardware-level log-normal delay (no HumanEngine dependency)."""
+    val = random.lognormvariate(math.log(max(median, 0.01)), sigma)
+    return max(lo, min(hi, val))
 from io import BytesIO
 from typing import Optional
 
@@ -26,7 +34,7 @@ class ADBController:
     """Controls a single Android device via raw ADB commands.
 
     Detection-safe: uses ONLY input events, am start, and screencap.
-    No uiautomator, no monkey, no force-stop (except emergency recovery).
+    No uiautomator, no monkey, no force-stop.
     """
 
     def __init__(self, serial: str, phone_config: dict):
@@ -75,26 +83,40 @@ class ADBController:
         return "device" in output
 
     def get_current_app(self) -> str:
-        """Return the package name of the currently focused app."""
-        output = self.shell("dumpsys activity activities | grep mResumedActivity")
-        match = re.search(r"u0\s+([^\s/]+)", output)
+        """Return the package name of the currently focused app.
+        Uses dumpsys window (lighter than dumpsys activity)."""
+        output = self.shell("dumpsys window | grep mCurrentFocus")
+        match = re.search(r"u0\s+([^\s/}]+)", output)
         return match.group(1) if match else ""
 
     def is_screen_on(self) -> bool:
-        output = self.shell("dumpsys power | grep 'Display Power'")
-        return "ON" in output
+        """Check if screen is on via sysfs backlight (zero process footprint)."""
+        for path in [
+            "/sys/class/leds/lcd-backlight/brightness",
+            "/sys/class/backlight/panel0/brightness",
+            "/sys/class/backlight/panel0-backlight/brightness",
+        ]:
+            output = self.shell(f"cat {path}").strip()
+            if output.isdigit():
+                return int(output) > 0
+        # Fallback for devices with non-standard paths
+        output = self.shell("cat /sys/power/wake_lock").strip()
+        return bool(output)
 
     def wake_screen(self):
         if not self.is_screen_on():
             self.shell("input keyevent KEYCODE_WAKEUP")
-            time.sleep(0.5)
+            time.sleep(_hw_delay(0.5, 0.3, 0.2, 1.5))
 
     def unlock_screen(self):
-        """Swipe up to unlock (no PIN assumed)."""
+        """Swipe up to unlock (no PIN assumed). Drift added for human realism."""
         self.wake_screen()
         cy = self.screen_h * 3 // 4
-        self.shell(f"input swipe {self.screen_w // 2} {cy} {self.screen_w // 2} {self.screen_h // 4} 300")
-        time.sleep(0.5)
+        cx = self.screen_w // 2 + random.randint(-15, 15)
+        drift = random.randint(-20, 20)
+        dur = random.randint(250, 400)
+        self.shell(f"input swipe {cx} {cy} {cx + drift} {self.screen_h // 4 + random.randint(-20, 20)} {dur}")
+        time.sleep(_hw_delay(0.5, 0.3, 0.2, 1.5))
 
     # --- Input actions (tap, swipe, type) ----------------------------------
 
@@ -105,26 +127,47 @@ class ADBController:
         self.shell(f"input tap {x} {y}")
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300):
-        """Swipe between two points."""
-        self.shell(f"input swipe {x1} {y1} {x2} {y2} {duration_ms}")
+        """Swipe with slight curve (2 segments with lateral drift for realism)."""
+        mid_t = random.uniform(0.35, 0.65)
+        drift = random.randint(-15, 15)
+        mx = int(x1 + (x2 - x1) * mid_t + drift)
+        my = int(y1 + (y2 - y1) * mid_t)
+        d1 = max(50, int(duration_ms * mid_t))
+        d2 = max(50, duration_ms - d1)
+        self.shell(f"input swipe {x1} {y1} {mx} {my} {d1}")
+        self.shell(f"input swipe {mx} {my} {x2} {y2} {d2}")
 
     def long_press(self, x: int, y: int, duration_ms: int = 800):
         """Long press at coordinates."""
         self.shell(f"input swipe {x} {y} {x} {y} {duration_ms}")
 
     def type_text(self, text: str):
-        """Type text character by character.
-        Handles special characters by escaping them for ADB."""
-        for char in text:
-            if char == " ":
+        """Type text in small batches (2-4 chars) to reduce per-char process pattern.
+        Special chars (space, newline) sent as keyevents."""
+        i = 0
+        while i < len(text):
+            c = text[i]
+            if c == " ":
                 self.shell("input keyevent KEYCODE_SPACE")
-            elif char == "\n":
+                i += 1
+            elif c == "\n":
                 self.shell("input keyevent KEYCODE_ENTER")
-            elif char == "@":
-                self.shell("input text '@'")
+                i += 1
             else:
-                escaped = char.replace("'", "'\\''")
-                self.shell(f"input text '{escaped}'")
+                # Batch 2-4 consecutive non-special chars
+                end = min(i + random.randint(2, 4), len(text))
+                batch = []
+                for j in range(i, end):
+                    if text[j] in (" ", "\n"):
+                        break
+                    batch.append(text[j])
+                if batch:
+                    chunk = "".join(batch)
+                    escaped = chunk.replace("'", "'\\''")
+                    self.shell(f"input text '{escaped}'")
+                    i += len(batch)
+                else:
+                    i += 1
 
     def press_back(self):
         self.shell("input keyevent KEYCODE_BACK")
@@ -143,17 +186,10 @@ class ADBController:
         if activity:
             self.shell(f"am start -n {package}/{activity}")
         else:
-            # Resolve launcher activity dynamically (Android 8+)
-            output = self.shell(
-                f"cmd package resolve-activity --brief "
-                f"-c android.intent.category.LAUNCHER {package}"
+            raise ValueError(
+                f"Unknown package {package}. "
+                f"Add it to config.APP_ACTIVITIES to avoid detectable cmd package calls."
             )
-            component = output.strip().split('\n')[-1].strip()
-            if '/' in component:
-                self.shell(f"am start -n {component}")
-            else:
-                log.warning("Could not resolve activity for %s", package)
-                self.shell(f"am start {package}")
 
     def close_app(self, package: str):
         """Close an app naturally (Home -> Recent Apps -> swipe away).
@@ -165,24 +201,23 @@ class ADBController:
         Mimics how a real user closes an app."""
         # Step 1: Go home (app goes to background)
         self.press_home()
-        time.sleep(0.8)
+        time.sleep(_hw_delay(0.8, 0.3, 0.3, 2))
 
         # Step 2: Open Recent Apps
         self.shell("input keyevent KEYCODE_APP_SWITCH")
-        time.sleep(1.0)
+        time.sleep(_hw_delay(1.0, 0.3, 0.4, 3))
 
-        # Step 3: Swipe top card up to dismiss
-        cx = self.screen_w // 2
-        self.swipe(cx, self.screen_h // 2, cx, 100, 250)
-        time.sleep(0.5)
+        # Step 3: Swipe top card up to dismiss (with drift for realism)
+        cx = self.screen_w // 2 + random.randint(-10, 10)
+        cy_start = self.screen_h // 2 + random.randint(-20, 20)
+        drift = random.randint(-30, 30)
+        dur = random.randint(200, 350)
+        self.shell(f"input swipe {cx} {cy_start} {cx + drift} {random.randint(50, 150)} {dur}")
+        time.sleep(_hw_delay(0.5, 0.3, 0.2, 1.5))
 
         # Step 4: Return to home
         self.press_home()
-        time.sleep(0.5)
-
-    def _force_stop(self, package: str):
-        """Emergency force-stop (ONLY for error recovery, not normal use)."""
-        self.shell(f"am force-stop {package}")
+        time.sleep(_hw_delay(0.5, 0.3, 0.2, 1.5))
 
     def open_tiktok(self):
         self.open_app("com.zhiliaoapp.musically")
@@ -271,8 +306,8 @@ class ADBController:
     # --- File transfer -----------------------------------------------------
 
     def push_file(self, local_path: str, device_path: str):
-        """Push a file from PC to device."""
-        self._run(["push", local_path, device_path])
+        """Push a file from PC to device (120s timeout for large videos)."""
+        self._run(["push", local_path, device_path], timeout=120)
 
     def pull_file(self, device_path: str, local_path: str):
         """Pull a file from device to PC."""
@@ -281,20 +316,20 @@ class ADBController:
     # --- WiFi management (for proxy queue) ---------------------------------
 
     def get_wifi_state(self) -> bool:
-        """Check if WiFi is enabled."""
-        output = self.shell("dumpsys wifi | grep 'Wi-Fi is'")
-        return "enabled" in output.lower()
+        """Check if WiFi is enabled (via settings, not dumpsys)."""
+        output = self.shell("settings get global wifi_on").strip()
+        return output == "1"
 
     def enable_wifi(self):
-        self.shell("svc wifi enable")
+        self.shell("settings put global wifi_on 1")
 
     def disable_wifi(self):
-        self.shell("svc wifi disable")
+        self.shell("settings put global wifi_on 0")
 
     def connect_wifi(self, ssid: str, password: str = ""):
         """Connect to a WiFi network (Android 11+)."""
         self.enable_wifi()
-        time.sleep(1)
+        time.sleep(_hw_delay(1.0, 0.3, 0.5, 3))
         if password:
             self.shell(f'cmd wifi connect-network "{ssid}" wpa2 "{password}"')
         else:
@@ -305,7 +340,12 @@ class ADBController:
         self.disable_wifi()
 
     def get_wifi_ssid(self) -> str:
-        """Get currently connected WiFi SSID."""
-        output = self.shell("dumpsys wifi | grep 'mWifiInfo'")
-        match = re.search(r'SSID: "?([^",]+)"?', output)
-        return match.group(1) if match else ""
+        """Get currently connected WiFi SSID via iw (lower profile than dumpsys)."""
+        output = self.shell("iw wlan0 link")
+        match = re.search(r"SSID:\s+(.+)", output)
+        if match:
+            return match.group(1).strip()
+        # Fallback: wpa_cli (available on most Android)
+        output = self.shell("wpa_cli -i wlan0 status | grep ^ssid=")
+        match = re.search(r"ssid=(.+)", output)
+        return match.group(1).strip() if match else ""

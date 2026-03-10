@@ -1,7 +1,7 @@
 """Coordinate maps for TikTok and Instagram UI elements.
 
 Replaces uiautomator dump -- zero detectable process on the device.
-All coordinates are lambda functions: (screen_w, screen_h) -> (x, y).
+All coordinates are proportional: (screen_w, screen_h) -> (x, y).
 Resolution-independent across phone models (720p, 1080p, etc.).
 
 For complex/dynamic flows (upload posting, camera trick), use Gemini Vision.
@@ -13,52 +13,52 @@ For complex/dynamic flows (upload posting, camera trick), use Gemini Vision.
 
 TIKTOK = {
     # --- Bottom Navigation Bar (5 tabs, evenly spaced) ---
-    "nav_home":         lambda w, h: (int(w * 0.10), h - 60),
-    "nav_friends":      lambda w, h: (int(w * 0.30), h - 60),
-    "nav_create":       lambda w, h: (int(w * 0.50), h - 60),
-    "nav_inbox":        lambda w, h: (int(w * 0.70), h - 60),
-    "nav_profile":      lambda w, h: (int(w * 0.90), h - 60),
+    "nav_home":         lambda w, h: (int(w * 0.10), int(h * 0.973)),
+    "nav_friends":      lambda w, h: (int(w * 0.30), int(h * 0.973)),
+    "nav_create":       lambda w, h: (int(w * 0.50), int(h * 0.973)),
+    "nav_inbox":        lambda w, h: (int(w * 0.70), int(h * 0.973)),
+    "nav_profile":      lambda w, h: (int(w * 0.90), int(h * 0.973)),
 
     # --- Right-Side Engagement Panel (FYP/video view) ---
-    "avatar":           lambda w, h: (w - 50, int(h * 0.35)),
-    "like_icon":        lambda w, h: (w - 50, int(h * 0.44)),
-    "comment_icon":     lambda w, h: (w - 50, int(h * 0.53)),
-    "share_icon":       lambda w, h: (w - 50, int(h * 0.62)),
-    "bookmark_icon":    lambda w, h: (w - 50, int(h * 0.70)),
+    "avatar":           lambda w, h: (int(w * 0.954), int(h * 0.35)),
+    "like_icon":        lambda w, h: (int(w * 0.954), int(h * 0.44)),
+    "comment_icon":     lambda w, h: (int(w * 0.954), int(h * 0.53)),
+    "share_icon":       lambda w, h: (int(w * 0.954), int(h * 0.62)),
+    "bookmark_icon":    lambda w, h: (int(w * 0.954), int(h * 0.70)),
 
     # --- Content Area ---
     "video_center":     lambda w, h: (int(w * 0.45), int(h * 0.45)),
-    "username":         lambda w, h: (150, h - 200),
-    "caption_area":     lambda w, h: (int(w * 0.35), h - 150),
+    "username":         lambda w, h: (int(w * 0.139), int(h * 0.910)),
+    "caption_area":     lambda w, h: (int(w * 0.35), int(h * 0.932)),
 
     # --- Top Bar (on FYP) ---
-    "search_icon":      lambda w, h: (w - 60, 80),
+    "search_icon":      lambda w, h: (int(w * 0.944), int(h * 0.036)),
 
     # --- Search Page ---
-    "search_bar":       lambda w, h: (int(w * 0.50), 100),
+    "search_bar":       lambda w, h: (int(w * 0.50), int(h * 0.045)),
 
     # --- Comments Sheet ---
-    "comment_input":    lambda w, h: (int(w * 0.50), h - 80),
+    "comment_input":    lambda w, h: (int(w * 0.50), int(h * 0.964)),
 
     # --- Create / Upload Flow ---
-    "upload_tab":       lambda w, h: (w - 80, h - 60),
-    "camera_tab":       lambda w, h: (int(w * 0.35), h - 60),
+    "upload_tab":       lambda w, h: (int(w * 0.926), int(h * 0.973)),
+    "camera_tab":       lambda w, h: (int(w * 0.35), int(h * 0.973)),
     "gallery_first":    lambda w, h: (int(w * 0.25), int(h * 0.33)),
-    "record_btn":       lambda w, h: (int(w * 0.50), h - 120),
-    "upload_next_btn":  lambda w, h: (w - 60, 50),
-    "upload_post_btn":  lambda w, h: (w - 60, 50),
+    "record_btn":       lambda w, h: (int(w * 0.50), int(h * 0.946)),
+    "upload_next_btn":  lambda w, h: (int(w * 0.944), int(h * 0.023)),
+    "upload_post_btn":  lambda w, h: (int(w * 0.944), int(h * 0.023)),
     "upload_caption":   lambda w, h: (int(w * 0.50), int(h * 0.15)),
 
     # --- Edit Screen (after recording/selecting) ---
-    "edit_overlay_btn": lambda w, h: (int(w * 0.50), h - 80),
-    "edit_next_btn":    lambda w, h: (w - 60, 50),
+    "edit_overlay_btn": lambda w, h: (int(w * 0.50), int(h * 0.964)),
+    "edit_next_btn":    lambda w, h: (int(w * 0.944), int(h * 0.023)),
 
     # --- Profile / Edit Profile ---
     "edit_profile_btn": lambda w, h: (int(w * 0.50), int(h * 0.22)),
-    "settings_icon":    lambda w, h: (w - 50, 50),
-    "avatar_edit":      lambda w, h: (int(w * 0.50), 250),
+    "settings_icon":    lambda w, h: (int(w * 0.954), int(h * 0.023)),
+    "avatar_edit":      lambda w, h: (int(w * 0.50), int(h * 0.113)),
     "bio_field":        lambda w, h: (int(w * 0.50), int(h * 0.45)),
-    "save_btn":         lambda w, h: (w - 60, 50),
+    "save_btn":         lambda w, h: (int(w * 0.944), int(h * 0.023)),
 }
 
 
@@ -68,39 +68,45 @@ TIKTOK = {
 
 INSTAGRAM = {
     # --- Bottom Navigation Bar (5 tabs) ---
-    "nav_home":         lambda w, h: (int(w * 0.10), h - 60),
-    "nav_search":       lambda w, h: (int(w * 0.30), h - 60),
-    "nav_reels":        lambda w, h: (int(w * 0.50), h - 60),
-    "nav_create":       lambda w, h: (int(w * 0.70), h - 60),
-    "nav_profile":      lambda w, h: (int(w * 0.90), h - 60),
+    "nav_home":         lambda w, h: (int(w * 0.10), int(h * 0.973)),
+    "nav_search":       lambda w, h: (int(w * 0.30), int(h * 0.973)),
+    "nav_reels":        lambda w, h: (int(w * 0.50), int(h * 0.973)),
+    "nav_create":       lambda w, h: (int(w * 0.70), int(h * 0.973)),
+    "nav_profile":      lambda w, h: (int(w * 0.90), int(h * 0.973)),
 
     # --- Right-Side Panel (Reels view, similar to TikTok) ---
-    "like_icon":        lambda w, h: (w - 50, int(h * 0.44)),
-    "comment_icon":     lambda w, h: (w - 50, int(h * 0.54)),
-    "share_icon":       lambda w, h: (w - 50, int(h * 0.62)),
+    "like_icon":        lambda w, h: (int(w * 0.954), int(h * 0.44)),
+    "comment_icon":     lambda w, h: (int(w * 0.954), int(h * 0.54)),
+    "share_icon":       lambda w, h: (int(w * 0.954), int(h * 0.62)),
+    "avatar_reel":      lambda w, h: (int(w * 0.954), int(h * 0.35)),
 
     # --- Content Area ---
     "video_center":     lambda w, h: (int(w * 0.45), int(h * 0.45)),
-    "username_reel":    lambda w, h: (150, h - 180),
+    "username_reel":    lambda w, h: (int(w * 0.139), int(h * 0.919)),
 
     # --- Search / Explore ---
-    "search_bar":       lambda w, h: (int(w * 0.50), 130),
+    "search_bar":       lambda w, h: (int(w * 0.50), int(h * 0.056)),
 
     # --- Comments ---
-    "comment_input":    lambda w, h: (int(w * 0.50), h - 80),
+    "comment_input":    lambda w, h: (int(w * 0.50), int(h * 0.964)),
 
     # --- Create / Reel Upload Flow ---
     "gallery_first":    lambda w, h: (int(w * 0.25), int(h * 0.33)),
-    "reel_tab":         lambda w, h: (int(w * 0.50), h - 60),
-    "upload_next_btn":  lambda w, h: (w - 60, 50),
-    "upload_share_btn": lambda w, h: (w - 60, 50),
+    "reel_tab":         lambda w, h: (int(w * 0.50), int(h * 0.973)),
+    "upload_next_btn":  lambda w, h: (int(w * 0.944), int(h * 0.023)),
+    "upload_share_btn": lambda w, h: (int(w * 0.944), int(h * 0.023)),
     "upload_caption":   lambda w, h: (int(w * 0.50), int(h * 0.15)),
 
     # --- Profile / Edit Profile ---
     "edit_profile_btn": lambda w, h: (int(w * 0.50), int(h * 0.22)),
-    "avatar_edit":      lambda w, h: (int(w * 0.50), 250),
+    "avatar_edit":      lambda w, h: (int(w * 0.50), int(h * 0.113)),
     "bio_field":        lambda w, h: (int(w * 0.50), int(h * 0.40)),
-    "save_btn":         lambda w, h: (w - 60, 50),
+    "save_btn":         lambda w, h: (int(w * 0.944), int(h * 0.023)),
+
+    # --- Stories (visible at top of Feed view) ---
+    "story_row_second": lambda w, h: (int(w * 0.30), int(h * 0.075)),
+    "story_row_third":  lambda w, h: (int(w * 0.43), int(h * 0.075)),
+    "story_tap_next":   lambda w, h: (int(w * 0.80), int(h * 0.50)),
 }
 
 
