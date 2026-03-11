@@ -562,20 +562,162 @@ class HumanEngine:
 
     # --- Layer 1: Swipe Humanization ---------------------------------------
 
+    def _init_swipe_habit(self):
+        """Generate per-session swipe identity (muscle memory baseline).
+
+        Thumb physics: you hold the phone in one hand. The thumb pivots from
+        the base of your palm (bottom-right for right-handed). This means:
+        - The thumb rests on the RIGHT side of the screen, not the center
+        - When swiping UP, the thumb curves INWARD (right → center)
+        - The grip offset is significant: 30-50px from center on a 720px screen
+        - All of this is consistent for the entire session
+        """
+        # Handedness: +1 = right-handed (75%), -1 = left-handed (25%)
+        self._handedness = random.choice([1, 1, 1, -1])
+
+        self._swipe_habit = {
+            # Where thumb naturally starts Y (% offset from caller base)
+            "start_y_bias": random.gauss(0, 0.04),
+            # Personal speed: 0.85 = slightly fast, 1.15 = slightly slow
+            "speed_mult": random.uniform(0.85, 1.20),
+            # How far from center the thumb rests (px). Right-handed = positive.
+            # On a 720px screen, 30-50px offset = thumb at ~55-57% of screen width
+            "grip_offset": self._handedness * random.uniform(25, 50),
+            # How much the thumb curves inward during upswipe (px)
+            # Bigger = more arc. Real thumbs curve 15-30px inward over a full swipe
+            "arc_inward": random.uniform(12, 28),
+            # Precision: tight=0.7, sloppy=1.3
+            "noise_level": random.uniform(0.7, 1.3),
+        }
+        # Grip X: where the thumb sits right now (varies slowly with grip shifts)
+        self._grip_x_offset = int(
+            self._swipe_habit["grip_offset"] + random.gauss(0, 5)
+        )
+        self._swipes_until_grip_shift = random.randint(12, 30)
+        self._swipe_count = 0
+        # Previous swipe duration for smooth transitions
+        self._prev_duration = None
+        # Previous start Y for position continuity
+        self._prev_start_y_offset = None
+
+    def _update_grip(self):
+        """Shift grip position every N swipes (adjusting hand on phone).
+        Shift is small and stays on the same side — you don't switch hands."""
+        self._swipe_count += 1
+        self._swipes_until_grip_shift -= 1
+        if self._swipes_until_grip_shift <= 0:
+            old = self._grip_x_offset
+            # Small shift: stays near the natural grip offset
+            self._grip_x_offset = int(
+                old * 0.5 + self._swipe_habit["grip_offset"] * 0.5
+                + random.gauss(0, 6)
+            )
+            self._swipes_until_grip_shift = random.randint(12, 30)
+
     def humanize_swipe(self, x1: int, y1: int, x2: int, y2: int) -> dict:
-        """Add human-like variance to a swipe gesture (log-normal duration)."""
-        duration = int(_lognormal(
-            H["swipe_duration_median"], H["swipe_duration_sigma"],
-            minimum=120, maximum=800
-        ))
-        jitter = H["swipe_y_jitter"]
-        drift = random.randint(*H["swipe_x_drift_range"])
+        """Generate a swipe indistinguishable from a real TikTok/IG user.
+
+        How a real person scrolls TikTok:
+        - You hold the phone the same way for dozens of swipes
+        - Your thumb does the same gesture from muscle memory, over and over
+        - Each swipe is ALMOST the same as the last one (±10-15% variation)
+        - Speed changes happen GRADUALLY over several swipes, not suddenly
+        - Position varies subtly (±25-35px) — your thumb doesn't land on exact pixels
+        - Your hand arc always curves the same direction (your hand shape)
+        - Over time you get slightly slower/lazier (fatigue)
+        - Once in a while (~3%) a swipe is a bit off — NOT wildly different,
+          just slightly faster or slower than your usual range
+
+        The BIG human variation in TikTok comes from WATCH DURATION and
+        engagement timing — NOT from wildly different swipe gestures.
+        """
+        if not hasattr(self, '_swipe_habit'):
+            self._init_swipe_habit()
+
+        habit = self._swipe_habit
+        dy = y2 - y1
+        distance = max(abs(dy), 50)
+        noise = habit["noise_level"]
+
+        # --- Start Y: muscle memory + subtle noise + position continuity ---
+        fatigue_drop = self.fatigue.fatigue_level * distance * 0.05
+        raw_start_y = (
+            distance * habit["start_y_bias"]
+            + fatigue_drop
+            + random.gauss(0, distance * 0.025 * noise)
+        )
+        # Smooth position continuity: blend with previous position
+        if self._prev_start_y_offset is not None:
+            raw_start_y = self._prev_start_y_offset * 0.3 + raw_start_y * 0.7
+        start_y_offset = int(raw_start_y)
+        self._prev_start_y_offset = raw_start_y
+
+        # --- End Y: subtle noise, adjusted after duration ---
+        end_y_base_noise = random.gauss(0, distance * 0.02 * noise)
+
+        # --- X position: thumb surface area + inward arc ---
+        # The thumb is NOT a point — it's a pad. Where it touches the screen
+        # varies: sometimes more with the tip (closer to center), sometimes
+        # more with the side (closer to edge). ±10-15px variation per swipe.
+        self._update_grip()
+        thumb_contact = int(random.gauss(0, 11 * noise))
+        start_x = self._grip_x_offset + thumb_contact
+
+        # Arc: thumb curves INWARD during upswipe (toward center),
+        # but the AMOUNT varies a lot — sometimes almost straight,
+        # sometimes a noticeable curve. Gaussian around the baseline
+        # with wide sigma so some swipes are nearly straight (3px)
+        # and some curve a lot (25px+)
+        swiping_up = dy < 0
+        arc_amount = max(0, random.gauss(habit["arc_inward"], habit["arc_inward"] * 0.4))
+        if swiping_up:
+            arc_direction = -self._handedness  # toward center
+        else:
+            arc_direction = self._handedness   # back toward hand
+        end_x = self._grip_x_offset + int(arc_direction * arc_amount)
+
+        # --- Duration: personal baseline + subtle gaussian variation ---
+        baseline = H["swipe_duration_median"] * habit["speed_mult"]
+        baseline /= max(self.mood.energy, 0.6)
+        baseline *= (1 + self.fatigue.fatigue_level * 0.15)
+        if self.fatigue.minutes_active < H["speed_ramp_minutes"]:
+            baseline *= 1.10
+
+        # Per-swipe noise: gaussian ±12% around baseline
+        raw_duration = baseline * random.gauss(1.0, 0.12)
+
+        # Rare slightly-off swipe (3%): ±30-40% from baseline (NOT from prev)
+        # This is like a slightly lazy swipe or a slightly quick one — subtle
+        if random.random() < 0.03:
+            if random.random() < 0.5:
+                raw_duration = baseline * random.uniform(0.65, 0.75)
+            else:
+                raw_duration = baseline * random.uniform(1.30, 1.40)
+
+        # --- Smooth transition: limit change vs previous to ±25% ---
+        # A real thumb can't go from 400ms to 150ms in one gesture.
+        # Changes are GRADUAL — you speed up or slow down over several swipes.
+        if self._prev_duration is not None:
+            ratio = raw_duration / self._prev_duration
+            if ratio > 1.25:
+                raw_duration = self._prev_duration * (1 + 0.25 * random.uniform(0.5, 1.0))
+            elif ratio < 0.75:
+                raw_duration = self._prev_duration * (1 - 0.25 * random.uniform(0.5, 1.0))
+
+        duration = int(max(180, min(600, raw_duration)))
+        self._prev_duration = duration
+
+        # --- Speed-distance correlation (subtle) ---
+        speed_ratio = baseline / max(duration, 150)
+        distance_adjust = int((speed_ratio - 1.0) * distance * 0.08)
+        end_y_offset = int(end_y_base_noise) + distance_adjust
+        end_y_offset += int(self.fatigue.fatigue_level * distance * 0.03)
 
         return {
-            "x1": x1 + random.randint(-jitter // 2, jitter // 2),
-            "y1": y1 + random.randint(-jitter, jitter),
-            "x2": x2 + drift,
-            "y2": y2 + random.randint(-jitter, jitter),
+            "x1": x1 + start_x,
+            "y1": y1 + start_y_offset,
+            "x2": x2 + end_x,
+            "y2": y2 + end_y_offset,
             "duration": duration,
         }
 
@@ -603,15 +745,61 @@ class HumanEngine:
 
         return max(0.2, delay)
 
-    def typing_delay(self) -> float:
-        """Delay between keystrokes (log-normal)."""
-        base = _lognormal(
-            H["typing_median"], H["typing_sigma"],
-            minimum=0.04, maximum=3.0
-        )
-        # Occasional longer pause (thinking)
-        if random.random() < 0.08:
-            base += _timing("t_thinking")
+    def typing_delay(self, rhythm: str = "confident",
+                     pos_ratio: float = 0.5,
+                     after_space: bool = False,
+                     is_corner_key: bool = False) -> float:
+        """Delay between keystrokes -- varies by rhythm, position, and state.
+
+        Rhythm profiles (chosen per-text, not per-char):
+          confident -- knows what to say, fast and steady
+          composing -- thinking while typing, irregular pauses
+          rush      -- wants to send fast, accelerates
+          careful   -- important text, slow and deliberate
+        """
+        base_median = H["typing_median"]  # 0.15s reference
+        sigma = H["typing_sigma"]  # 0.4
+
+        # --- Rhythm modifies the base speed ---
+        if rhythm == "confident":
+            speed = 0.85  # slightly faster than default
+            sigma *= 0.8  # more consistent
+        elif rhythm == "composing":
+            speed = 1.1   # slightly slower
+            sigma *= 1.3  # more irregular
+        elif rhythm == "rush":
+            # Accelerates toward end
+            speed = 1.0 - pos_ratio * 0.35  # 1.0 at start -> 0.65 at end
+            sigma *= 0.7  # tight timing when rushing
+        elif rhythm == "careful":
+            speed = 1.3   # noticeably slower
+            sigma *= 0.6  # very consistent
+        else:
+            speed = 1.0
+
+        # --- State modifiers ---
+        # Fatigue: tired = slower + more variable
+        speed *= (1 + self.fatigue.fatigue_level * 0.4)
+        sigma *= (1 + self.fatigue.fatigue_level * 0.3)
+        # Energy: high energy = faster
+        speed *= max(0.7, 1.3 - self.mood.energy * 0.4)
+
+        # --- Positional modifiers (NOT always applied) ---
+        # Corner keys (q, z, p, x, etc.) = slightly slower ~60% of the time
+        if is_corner_key and random.random() < 0.6:
+            speed *= random.uniform(1.08, 1.25)
+
+        # After space = sometimes a word-gap pause
+        if after_space:
+            # In composing mode, longer pauses between words
+            if rhythm == "composing" and random.random() < 0.55:
+                speed *= random.uniform(1.4, 2.5)
+            elif rhythm == "rush" and random.random() < 0.15:
+                speed *= random.uniform(1.1, 1.3)
+            elif random.random() < 0.35:
+                speed *= random.uniform(1.15, 1.6)
+
+        base = _lognormal(base_median * speed, sigma, minimum=0.04, maximum=3.0)
         return base
 
     def reading_delay(self) -> float:
@@ -797,41 +985,161 @@ class HumanEngine:
         """How long the zona morta lasts."""
         return _timing("zona_morta_duration")
 
+    def _pick_typing_rhythm(self) -> str:
+        """Choose a typing rhythm for this text based on current state.
+        NOT fixed -- different texts get different rhythms."""
+        energy = self.mood.energy
+        fatigue = self.fatigue.fatigue_level
+        patience = self.mood.patience
+        boredom = self.boredom.level
+
+        # Weighted probabilities based on state
+        w_confident = 1.0 + energy * 1.5 - fatigue * 0.5
+        w_composing = 1.0 - energy * 0.4 + fatigue * 0.8 + patience * 0.3
+        w_rush = 0.5 + boredom * 2.0 + (1 - patience) * 1.0 - fatigue * 0.3
+        w_careful = 0.3 + patience * 1.2 - boredom * 0.8 - fatigue * 0.4
+
+        # Clamp to positive
+        weights = [max(0.05, w) for w in [w_confident, w_composing, w_rush, w_careful]]
+        return random.choices(
+            ["confident", "composing", "rush", "careful"],
+            weights=weights, k=1
+        )[0]
+
     def type_with_errors(self, adb, text: str):
         """Behavior #2: Type with occasional errors (backspace + retype).
-        ~10% typo rate makes typing pattern look human."""
-        for char in text:
-            if char.isalpha() and random.random() < H["typo_rate"]:
-                # Type wrong char
+
+        Each text gets a random typing RHYTHM (confident/composing/rush/careful)
+        chosen based on energy, fatigue, boredom, patience.
+
+        Typo rate depends on fatigue, energy, text length, and position --
+        but position effects are NOT a fixed curve (rhythm changes where
+        slowdowns/speedups happen).
+
+        Thinking pauses: in composing mode, 2-3 random positions get a long
+        pause. In confident mode, almost never. In careful mode, at regular
+        intervals.
+        """
+        rhythm = self._pick_typing_rhythm()
+        corner_keys = set("qzpxmkw")  # phone keyboard corners/edges
+
+        base_rate = H["typo_rate"]  # 0.10 reference
+        # Fatigue: tired fingers make more mistakes
+        rate = base_rate * (1 + self.fatigue.fatigue_level * 0.8)
+        # Energy: high energy = typing faster = more slips
+        rate *= (0.7 + self.mood.energy * 0.3)
+        # Longer text = slightly more careless overall
+        if len(text) > 15:
+            rate *= 1.15
+        elif len(text) < 6:
+            rate *= 0.75  # short words = more careful
+
+        # Rhythm affects typo rate too
+        if rhythm == "rush":
+            rate *= 1.25   # rushing = more mistakes
+        elif rhythm == "careful":
+            rate *= 0.6    # being careful = fewer mistakes
+        elif rhythm == "composing":
+            rate *= 1.05   # distracted thinking = slightly more
+
+        text_len = max(len(text), 1)
+
+        # Pre-generate thinking pause positions for composing rhythm
+        # (random positions, not evenly spaced)
+        thinking_positions = set()
+        if rhythm == "composing":
+            n_pauses = random.randint(1, max(1, text_len // 8))
+            thinking_positions = set(random.sample(
+                range(2, max(3, text_len - 1)), min(n_pauses, max(1, text_len - 3))
+            ))
+        elif rhythm == "careful" and text_len > 10:
+            # Regular-ish intervals but with jitter
+            interval = random.randint(5, 9)
+            pos = interval
+            while pos < text_len - 2:
+                thinking_positions.add(pos + random.randint(-1, 1))
+                pos += interval
+
+        prev_was_space = False
+        for i, char in enumerate(text):
+            pos_ratio = i / text_len
+
+            # Position-based typo modifier -- varies by rhythm
+            if rhythm == "confident":
+                # Confident: steady rate, slight warmup in first 2 chars
+                char_rate = rate * (0.6 if i < 2 else 1.0)
+            elif rhythm == "rush":
+                # Rush: more typos toward end (going faster)
+                char_rate = rate * (0.9 + pos_ratio * 0.4)
+            elif rhythm == "composing":
+                # Composing: irregular -- random bursts of fast/slow
+                char_rate = rate * random.uniform(0.7, 1.4)
+            elif rhythm == "careful":
+                # Careful: low and steady throughout
+                char_rate = rate
+            else:
+                char_rate = rate
+
+            # Make the typo (if applicable)
+            if char.isalpha() and random.random() < char_rate:
                 adb.type_text(_nearby_char(char))
-                time.sleep(self.typing_delay())
-                # Notice mistake, pause
+                time.sleep(self.typing_delay(rhythm, pos_ratio))
                 time.sleep(_timing("t_typo_notice"))
-                # Backspace
                 adb.shell("input keyevent KEYCODE_DEL")
                 time.sleep(_timing("t_typo_backspace"))
+
             adb.type_text(char)
-            time.sleep(self.typing_delay())
+
+            # Thinking pause at pre-generated positions
+            if i in thinking_positions:
+                time.sleep(_timing("t_thinking"))
+
+            # Keystroke delay with full context
+            time.sleep(self.typing_delay(
+                rhythm=rhythm,
+                pos_ratio=pos_ratio,
+                after_space=prev_was_space,
+                is_corner_key=char.lower() in corner_keys,
+            ))
+            prev_was_space = (char == " ")
 
     def should_peek_scroll(self) -> bool:
-        """Behavior #4: Scroll halfway and come back (8-12%)."""
-        return random.random() < H["peek_scroll_prob"]
+        """Behavior #4: Scroll halfway and come back.
+        Patient users peek more. Fatigue reduces it (too tired to bother)."""
+        prob = H["peek_scroll_prob"] * self.mood.patience
+        prob *= max(0.3, 1.0 - self.fatigue.fatigue_level * 0.5)
+        return random.random() < prob
 
     def should_rewatch(self) -> bool:
-        """Behavior #5: Scroll forward then back to re-watch previous video (5%)."""
-        return random.random() < H["rewatch_prob"]
+        """Behavior #5: Scroll forward then back to re-watch previous video.
+        Patient + not tired = more likely to go back. Bored = less likely."""
+        prob = H["rewatch_prob"] * self.mood.patience
+        prob *= max(0.2, 1.0 - self.fatigue.fatigue_level * 0.6)
+        prob *= max(0.3, 1.0 - self.boredom.level * 0.5)
+        return random.random() < prob
 
     def should_micro_scroll(self) -> bool:
-        """Behavior #8: Incomplete swipe that doesn't change video (2-3%)."""
-        return random.random() < H["micro_scroll_prob"]
+        """Behavior #8: Incomplete swipe that doesn't change video.
+        Tired = clumsier swipes. Also more likely when distracted (bored)."""
+        prob = H["micro_scroll_prob"]
+        prob *= (1 + self.fatigue.fatigue_level * 0.6)
+        prob *= (1 + self.boredom.level * 0.3)
+        return random.random() < prob
 
     def should_double_open_comments(self) -> bool:
-        """Behavior #9: Open comments, close, re-open (3%)."""
-        return random.random() < H["double_comment_prob"]
+        """Behavior #9: Open comments, close, re-open.
+        Social mood = more curious about comments. Fatigue = fumble more."""
+        prob = H["double_comment_prob"] * self.mood.social
+        prob *= (1 + self.fatigue.fatigue_level * 0.4)
+        return random.random() < prob
 
     def should_end_in_background(self) -> bool:
-        """Behavior #11: End session by going to background (fell asleep, 5%)."""
-        return random.random() < H["bg_end_prob"]
+        """Behavior #11: End session by going to background (fell asleep).
+        Much more likely when very tired. Low energy = doze off."""
+        prob = H["bg_end_prob"]
+        prob *= (1 + self.fatigue.fatigue_level * 2.5)
+        prob *= max(0.3, 1.5 - self.mood.energy)
+        return random.random() < prob
 
     def bg_end_duration(self) -> float:
         """How long to stay in background before closing."""

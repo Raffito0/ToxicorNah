@@ -197,21 +197,187 @@ class InstagramBot:
         self.adb.press_back()
         time.sleep(self.human.timing("t_nav_settle"))
 
-    def search_keyword(self, keyword: str):
-        """Search for a keyword on Instagram Explore."""
+    def _type_search_query(self, keyword: str):
+        """Navigate to Explore, type keyword, hit enter."""
         self.go_to_explore()
         time.sleep(self.human.timing("t_nav_settle"))
 
-        # Tap search bar
         x, y = self.adb.get_coord("instagram", "search_bar")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
         time.sleep(self.human.timing("t_nav_settle"))
 
         self.human.type_with_errors(self.adb, keyword)
-
         self.adb.press_enter()
         time.sleep(self.human.timing("t_browse_results"))
+
+    def _clear_and_retype(self, keyword: str):
+        """Clear search bar and type a new keyword (staying in Explore)."""
+        x, y = self.adb.get_coord("instagram", "search_bar")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_search_clear"))
+
+        cx, cy = self.adb.get_coord("instagram", "search_clear")
+        cx, cy = self.human.jitter_tap(cx, cy)
+        self.adb.tap(cx, cy)
+        time.sleep(self.human.timing("t_search_clear"))
+
+        time.sleep(self.human.timing("t_thinking"))
+
+        self.human.type_with_errors(self.adb, keyword)
+        self.adb.press_enter()
+        time.sleep(self.human.timing("t_browse_results"))
+
+    async def search_explore_session(self, niche_keywords: list = None):
+        """Human-like search mini-session on Instagram Explore.
+        Every decision driven by personality + boredom + mood.
+
+        IG Explore has a 3-column grid. Tapping opens a reel/post fullscreen,
+        back returns to grid. Same logic as TikTok but with 6 grid slots.
+        """
+        pool = niche_keywords or config.NICHE_KEYWORDS_POOL
+        session_keywords = random.sample(pool, min(6, len(pool)))
+        keyword = session_keywords.pop(0)
+
+        log.info("IG Search explore: '%s'", keyword)
+        self._type_search_query(keyword)
+
+        curiosity = self.human.personality.explore_curiosity
+        boredom = self.human.boredom.level
+        energy = self.human.mood.energy
+        patience = self.human.mood.patience
+        videos_watched = 0
+        found_interesting = False
+
+        # How many results to browse (IG grid = 3 cols, more visible at once)
+        browse_drive = curiosity * 5 + boredom * 3 + energy * 0.5
+        n_results = max(2, int(random.gauss(browse_drive, browse_drive * 0.3)))
+        n_results = min(n_results, 9)  # IG shows more per scroll
+
+        grid_keys = [f"search_grid_{i}" for i in range(1, 7)]  # 6 visible
+
+        for i in range(n_results):
+            if i < len(grid_keys):
+                gx, gy = self.adb.get_coord("instagram", grid_keys[i])
+            else:
+                sw = self.human.humanize_swipe(
+                    self.adb.screen_w // 2, self.adb.screen_h * 3 // 4,
+                    self.adb.screen_w // 2, self.adb.screen_h // 3,
+                )
+                self.adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"],
+                               sw["duration"])
+                await asyncio.sleep(self.human.timing("t_search_scroll_pause"))
+                gx, gy = self.adb.get_coord("instagram",
+                                             grid_keys[i % len(grid_keys)])
+
+            gx, gy = self.human.jitter_tap(gx, gy)
+            self.adb.tap(gx, gy)
+
+            watch = self.human.watch_duration()
+            await asyncio.sleep(watch)
+            videos_watched += 1
+
+            # Like -- same formula as TikTok, energy + exposure + boredom
+            like_drive = (energy * 0.15
+                          + videos_watched * 0.04
+                          + boredom * 0.06)
+            if random.random() < like_drive:
+                self.like_post()
+                self.human.on_engage()
+                found_interesting = True
+                await asyncio.sleep(self.human.post_like_pause())
+
+            # Visit profile -- curiosity + exposure + boredom
+            profile_drive = (curiosity * 1.5
+                             + videos_watched * 0.03
+                             + boredom * 0.08
+                             - (0.12 if found_interesting else 0))
+            if random.random() < max(0, profile_drive):
+                log.debug("IG Search: visiting creator profile")
+                self.visit_profile()
+
+                depth = max(1, int(random.gauss(2 + curiosity * 8, 1)))
+                depth = min(depth, 5)
+
+                # Tap first post in their grid
+                px, py = self.human.jitter_tap(
+                    self.adb.screen_w // 4, self.adb.screen_h // 2)
+                self.adb.tap(px, py)
+                time.sleep(self.human.timing("t_nav_settle"))
+
+                for v in range(depth):
+                    await asyncio.sleep(self.human.watch_duration(10))
+                    if self.human.should_like():
+                        self.like_post()
+                        self.human.on_engage()
+                        found_interesting = True
+                    if v < depth - 1:
+                        self.scroll_feed()
+                        await asyncio.sleep(self.human.action_delay())
+
+                # Back to search results (post -> profile -> results)
+                self.adb.press_back()
+                time.sleep(self.human.timing("micro_pause"))
+                self.adb.press_back()
+                time.sleep(self.human.timing("t_nav_settle"))
+            else:
+                self.adb.press_back()
+                await asyncio.sleep(self.human.timing("t_search_scroll_pause"))
+
+            self.human.boredom.on_scroll(True if found_interesting else None)
+
+        # --- Second keyword? ---
+        if session_keywords:
+            second_drive = (curiosity * 2.5
+                            + self.human.boredom.level * 0.4
+                            + patience * 0.05
+                            - (0.25 if found_interesting else 0))
+            if random.random() < max(0.05, min(0.6, second_drive)):
+                keyword2 = session_keywords.pop(0)
+                log.info("IG Search explore: second keyword '%s'", keyword2)
+                self._clear_and_retype(keyword2)
+
+                n2 = max(1, int(n_results * random.uniform(0.3, 0.7)))
+                for j in range(n2):
+                    if j < len(grid_keys):
+                        gx, gy = self.adb.get_coord("instagram",
+                                                     grid_keys[j])
+                    else:
+                        sw = self.human.humanize_swipe(
+                            self.adb.screen_w // 2,
+                            self.adb.screen_h * 3 // 4,
+                            self.adb.screen_w // 2,
+                            self.adb.screen_h // 3,
+                        )
+                        self.adb.swipe(sw["x1"], sw["y1"], sw["x2"],
+                                       sw["y2"], sw["duration"])
+                        await asyncio.sleep(
+                            self.human.timing("t_search_scroll_pause"))
+                        gx, gy = self.adb.get_coord(
+                            "instagram", grid_keys[j % len(grid_keys)])
+
+                    gx, gy = self.human.jitter_tap(gx, gy)
+                    self.adb.tap(gx, gy)
+                    await asyncio.sleep(self.human.watch_duration())
+
+                    like2 = energy * 0.12 + videos_watched * 0.02
+                    if random.random() < like2:
+                        self.like_post()
+                        self.human.on_engage()
+
+                    self.adb.press_back()
+                    await asyncio.sleep(
+                        self.human.timing("t_search_scroll_pause"))
+                    videos_watched += 1
+
+        self.human._session_stats["searches_done"] = \
+            self.human._session_stats.get("searches_done", 0) + 1
+        log.info("IG Search explore done: watched %d videos", videos_watched)
+
+    def search_keyword(self, keyword: str):
+        """Legacy wrapper -- simple search without full explore session."""
+        self._type_search_query(keyword)
 
     # --- Stories -----------------------------------------------------------
 
@@ -580,11 +746,7 @@ class InstagramBot:
                     self.human.on_engage()
 
             elif action == "search_explore":
-                pool = niche_keywords or config.NICHE_KEYWORDS_POOL
-                keywords = random.sample(pool, min(6, len(pool)))
-                self.search_keyword(random.choice(keywords))
-                self.human._session_stats["searches_done"] = \
-                    self.human._session_stats.get("searches_done", 0) + 1
+                await self.search_explore_session(niche_keywords)
                 # Return to whatever view we were in
                 if current_view == "feed":
                     self.go_to_feed()

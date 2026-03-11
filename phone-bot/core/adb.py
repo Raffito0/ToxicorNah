@@ -127,15 +127,10 @@ class ADBController:
         self.shell(f"input tap {x} {y}")
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300):
-        """Swipe with slight curve (2 segments with lateral drift for realism)."""
-        mid_t = random.uniform(0.35, 0.65)
-        drift = random.randint(-15, 15)
-        mx = int(x1 + (x2 - x1) * mid_t + drift)
-        my = int(y1 + (y2 - y1) * mid_t)
-        d1 = max(50, int(duration_ms * mid_t))
-        d2 = max(50, duration_ms - d1)
-        self.shell(f"input swipe {x1} {y1} {mx} {my} {d1}")
-        self.shell(f"input swipe {mx} {my} {x2} {y2} {d2}")
+        """Single swipe with slight lateral drift for realism.
+        One command = one gesture = no double-skip on any screen size."""
+        drift = random.randint(-10, 10)
+        self.shell(f"input swipe {x1} {y1} {x2 + drift} {y2} {duration_ms}")
 
     def long_press(self, x: int, y: int, duration_ms: int = 800):
         """Long press at coordinates."""

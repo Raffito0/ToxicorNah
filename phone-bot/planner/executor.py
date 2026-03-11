@@ -197,11 +197,12 @@ class SessionExecutor:
         log.info("=== Session: %s | Phone %d | %s | %s | %d min ===",
                  account, phone_id, platform, session_type, total_duration)
 
-        # Connect phone to proxy
-        if session.get("proxy_rotation_before", False) or self.proxy.active_phone_id != phone_id:
-            if not self.proxy.switch_to_phone(phone_id):
-                log.error("Failed to connect Phone %d to proxy, skipping session", phone_id)
-                return
+        # Connect phone to proxy (skip in TEST_MODE — use local WiFi)
+        if not config.TEST_MODE:
+            if session.get("proxy_rotation_before", False) or self.proxy.active_phone_id != phone_id:
+                if not self.proxy.switch_to_phone(phone_id):
+                    log.error("Failed to connect Phone %d to proxy, skipping session", phone_id)
+                    return
 
         adb = self.controllers[phone_id]
         human = self._get_human(account)
@@ -365,11 +366,12 @@ class SessionExecutor:
         log.info("=== WARMUP Day %d: %s | Phone %d | %s | %d min ===",
                  day, account, phone_id, platform, duration)
 
-        # Connect proxy
-        if self.proxy.active_phone_id != phone_id:
-            if not self.proxy.switch_to_phone(phone_id):
-                log.error("Failed to connect Phone %d, skipping warmup session", phone_id)
-                return
+        # Connect proxy (skip in TEST_MODE)
+        if not config.TEST_MODE:
+            if self.proxy.active_phone_id != phone_id:
+                if not self.proxy.switch_to_phone(phone_id):
+                    log.error("Failed to connect Phone %d, skipping warmup session", phone_id)
+                    return
 
         adb = self.controllers[phone_id]
         human = self._get_human(account)
@@ -930,7 +932,8 @@ class SessionExecutor:
                     log.info("Waiting %.1f min gap before next session", gap)
                     await asyncio.sleep(gap * 60)
 
-        self.proxy.disconnect_all()
+        if not config.TEST_MODE:
+            self.proxy.disconnect_all()
         log.info("All sessions for today completed!")
 
     async def _wait_until(self, time_str: str):

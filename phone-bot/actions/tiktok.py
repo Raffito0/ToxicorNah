@@ -215,23 +215,202 @@ class TikTokBot:
         self.adb.press_back()
         time.sleep(self.human.timing("t_nav_settle"))
 
-    def search_hashtag(self, hashtag: str):
-        """Search for a hashtag and browse results."""
+    def _type_search_query(self, keyword: str):
+        """Navigate to search, type keyword, hit enter."""
         self.go_to_search()
         time.sleep(self.human.timing("t_nav_settle"))
 
-        # Tap search bar
         x, y = self.adb.get_coord("tiktok", "search_bar")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
         time.sleep(self.human.timing("t_nav_settle"))
 
-        # Type hashtag with human-like errors
-        self.human.type_with_errors(self.adb, hashtag)
-
+        self.human.type_with_errors(self.adb, keyword)
         time.sleep(self.human.timing("micro_pause"))
         self.adb.press_enter()
         time.sleep(self.human.timing("t_browse_results"))
+
+    def _clear_and_retype(self, keyword: str):
+        """Clear search bar and type a new keyword (staying in search page)."""
+        # Tap search bar to focus it
+        x, y = self.adb.get_coord("tiktok", "search_bar")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_search_clear"))
+
+        # Tap X to clear
+        cx, cy = self.adb.get_coord("tiktok", "search_clear")
+        cx, cy = self.human.jitter_tap(cx, cy)
+        self.adb.tap(cx, cy)
+        time.sleep(self.human.timing("t_search_clear"))
+
+        # Think about what to search next
+        time.sleep(self.human.timing("t_thinking"))
+
+        self.human.type_with_errors(self.adb, keyword)
+        time.sleep(self.human.timing("micro_pause"))
+        self.adb.press_enter()
+        time.sleep(self.human.timing("t_browse_results"))
+
+    async def search_explore_session(self, niche_keywords: list = None):
+        """Human-like search mini-session. Every decision driven by
+        personality + boredom + mood -- zero fixed probabilities.
+
+        Flow: search keyword -> scroll results watching videos -> maybe tap
+        a profile -> maybe search another keyword -> leave.
+        """
+        pool = niche_keywords or config.NICHE_KEYWORDS_POOL
+        session_keywords = random.sample(pool, min(6, len(pool)))
+        keyword = session_keywords.pop(0)
+
+        log.info("Search explore: '%s'", keyword)
+        self._type_search_query(keyword)
+
+        # --- Live state that drives every decision ---
+        curiosity = self.human.personality.explore_curiosity  # 0.03..0.20
+        boredom = self.human.boredom.level                    # 0.0..1.0
+        energy = self.human.mood.energy                       # 0.5..1.5
+        patience = self.human.mood.patience                   # 0.4..1.8
+        videos_watched = 0
+        found_interesting = False
+
+        # How many results to browse -- driven by curiosity + boredom + energy
+        # Curious/bored/energetic = browse more. Low all three = quick glance
+        browse_drive = curiosity * 5 + boredom * 3 + energy * 0.5
+        n_results = max(2, int(random.gauss(browse_drive, browse_drive * 0.3)))
+        n_results = min(n_results, 8)
+
+        grid_keys = [f"search_grid_{i}" for i in range(1, 5)]
+
+        for i in range(n_results):
+            # Tap video in grid (first 4 visible, then scroll for more)
+            if i < len(grid_keys):
+                gx, gy = self.adb.get_coord("tiktok", grid_keys[i])
+            else:
+                sw = self.human.humanize_swipe(
+                    self.adb.screen_w // 2, self.adb.screen_h * 3 // 4,
+                    self.adb.screen_w // 2, self.adb.screen_h // 3,
+                )
+                self.adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"],
+                               sw["duration"])
+                await asyncio.sleep(self.human.timing("t_search_scroll_pause"))
+                gx, gy = self.adb.get_coord("tiktok",
+                                             grid_keys[i % len(grid_keys)])
+
+            gx, gy = self.human.jitter_tap(gx, gy)
+            self.adb.tap(gx, gy)
+
+            # Watch the video
+            watch = self.human.watch_duration()
+            await asyncio.sleep(watch)
+            videos_watched += 1
+
+            # Like? -- energy drives base impulse, watching more = more likely
+            # to find something worth liking, boredom = more impulsive
+            like_drive = (energy * 0.15
+                          + videos_watched * 0.04
+                          + boredom * 0.06)
+            if random.random() < like_drive:
+                self.like_video()
+                self.human.on_engage()
+                found_interesting = True
+                await asyncio.sleep(self.human.post_like_pause())
+
+            # Visit creator profile? -- curiosity accumulates with exposure,
+            # boredom pushes exploration, already-engaged = less need
+            profile_drive = (curiosity * 1.5
+                             + videos_watched * 0.03
+                             + boredom * 0.08
+                             - (0.12 if found_interesting else 0))
+            if random.random() < max(0, profile_drive):
+                log.debug("Search: visiting creator profile")
+                self.visit_creator_profile()
+
+                # Mini rabbit hole (shorter than FYP rabbit hole)
+                depth = max(1, int(random.gauss(2 + curiosity * 8, 1)))
+                depth = min(depth, 5)
+                for v in range(depth):
+                    if v == 0:
+                        grid_y = self.adb.screen_h // 2
+                        px, py = self.human.jitter_tap(
+                            self.adb.screen_w // 4, grid_y)
+                        self.adb.tap(px, py)
+                        time.sleep(self.human.timing("t_nav_settle"))
+                    else:
+                        self.scroll_fyp()
+                    await asyncio.sleep(self.human.watch_duration(15))
+
+                    if self.human.should_like():
+                        self.like_video()
+                        self.human.on_engage()
+                        found_interesting = True
+
+                # Back to search results (2 backs: video -> profile -> results)
+                self.adb.press_back()
+                time.sleep(self.human.timing("micro_pause"))
+                self.adb.press_back()
+                time.sleep(self.human.timing("t_nav_settle"))
+            else:
+                # Back from video to results grid
+                self.adb.press_back()
+                await asyncio.sleep(self.human.timing("t_search_scroll_pause"))
+
+            # Slight boredom relief from active browsing
+            self.human.boredom.on_scroll(True if found_interesting else None)
+
+        # --- Second keyword? ---
+        # High boredom + curiosity + didn't find interesting = try another
+        # Found good stuff = less likely to switch (you're satisfied)
+        if session_keywords:
+            second_drive = (curiosity * 2.5
+                            + self.human.boredom.level * 0.4
+                            + patience * 0.05
+                            - (0.25 if found_interesting else 0))
+            if random.random() < max(0.05, min(0.6, second_drive)):
+                keyword2 = session_keywords.pop(0)
+                log.info("Search explore: second keyword '%s'", keyword2)
+                self._clear_and_retype(keyword2)
+
+                # Shorter second browse (attention fading)
+                n2 = max(1, int(n_results * random.uniform(0.3, 0.7)))
+                for j in range(n2):
+                    if j < len(grid_keys):
+                        gx, gy = self.adb.get_coord("tiktok", grid_keys[j])
+                    else:
+                        sw = self.human.humanize_swipe(
+                            self.adb.screen_w // 2,
+                            self.adb.screen_h * 3 // 4,
+                            self.adb.screen_w // 2,
+                            self.adb.screen_h // 3,
+                        )
+                        self.adb.swipe(sw["x1"], sw["y1"], sw["x2"],
+                                       sw["y2"], sw["duration"])
+                        await asyncio.sleep(
+                            self.human.timing("t_search_scroll_pause"))
+                        gx, gy = self.adb.get_coord(
+                            "tiktok", grid_keys[j % len(grid_keys)])
+
+                    gx, gy = self.human.jitter_tap(gx, gy)
+                    self.adb.tap(gx, gy)
+                    await asyncio.sleep(self.human.watch_duration())
+
+                    like2 = energy * 0.12 + videos_watched * 0.02
+                    if random.random() < like2:
+                        self.like_video()
+                        self.human.on_engage()
+
+                    self.adb.press_back()
+                    await asyncio.sleep(
+                        self.human.timing("t_search_scroll_pause"))
+                    videos_watched += 1
+
+        self.human._session_stats["searches_done"] = \
+            self.human._session_stats.get("searches_done", 0) + 1
+        log.info("Search explore done: watched %d videos", videos_watched)
+
+    def search_hashtag(self, hashtag: str):
+        """Legacy wrapper -- simple search without full explore session."""
+        self._type_search_query(hashtag)
 
     # --- Profile Setup -----------------------------------------------------
 
@@ -546,12 +725,7 @@ class TikTokBot:
                     self.human.on_engage()
 
             elif action == "search_explore":
-                pool = niche_keywords or config.NICHE_KEYWORDS_POOL
-                keywords = random.sample(pool, min(6, len(pool)))
-                self.search_hashtag(random.choice(keywords))
-                self.human._session_stats["searches_done"] = \
-                    self.human._session_stats.get("searches_done", 0) + 1
-                await asyncio.sleep(self.human.timing("t_search_browse"))
+                await self.search_explore_session(niche_keywords)
                 self.go_to_fyp()
 
             elif action == "profile_visit":

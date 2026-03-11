@@ -488,16 +488,65 @@ Piano completo in `C:\Users\trmlsn\.claude\plans\wondrous-watching-stallman.md` 
 **FASE 2 — Human Behavior Engine: IN CORSO**
 
 Completato:
-- **Log-normal timing**: TUTTE le chiamate `random.uniform(X, Y)` per timing convertite in distribuzioni log-normal via `_timing()` / `human.timing()`. 27 parametri timing in `config.py` come tuple `(mediana, sigma, min, max)`. Distribuzioni pesanti = la maggior parte dei valori vicino alla mediana, pause lunghe occasionali = umano
+- **Log-normal timing**: TUTTE le chiamate `random.uniform(X, Y)` per timing convertite in distribuzioni log-normal via `_timing()` / `human.timing()`. 29 parametri timing in `config.py` come tuple `(mediana, sigma, min, max)`. Distribuzioni pesanti = la maggior parte dei valori vicino alla mediana, pause lunghe occasionali = umano
 - **14 micro-comportamenti**: tutti implementati (zona morta, errori digitazione, pausa post-like, peek scroll, re-watch, primo video lungo, speed ramp, micro-scroll, doppia apertura commenti, tempo reazione caricamento, background a fine sessione, like burst, azione correlata post-like, fasi sessione)
-- **Session Flow Phases**: 5 fasi (Arrival → Warmup → Peak → Fatigue → Exit) in `config.SESSION_PHASES`, gestite da `SessionPhaseTracker` in `human.py`
+- **Session Flow Phases**: 5 fasi (Arrival -> Warmup -> Peak -> Fatigue -> Exit) in `config.SESSION_PHASES`, gestite da `SessionPhaseTracker` in `human.py`
 - **`verify_email` rimosso**: l'utente verifica email manualmente, rimosso da warmup.py (6 punti) + executor.py (2 punti)
 
 COMPLETATO (2026-03-10, sessione serale):
 - **Per-account Personality System**: 7 tratti comportamentali unici per account (reels_preference, story_affinity, double_tap_habit, explore_curiosity, boredom_rate, boredom_relief, switch_threshold). Persistiti in JSON, evolvono ~1.5% per sessione basandosi sul comportamento reale. Dopo ~60 sessioni (~1 mese) ogni account ha abitudini visibilmente diverse
-- **BoredomTracker**: Float 0.0-1.0 che sale con scroll passivo (contenuto fuori nicchia = +30% noia), scende con engagement (like/comment/follow). Quando supera switch_threshold della personalita' → trigger cambio Feed/Reels. Influenza anche pick_action() (piu' noia = piu' search/explore)
+- **BoredomTracker**: Float 0.0-1.0 che sale con scroll passivo (contenuto fuori nicchia = +30% noia), scende con engagement (like/comment/follow). Quando supera switch_threshold della personalita' -> trigger cambio Feed/Reels. Influenza anche pick_action() (piu' noia = piu' search/explore)
 - **Niche keywords per sessione**: executor.py ora campiona 6-10 keyword random dal pool di 21 per ogni sessione, cosi' ogni account cerca cose diverse
 - **11 magic numbers eliminati**: tutte le probabilita' hardcoded in browse_session() (double_tap 0.6/0.5, stories 0.25/0.30, feed/reels switch ogni 20 azioni, health check ogni 15, ecc.) sostituite con tratti personalita' o decisioni boredom-driven
+
+COMPLETATO (2026-03-11, sessione odierna):
+
+**Swipe humanization rewrite** — `humanize_swipe()` riscritto da zero con fisica del pollice:
+- **Swipe habit per sessione**: handedness (75% destro), grip_offset (25-50px da centro), arc_inward (12-28px), speed_mult, noise_level — persistenti per tutta la sessione come "memoria muscolare"
+- **Grip shift**: ogni 12-30 swipe il grip si sposta leggermente (aggiusti la mano)
+- **Continuita' temporale**: ogni swipe ha durata simile al precedente (blend 60% vecchio + 40% nuovo), NON randomizzato da zero ogni volta
+- **Continuita' posizione**: start Y blendato col precedente (30% vecchio + 70% nuovo)
+- **Arco del pollice**: il pollice curva VERSO IL CENTRO durante lo swipe su (verso destra se mancino, verso sinistra se destro). L'ampiezza varia per-swipe con gaussiana
+- **Fatica progressiva**: ogni swipe diventa ~5% piu' lento e ~5% piu' basso con la fatica
+- **Outlier rari (~3%)**: a volte uno swipe e' un po' off (non wildamente diverso, solo +-15-25% dalla media)
+- **Singolo comando ADB**: `adb.swipe()` ora usa UN SOLO `input swipe` (era due segmenti che causavano double-skip su Motorola 720x1600)
+
+**Search explore session** — `search_explore_session()` (NUOVO) per TikTok e Instagram:
+- Prima: `search_hashtag()` cercava 1 keyword, aspettava 7s ferma, tornava alla FYP. Zero interazione con risultati
+- Ora: cerca una keyword -> scrolla griglia risultati -> apre video -> guarda -> decide se likare/visitare profilo/cercare altra keyword -> esce
+- TUTTE le decisioni guidate da stato (curiosity, boredom, energy, patience, videos_watched, found_interesting) — ZERO probabilita' fisse
+- Formule chiave:
+  - `browse_drive = curiosity*5 + boredom*3 + energy*0.5` (quanti risultati sfogliare)
+  - `like_drive = energy*0.15 + videos_watched*0.04 + boredom*0.06` (se likare)
+  - `profile_drive = curiosity*1.5 + videos_watched*0.03 + boredom*0.08` (se visitare profilo)
+  - `second_drive = curiosity*2.5 + boredom*0.4 + patience*0.05` (se cercare seconda keyword)
+- Coordinate griglia: TikTok 4 slot (2 colonne), Instagram 6 slot (3 colonne) — in `coords.py`
+- Metodi helper: `_type_search_query()`, `_clear_and_retype()` (cancella barra search e riscrive)
+- `browse_session()` aggiornato: usa `search_explore_session()` poi torna alla FYP
+
+**Dynamic probabilities** — TUTTE le probabilita' dei micro-comportamenti ora dipendono dallo stato:
+- `should_peek_scroll()`: patience * (1 - fatigue*0.5) — paziente e riposato = piu' peek
+- `should_rewatch()`: patience * (1 - fatigue*0.6) * (1 - boredom*0.5) — paziente + non annoiato + riposato
+- `should_micro_scroll()`: (1 + fatigue*0.6) * (1 + boredom*0.3) — stanco/annoiato = piu' scroll imprecisi
+- `should_double_open_comments()`: social * (1 + fatigue*0.4) — sociale + stanco = fumble
+- `should_end_in_background()`: (1 + fatigue*2.5) * (1.5 - energy) — stanchissimo = si addormenta col telefono
+
+**Typing rhythm system** — `typing_delay()` e `type_with_errors()` riscritti:
+- Ogni testo riceve un RITMO casuale scelto in base allo stato:
+  - **confident**: veloce e costante, pochi errori. Favorito con alta energia + bassa stanchezza
+  - **composing**: irregolare, pause random sparse. Favorito con bassa energia + alta stanchezza
+  - **rush**: accelera verso la fine, +25% errori. Favorito con alta noia + poca pazienza
+  - **careful**: lento e regolare, -40% errori. Favorito con alta pazienza
+- Scelta ritmo con pesi dinamici: `w_confident = 1+energy*1.5-fatigue*0.5`, ecc.
+- Delay per-carattere influenzato da: ritmo, posizione nel testo, se dopo spazio, se lettera agli angoli tastiera (q,z,p,x,m,k,w)
+- Pause "thinking" a posizioni PRE-GENERATE random (non 8% fisso ovunque): composing = 1-N random, careful = intervalli semi-regolari con jitter, confident/rush = quasi mai
+- Due messaggi scritti di fila possono avere ritmi diversi
+
+**Test mode** — `TEST_MODE` flag in config.py:
+- `PHONEBOT_TEST=1` env var (default on)
+- Skip proxy (usa WiFi locale), timezone Europe/Rome, verbose logging
+- `--scroll-only --phone 4` in main.py: scroll passivo 5 min senza engagement per test
+- executor.py: skip proxy connect/disconnect in test mode
 
 GIA' FIXATI (verificato 2026-03-10):
 - **`close_app_natural()`**: USA GIA' `_hw_delay()` log-normal, NON delay fissi
@@ -508,6 +557,7 @@ GIA' FIXATI (verificato 2026-03-10):
 DA FARE (phone-bot):
 - **~100+ `time.sleep(N)` con numeri letterali**: il buco piu grande rimasto. Sparsi in tiktok.py (~40), instagram.py (~40), adb.py (~5), proxy.py (~3). DEVONO essere convertiti in `time.sleep(self.human.timing("param_name"))`
 - **Proxy credentials in chiaro**: config.py ha username/password — spostare in env vars
+- **Scan for remaining fixed probabilities**: cercare `random.random() < 0.` nel codebase per eventuali probabilita' fisse rimaste
 
 **FASE 3 — Proxy: NESSUNA MODIFICA NECESSARIA** (proxy mobile SOCKS5 USA = IP residenziale)
 
@@ -527,18 +577,20 @@ DA FARE (phone-bot):
 ### File principali phone-bot:
 ```
 phone-bot/
-  config.py           — Config centrale (27 timing params log-normal, phones, accounts, proxy)
+  config.py           — Config centrale (29 timing params log-normal, phones, accounts, proxy, TEST_MODE)
+  main.py             — Entry point (--test, --warmup, --scroll-only --phone N)
+  TEST-LOG.md         — Log di tutti i cambiamenti con spiegazioni dettagliate
   core/
-    adb.py            — Comandi ADB (tap, swipe, open/close app, screenshot)
-    coords.py         — Mappe coordinate UI per TikTok + Instagram (normalizzate a screen w/h)
-    human.py          — Engine comportamento umano (timing log-normal, 14 micro-behaviors, 5 fasi sessione)
+    adb.py            — Comandi ADB (tap, single-swipe, open/close app, screenshot)
+    coords.py         — Mappe coordinate UI per TikTok + Instagram (+ search grid + search_clear)
+    human.py          — Engine comportamento umano (timing log-normal, 14 micro-behaviors, 5 fasi sessione, swipe habit, typing rhythm)
     gemini.py         — Gemini Vision API per analisi UI dinamica
     proxy.py          — Rotazione proxy SOCKS5
   actions/
-    tiktok.py         — Automazione TikTok (browse, like, comment, follow, post)
-    instagram.py      — Automazione Instagram (stessa struttura di tiktok.py)
+    tiktok.py         — Automazione TikTok (browse, search_explore_session, like, comment, follow, post)
+    instagram.py      — Automazione Instagram (stessa struttura + search_explore_session)
   planner/
-    executor.py       — Esecuzione sessioni (warmup + regolari)
+    executor.py       — Esecuzione sessioni (warmup + regolari, skip proxy in TEST_MODE)
     warmup.py         — Generazione piano warmup (5-8 giorni rampa graduale)
 ```
 
@@ -684,8 +736,11 @@ Poi in Xcode: seleziona iPhone 17 Pro → Play (triangolo)
 - Xcode → Archive → Distribute → App Store Connect
 
 ### PRIORITA' 2: Phone-Bot (rimasto da fare)
-- Convertire ~100+ `time.sleep(N)` letterali in timing log-normal
+- Convertire ~100+ `time.sleep(N)` letterali in timing log-normal (tiktok.py ~40, instagram.py ~40, adb.py ~5, proxy.py ~3)
 - Spostare proxy credentials in env vars
+- Scan `random.random() < 0.` per probabilita' fisse rimaste
+- Testare search_explore_session su telefono reale (verificare coordinate griglia)
+- Testare typing rhythm (verificare che i 4 ritmi producano delay diversi)
 
 ### PRIORITA' 3: n8n Pipeline
 - Re-importare `unified-pipeline-fixed.json` su VPS

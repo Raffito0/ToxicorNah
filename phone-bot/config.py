@@ -1,6 +1,10 @@
 """Global configuration for the Phone Bot automation system."""
 import os
 
+# --- Test Mode ----------------------------------------------------------------
+# When True: skip proxy, use local WiFi, verbose logging, Europe/Rome timezone
+TEST_MODE = os.getenv("PHONEBOT_TEST", "1") == "1"
+
 # --- Phones -------------------------------------------------------------------
 PHONES = [
     {
@@ -30,7 +34,7 @@ PHONES = [
     {
         "id": 4,
         "name": "Motorola E22i",
-        "model": "XT2239-15",
+        "model": "moto e22i",
         "adb_serial": None,
         "screen_w": 720,
         "screen_h": 1600,
@@ -94,8 +98,8 @@ HUMAN = {
     "tap_sigma_y": 14,
 
     # Swipe dynamics (log-normal duration)
-    "swipe_duration_median": 300,           # ms
-    "swipe_duration_sigma": 0.3,
+    "swipe_duration_median": 320,           # ms
+    "swipe_duration_sigma": 0.5,            # wider spread: fast flicks (150ms) + slow drags (600ms+)
     "swipe_x_drift_range": (-20, 20),       # px lateral drift
     "swipe_y_jitter": 30,                   # px start/end variance
 
@@ -190,6 +194,8 @@ HUMAN = {
     "t_poll_check": (1.0, 0.3, 0.5, 3),            # polling loop check interval
     "t_caption_input": (0.5, 0.3, 0.2, 1.5),       # after tapping caption field
     "t_story_watch": (3.0, 0.5, 1.0, 12),          # watching each story slide
+    "t_search_scroll_pause": (1.5, 0.4, 0.5, 5),    # pause between videos in search results
+    "t_search_clear": (0.8, 0.3, 0.3, 2),            # time to clear search bar before new keyword
 }
 
 # --- Niche Keywords Pool (per-session random sampling, avoids all accounts = same queries) ---
@@ -280,4 +286,4 @@ for d in [DATA_DIR, PLANS_DIR, VIDEOS_DIR, LOGS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # --- Timezone -----------------------------------------------------------------
-TIMEZONE = "US/Eastern"
+TIMEZONE = "Europe/Rome" if TEST_MODE else "US/Eastern"

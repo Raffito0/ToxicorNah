@@ -36,6 +36,14 @@ TIKTOK = {
 
     # --- Search Page ---
     "search_bar":       lambda w, h: (int(w * 0.50), int(h * 0.045)),
+    "search_clear":     lambda w, h: (int(w * 0.90), int(h * 0.045)),   # X button to clear search
+
+    # --- Search Results Grid (2 columns) ---
+    "search_grid_1":    lambda w, h: (int(w * 0.25), int(h * 0.25)),    # top-left video
+    "search_grid_2":    lambda w, h: (int(w * 0.75), int(h * 0.25)),    # top-right video
+    "search_grid_3":    lambda w, h: (int(w * 0.25), int(h * 0.55)),    # mid-left video
+    "search_grid_4":    lambda w, h: (int(w * 0.75), int(h * 0.55)),    # mid-right video
+    "search_creator":   lambda w, h: (int(w * 0.25), int(h * 0.85)),    # bottom area (creator/profile)
 
     # --- Comments Sheet ---
     "comment_input":    lambda w, h: (int(w * 0.50), int(h * 0.964)),
@@ -86,6 +94,15 @@ INSTAGRAM = {
 
     # --- Search / Explore ---
     "search_bar":       lambda w, h: (int(w * 0.50), int(h * 0.056)),
+    "search_clear":     lambda w, h: (int(w * 0.90), int(h * 0.056)),   # X button to clear search
+
+    # --- Search/Explore Results Grid (3 columns) ---
+    "search_grid_1":    lambda w, h: (int(w * 0.167), int(h * 0.25)),   # top-left
+    "search_grid_2":    lambda w, h: (int(w * 0.50), int(h * 0.25)),    # top-center
+    "search_grid_3":    lambda w, h: (int(w * 0.833), int(h * 0.25)),   # top-right
+    "search_grid_4":    lambda w, h: (int(w * 0.167), int(h * 0.50)),   # mid-left
+    "search_grid_5":    lambda w, h: (int(w * 0.50), int(h * 0.50)),    # mid-center
+    "search_grid_6":    lambda w, h: (int(w * 0.833), int(h * 0.50)),   # mid-right
 
     # --- Comments ---
     "comment_input":    lambda w, h: (int(w * 0.50), int(h * 0.964)),

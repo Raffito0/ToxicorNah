@@ -4,11 +4,12 @@ Discovers connected phones via ADB, initializes controllers,
 and starts the session executor to run today's plan.
 
 Usage:
-    python main.py                   # run today's plan (or warmup if active)
-    python main.py --dashboard       # start web dashboard
-    python main.py --test            # test device connections
-    python main.py --warmup          # initialize warmup for all accounts
-    python main.py --warmup --phone 1  # initialize warmup for phone 1 only
+    python main.py                       # run today's plan (or warmup if active)
+    python main.py --dashboard           # start web dashboard
+    python main.py --test                # test device connections
+    python main.py --warmup              # initialize warmup for all accounts
+    python main.py --warmup --phone 1    # initialize warmup for phone 1 only
+    python main.py --scroll-only --phone 4  # TEST: 5 min passive scroll, no engagement
 """
 import argparse
 import asyncio
@@ -17,11 +18,14 @@ import logging.handlers
 import os
 import subprocess
 import sys
+import time
+from datetime import datetime
 
-from config import ADB_PATH, PHONES, ACCOUNTS, LOGS_DIR, GEMINI, AIRTABLE
-from core.adb import ADBController
-from core.proxy import ProxyQueue
-from planner.executor import SessionExecutor
+from .config import ADB_PATH, PHONES, ACCOUNTS, LOGS_DIR, GEMINI, AIRTABLE, TEST_MODE
+from .core.adb import ADBController
+from .core.proxy import ProxyQueue
+from .core.human import HumanEngine
+from .planner.executor import SessionExecutor
 
 # Console + rotating file log
 logging.basicConfig(
@@ -98,6 +102,70 @@ def test_devices(controllers: dict[int, ADBController]):
         log.info("  Coord test (tiktok nav_home): %d, %d", x, y)
 
 
+async def run_scroll_only(controllers: dict[int, ADBController], phone_id: int,
+                          duration_min: int = 5):
+    """TEST MODE: Open TikTok and scroll passively. No likes, comments, follows, posts.
+    Logs every action to console + file for review."""
+    if phone_id not in controllers:
+        log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
+        return
+
+    adb = controllers[phone_id]
+    human = HumanEngine(account_name=f"test_ph{phone_id}")
+    human.start_session(
+        hour=datetime.now().hour,
+        weekday=datetime.now().weekday(),
+        duration_minutes=duration_min,
+    )
+
+    from .actions.tiktok import TikTokBot
+    bot = TikTokBot(adb, human)
+
+    log.info("=== SCROLL-ONLY TEST: Phone %d | %d min | NO engagement ===", phone_id, duration_min)
+
+    if not bot.open_app():
+        log.error("Failed to open TikTok")
+        return
+
+    time.sleep(human.timing("t_app_load"))
+    bot.go_to_fyp()
+    time.sleep(human.timing("t_nav_settle"))
+
+    start = time.time()
+    video_count = 0
+
+    while (time.time() - start) < duration_min * 60:
+        # Watch current video
+        watch = human.watch_duration()
+        video_count += 1
+        log.info("[Video #%d] Watching %.1fs", video_count, watch)
+        time.sleep(watch)
+
+        # Zona morta (stare doing nothing)
+        if human.should_zona_morta():
+            zm = human.zona_morta_duration()
+            log.info("[Zona morta] Pausing %.0fs", zm)
+            time.sleep(zm)
+
+        # Scroll to next video
+        sw = human.humanize_swipe(
+            adb.screen_w // 2, adb.screen_h * 3 // 4,
+            adb.screen_w // 2, adb.screen_h // 4,
+        )
+        log.info("[Scroll] swipe (%d,%d)->(%d,%d) %dms",
+                 sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
+        adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
+
+        delay = human.action_delay()
+        log.info("[Delay] %.2fs", delay)
+        time.sleep(delay)
+
+    elapsed = time.time() - start
+    log.info("=== TEST COMPLETE: %d videos in %.0fs ===", video_count, elapsed)
+    bot.close_app()
+    human.end_session()
+
+
 async def run_today(controllers: dict[int, ADBController]):
     """Run today's scheduled sessions."""
     proxy = ProxyQueue(controllers)
@@ -150,8 +218,17 @@ def main():
     parser.add_argument("--test", action="store_true", help="Test device connections")
     parser.add_argument("--dashboard", action="store_true", help="Start web dashboard")
     parser.add_argument("--warmup", action="store_true", help="Initialize warmup for new accounts")
+    parser.add_argument("--scroll-only", action="store_true",
+                        help="TEST: passive scroll only, no engagement (requires --phone)")
+    parser.add_argument("--duration", type=int, default=5,
+                        help="Duration in minutes for --scroll-only (default: 5)")
     parser.add_argument("--phone", type=int, help="Filter to specific phone ID (1-4)")
     args = parser.parse_args()
+
+    # Verbose logging in TEST_MODE
+    if TEST_MODE or args.scroll_only:
+        logging.getLogger().setLevel(logging.DEBUG)
+        log.info("TEST MODE active — proxy disabled, verbose logging, timezone Europe/Rome")
 
     _check_api_keys()
     log.info("Discovering connected devices...")
@@ -168,8 +245,15 @@ def main():
         return
 
     if args.dashboard:
-        from api.server import start_dashboard
+        from .api.server import start_dashboard
         start_dashboard(controllers)
+        return
+
+    if args.scroll_only:
+        if not args.phone:
+            log.error("--scroll-only requires --phone (e.g. --phone 4)")
+            sys.exit(1)
+        asyncio.run(run_scroll_only(controllers, args.phone, args.duration))
         return
 
     if args.warmup:
