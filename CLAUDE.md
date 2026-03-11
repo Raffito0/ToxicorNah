@@ -564,11 +564,11 @@ config.py HUMAN dict
 7. Sleep molto corti (< 0.1s) per sincronizzazione ADB possono restare fissi
 8. Verifica finale: `grep -rn "time.sleep(" phone-bot/` = ZERO numeri letterali
 
-## iOS App Build (2026-03-10) — IN CORSO
+## iOS App Build (2026-03-11) — IN CORSO
 
 ### Contesto
-L'utente deve registrare body clips per TikTok/Instagram dall'app sul suo iPhone.
-L'app Android esiste gia' (Capacitor WebView). Serve la versione iOS identica.
+L'utente deve distribuire l'app su App Store (non solo body clips).
+L'app Android esiste gia' (Capacitor WebView). Serve la versione iOS identica e funzionante.
 L'utente NON ha un Mac — usa MacInCloud (Mac remoto via RDP).
 
 ### Architettura App
@@ -580,16 +580,61 @@ L'utente NON ha un Mac — usa MacInCloud (Mac remoto via RDP).
 ### Cosa e' stato fatto (2026-03-10 sera):
 1. **capacitor.config.ts**: aggiunto config iOS (backgroundColor #111111, contentInset, preferredContentMode)
 2. **Info.plist**: registrato URL scheme `toxicornah://`, bloccato orientamento a solo Portrait
-3. **AppDelegate.swift**: aggiunto handler deep link per iOS — estrae `sid` da URL `toxicornah://results?sid=UUID`, inietta nel WebView via JavaScript (identico a Android MainActivity.java)
-4. **Web app buildata**: `npm run build` + `npx cap copy ios` eseguiti, asset web copiati in `ios/App/App/public/`
-5. **Tutto pushato su GitHub** (`github.com/Raffito0/ToxicorNah`, branch master)
+3. **AppDelegate.swift**: aggiunto handler deep link per iOS — estrae `sid` da URL `toxicornah://results?sid=UUID`, inietta nel WebView via JavaScript
+4. **Web app buildata e pushata** su GitHub (`github.com/Raffito0/ToxicorNah`, branch main)
+
+### Cosa e' stato fatto (2026-03-11) — SESSIONE MACINCLOUD:
+1. **Setup Mac**: scaricato ZIP da GitHub (git clone non funzionava per config SSH), escluso `public/` per spazio disco
+2. **Creato .env** sul Mac con VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY + VITE_GEMINI_API_KEY
+3. **App avviata nel simulatore iPhone 17 Pro** — funzionante al 100%
+4. **UploadPage fixes**:
+   - Rimossi `Friend` e `Family Member` dalla lista relationship (restano: Crush, Boyfriend/Girlfriend, Ex, Situationship)
+   - Aggiunto bottone **ADD** dopo i relationship tag
+   - `createNewPerson()` ora ha fallback a **localStorage** se Supabase fallisce
+   - Aggiunto upload foto avatar nel form con cerchio cliccabile (+)
+   - Scroll fix: `h-screen overflow-hidden` → `min-h-screen overflow-y-auto`
+5. **ResultsPage fix**: hero section (avatar + background image) nascosta per first-time users (quando personName e' "Him" o "Unknown")
+6. **AvatarCropModal**: nuovo componente `src/components/AvatarCropModal.tsx`
+   - Crop circolare con drag (pointer events) e zoom (scroll + pinch)
+   - Clamping corretto: immagine non puo' mai mostrare sfondo nero
+   - Fix landscape: usa `Math.max(CIRCLE_SIZE/w, CIRCLE_SIZE/h)` per scala iniziale
+   - `stateRef` per evitare stale closures negli event handler
+   - Glassmorphism backdrop (blur 18px + dark overlay)
+   - Popup `#111111` uniforme, bordo sottile, shadow profonda
+   - Animazione spring all'apertura
+   - Scroll della pagina bloccato mentre il modal e' aperto
+   - Canvas API esporta area circolare come JPEG dataURL
+7. **Tutto pushato** su GitHub (commit `1daf199`)
+
+### MacInCloud — Istruzioni Setup (per la prossima sessione)
+**IMPORTANTE**: il Mac NON ha git configurato. Ogni volta scaricare lo ZIP:
+```bash
+# 1. Scarica ZIP da github.com/Raffito0/ToxicorNah → Code → Download ZIP
+# 2. Nel Terminal:
+rm -rf ~/Downloads/ToxicorNah-main
+cd Downloads && unzip ToxicorNah-main.zip -x "ToxicorNah-main/public/*"
+cd ToxicorNah-main
+
+# 3. Crea .env (le API keys sono sempre le stesse):
+printf 'VITE_SUPABASE_URL=https://iilqnbumccqxlyloerzd.supabase.co\nVITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpbHFuYnVtY2NxeGx5bG9lcnpkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg3MjMwMjgsImV4cCI6MjA4NDI5OTAyOH0.XhAsnTD36zk6dFegmsvw3DJ3emkpMASDI-6TKungHng\nVITE_GEMINI_API_KEY=AIzaSyDvwh4rbEQu4TnsqmPukaC6wAqXiyINuv8\n' > .env
+
+# 4. Build e apri Xcode:
+npm install && npm run build && npx cap copy ios && npx cap open ios
+```
+Poi in Xcode: seleziona iPhone 17 Pro → Play (triangolo)
+
+**Tasto ~ sul Mac via RDP Windows**: scrivere `$HOME` al posto di `~` nei comandi
+
+### Problemi noti MacInCloud:
+- **git clone non funziona**: la config globale git ha regola `url.https://.insteadOf=git://` che trasforma HTTPS in SSH. Non risolvibile facilmente → usare ZIP
+- **Disco pieno**: la cartella `public/` ha video/immagini pesanti → sempre escluderla dall'unzip
+- **Simulatore "No such process"**: crash intermittente → Product → Clean Build Folder → Play di nuovo
+- **`@` sulla tastiera italiana via RDP**: Alt+G o Alt+2 (se non funziona, usare la variabile nel codice)
 
 ### Deep Link — come funziona:
 - n8n genera link `APP_URL/?sid=UUID` e lo manda su Telegram
-- Su Android: `MainActivity.java` intercetta il link → inietta `window.__pendingSid` + dispatcha evento `applink-sid`
-- Su iOS: `AppDelegate.swift` fa la stessa cosa tramite `handleDeepLink()` → WKWebView.evaluateJavaScript
+- Su iOS: `AppDelegate.swift` intercetta `toxicornah://results?sid=UUID` → inietta JS nel WebView
 - `App.tsx` ascolta l'evento `applink-sid` → carica scenario da Supabase → mostra risultati
-- Il salvataggio scenari su Supabase e' gia' implementato in `telegram-callback-handler.js` (riga 700) e `save-to-supabase.js`
 
 ### File iOS chiave:
 - `capacitor.config.ts` — config Capacitor (appId, webDir, iOS/Android settings)
@@ -597,26 +642,10 @@ L'utente NON ha un Mac — usa MacInCloud (Mac remoto via RDP).
 - `ios/App/App/Info.plist` — URL scheme, orientamento, bundle ID
 - `ios/App/App.xcodeproj` — progetto Xcode (aprire questo)
 - `ios/App/App/public/` — asset web (generati da `npx cap copy ios`)
-- `ios/App/CapApp-SPM/` — dipendenze Capacitor via Swift Package Manager
-
-### Bug di layout iOS:
-- L'utente ha visto bug di layout aprendo il link web su Chrome iPhone (rispetto ad Android)
-- I bug vanno identificati e fixati — verranno visti nel simulatore iPhone su MacInCloud
-- Anche l'app nativa Capacitor usa WKWebView, quindi gli stessi bug CSS si vedranno
-- Fix CSS nel codice web (`src/`) → `npm run build` → `npx cap copy ios` → rebuild in Xcode
-
-### MacInCloud Setup:
-- Piano scelto: **Managed Server** ($26/mese, 7 giorni di accesso/mese)
-- Preset: **Xcode/iOS Dev**
-- Platform: Mac Mini Silicon M2, 16GB RAM
-- Location: Europe Central (Frankfurt)
-- OS: macOS Sequoia 15.7.3 con Xcode 26.1
-- Accesso via Microsoft Remote Desktop (RDP)
-- VS Code installabile senza admin (drag-and-drop .app)
-- Claude Code via Terminal: `npx @anthropic-ai/claude-code`
+- `src/components/AvatarCropModal.tsx` — modal crop circolare avatar (NUOVO)
 
 ### Come installare .ipa su iPhone senza Apple Developer Program ($99):
-1. Su MacInCloud: Xcode → Product → Archive → Distribute → Development → Export .ipa
+1. Su MacInCloud: Xcode → **Product → Archive → Distribute → Development → Export**
 2. Scaricare .ipa sul PC Windows
 3. Installare **AltStore** su Windows (altstore.io) + iTunes
 4. Collegare iPhone via USB → AltStore installa l'app
@@ -625,26 +654,34 @@ L'utente NON ha un Mac — usa MacInCloud (Mac remoto via RDP).
 
 ## TODO — PROSSIMI STEP (da dove riprendere)
 
-### PRIORITA' 1: iOS App (body clips per video TikTok/Instagram)
-1. Comprare MacInCloud Managed Server ($26.99)
-2. Accedere al Mac via RDP
-3. Terminal:
-   ```
-   git clone https://github.com/Raffito0/ToxicorNah.git
-   cd ToxicorNah
-   npm install
-   npm run build
-   npx cap copy ios
-   npx cap open ios
-   ```
-4. Xcode: selezionare iPhone 16 simulatore → Play
-5. Verificare l'app nel simulatore — identificare bug di layout
-6. Fixare bug di layout (CSS in `src/`) con Claude Code
-7. Rebuild: `npm run build && npx cap copy ios` → Xcode Play
-8. Quando perfetta: Archive → Export .ipa
-9. Su Windows: AltStore → installare .ipa su iPhone
-10. Testare deep link da Telegram → app si apre con risultati
-11. Registrare body clips per i video
+### PRIORITA' 1: iOS App — prossimi step
+
+**Step 1 — Riaprire MacInCloud e riprendere dal simulatore**
+1. Accedere a MacInCloud via RDP
+2. Se la sessione e' scaduta: ri-scaricare ZIP e rifare setup (vedi istruzioni sopra)
+3. Se la sessione e' ancora attiva: `cd ~/Downloads/ToxicorNah-main && npm run build && npx cap copy ios` → Play in Xcode
+
+**Step 2 — Testare flow completo nel simulatore**
+- Upload chat screenshot → analisi → risultati ✅ (gia' testato)
+- First-time user: niente hero section, niente form persona ✅ (gia' testato)
+- Create new person → ADD → persona selezionata ✅ (gia' testato)
+- Avatar crop: aprire modal, trascinare, zoomare, scegliere → DA VERIFICARE (fix landscape pushato ma non ritestato)
+- Scorrere tutta la ResultsPage: Soul Type card, MessageInsights, DynamicCard flip, category cards → DA FARE
+
+**Step 3 — Fixare eventuali bug di layout rimanenti**
+- Fix CSS in `src/` sul Mac con sed
+- `npm run build && npx cap copy ios` → Play
+
+**Step 4 — Export .ipa e installazione su iPhone reale**
+1. Xcode → Product → Archive
+2. Distribute App → Development → Export
+3. Scaricare .ipa su Windows
+4. AltStore → installa su iPhone
+5. Testare deep link: aprire `toxicornah://results?sid=UUID` da Telegram
+
+**Step 5 — Preparare per App Store (futuro)**
+- Serve Apple Developer Program ($99/anno)
+- Xcode → Archive → Distribute → App Store Connect
 
 ### PRIORITA' 2: Phone-Bot (rimasto da fare)
 - Convertire ~100+ `time.sleep(N)` letterali in timing log-normal
