@@ -178,7 +178,7 @@ export function InnerTruthReveal({ content, onClose }: InnerTruthRevealProps) {
         >
           <p
             className="text-white/40 uppercase tracking-widest mb-2"
-            style={{ fontSize: '9px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
+            style={{ fontSize: '9px', letterSpacing: '1.5px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
           >
             YOUR MOVE
           </p>
