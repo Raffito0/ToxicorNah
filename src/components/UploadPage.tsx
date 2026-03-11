@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Plus, X, LogOut, MessageSquarePlus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { ImageCropModal } from './ImageCropModal';
+import { AvatarCropModal } from './AvatarCropModal';
 import { AnimatePresence } from 'framer-motion';
 import { startAnalysis } from '../services/analysisService';
 import { getUserState, isFirstTimeUser, UserState } from '../services/userStateService';
@@ -31,6 +32,9 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
   const [isCreatingPerson, setIsCreatingPerson] = useState(false);
   const [newPersonName, setNewPersonName] = useState('');
   const [selectedRelationship, setSelectedRelationship] = useState('');
+  const [newPersonAvatar, setNewPersonAvatar] = useState<string | null>(null);
+  const [avatarCropSrc, setAvatarCropSrc] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [showCropModal, setShowCropModal] = useState(false);
   const [tempFiles, setTempFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -115,45 +119,75 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
     }
   }
 
+  function loadLocalPersons(): Person[] {
+    try {
+      return JSON.parse(localStorage.getItem('local_persons') || '[]');
+    } catch { return []; }
+  }
+
+  function saveLocalPersons(p: Person[]) {
+    localStorage.setItem('local_persons', JSON.stringify(p));
+  }
+
   async function loadPersons() {
+    // Try Supabase first, fallback to localStorage
     const { data, error } = await supabase
       .from('persons')
       .select('*')
       .order('name', { ascending: true });
 
-    if (error) {
-      console.error('Error loading persons:', error);
+    if (error || !data || data.length === 0) {
+      const local = loadLocalPersons();
+      setPersons(local);
+      if (local.length > 0 && !selectedPerson) setSelectedPerson(local[0].id);
       return;
     }
 
-    setPersons(data || []);
-    if (data && data.length > 0 && !selectedPerson) {
-      setSelectedPerson(data[0].id);
-    }
+    setPersons(data);
+    if (data.length > 0 && !selectedPerson) setSelectedPerson(data[0].id);
   }
 
   async function createNewPerson() {
     if (!newPersonName.trim() || !selectedRelationship) return;
 
+    // Try Supabase first
     const { data, error } = await supabase
       .from('persons')
       .insert({ name: newPersonName.trim(), user_id: null })
       .select()
       .single();
 
-    if (error) {
-      console.error('Error creating person:', error);
-      return;
+    let newId: string;
+    if (error || !data) {
+      // Fallback: save to localStorage
+      const newPerson: Person = { id: crypto.randomUUID(), name: newPersonName.trim(), avatar: newPersonAvatar || undefined };
+      const local = loadLocalPersons();
+      local.push(newPerson);
+      saveLocalPersons(local);
+      setPersons([...local]);
+      newId = newPerson.id;
+    } else {
+      await loadPersons();
+      newId = data.id;
     }
 
-    await loadPersons();
-    setSelectedPerson(data.id);
+    setSelectedPerson(newId);
     setNewPersonName('');
     setSelectedRelationship('');
+    setNewPersonAvatar(null);
     setIsCreatingPerson(false);
   }
 
-  const relationships = ['Crush', 'Boyfriend / Girlfriend', 'Ex', 'Situationship', 'Friend', 'Family Member'];
+  function handleAvatarSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setAvatarCropSrc(ev.target?.result as string);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  const relationships = ['Crush', 'Boyfriend / Girlfriend', 'Ex', 'Situationship'];
 
   // Maximum number of screenshots allowed per analysis
   const MAX_SCREENSHOTS = 4;
@@ -289,7 +323,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
   }
 
   return (
-    <div className="h-screen bg-black text-white overflow-hidden flex flex-col">
+    <div className="min-h-screen bg-black text-white overflow-y-auto flex flex-col">
       <div className="flex flex-col items-center flex-1 min-h-0" style={{ paddingLeft: '30px', paddingRight: '30px', paddingTop: '16px', paddingBottom: '16px' }}>
         <div className="w-full max-w-md flex flex-col flex-1 min-h-0">
           <div className="bg-black pt-12 pb-4 flex flex-col flex-1 min-h-0">
@@ -468,7 +502,20 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
                   }}
                 >
                   <div className="border border-zinc-700 rounded-3xl p-5 bg-black">
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-4 mb-4">
+                      <button
+                        onClick={() => avatarInputRef.current?.click()}
+                        className="flex-shrink-0 w-12 h-12 rounded-full overflow-hidden border-2 border-dashed border-zinc-600 flex items-center justify-center hover:border-zinc-400 transition-colors"
+                        style={{ background: newPersonAvatar ? 'transparent' : '#1a1a1a' }}
+                      >
+                        {newPersonAvatar ? (
+                          <img src={newPersonAvatar} className="w-full h-full object-cover" />
+                        ) : (
+                          <Plus className="w-5 h-5 text-zinc-500" />
+                        )}
+                      </button>
+                      <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarSelect} />
+                    <div className="flex-1">
                       <input
                         type="text"
                         value={newPersonName}
@@ -484,6 +531,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
                           }
                         }}
                       />
+                    </div>
                     </div>
 
                     <div className="border-t border-zinc-800 pt-4">
@@ -506,6 +554,19 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
                           </button>
                         ))}
                       </div>
+                      <button
+                        onClick={createNewPerson}
+                        disabled={!newPersonName.trim() || !selectedRelationship}
+                        className="w-full mt-4 py-3 rounded-full text-white text-sm font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        style={{
+                          background: !newPersonName.trim() || !selectedRelationship ? '#333' : 'linear-gradient(135deg, #7C4DFF, #6200EA)',
+                          fontFamily: 'Plus Jakarta Sans, sans-serif',
+                          fontWeight: 500,
+                          letterSpacing: '1.5px'
+                        }}
+                      >
+                        ADD
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -537,6 +598,13 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
             selectedFiles={tempFiles}
             onConfirm={handleCropConfirm}
             onCancel={handleCropCancel}
+          />
+        )}
+        {avatarCropSrc && (
+          <AvatarCropModal
+            imageSrc={avatarCropSrc}
+            onConfirm={(dataUrl) => { setNewPersonAvatar(dataUrl); setAvatarCropSrc(null); }}
+            onCancel={() => setAvatarCropSrc(null)}
           />
         )}
       </AnimatePresence>

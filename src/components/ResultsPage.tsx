@@ -474,8 +474,8 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* ===== Profile Hero Section (hidden for first-time users who haven't added a person yet) ===== */}
-      {!isFirstTime && (
+      {/* ===== Profile Hero Section (hidden when no person was selected/created) ===== */}
+      {analysis.personName && analysis.personName !== 'Him' && analysis.personName !== 'Unknown' && (
       <div className="relative w-full overflow-hidden" style={{ minHeight: '38vh' }}>
         {/* Blurred archetype background — matched to Soul Type */}
         <img
@@ -508,42 +508,45 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
           className="relative flex flex-col items-center justify-center text-center px-8 pt-12 pb-6"
           style={{ zIndex: 3, minHeight: '38vh' }}
         >
-          {/* Avatar */}
-          <motion.div
-            className="relative"
-            style={{ willChange: 'filter, transform, opacity' }}
-            initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-            transition={{ delay: 0.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
-          >
-            <div
-              className="w-32 h-32 rounded-full overflow-hidden relative"
-            >
-              {personAvatarUrl ? (
-                <img src={personAvatarUrl} alt={analysis.personName} className="w-full h-full object-cover" />
-              ) : (
+          {/* Avatar + Name - only show if person was selected/created */}
+          {analysis.personName && analysis.personName !== 'Him' && analysis.personName !== 'Unknown' && (
+            <>
+              <motion.div
+                className="relative"
+                style={{ willChange: 'filter, transform, opacity' }}
+                initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+                animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                transition={{ delay: 0.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+              >
                 <div
-                  className="w-full h-full flex items-center justify-center"
-                  style={{ background: `linear-gradient(135deg, ${analysis.personArchetype.gradientFrom}, ${analysis.personArchetype.gradientTo})` }}
+                  className="w-32 h-32 rounded-full overflow-hidden relative"
                 >
-                  <span className="text-white text-4xl font-semibold">
-                    {analysis.personName.charAt(0).toUpperCase()}
-                  </span>
+                  {personAvatarUrl ? (
+                    <img src={personAvatarUrl} alt={analysis.personName} className="w-full h-full object-cover" />
+                  ) : (
+                    <div
+                      className="w-full h-full flex items-center justify-center"
+                      style={{ background: `linear-gradient(135deg, ${analysis.personArchetype.gradientFrom}, ${analysis.personArchetype.gradientTo})` }}
+                    >
+                      <span className="text-white text-4xl font-semibold">
+                        {analysis.personName.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </motion.div>
+              </motion.div>
 
-          {/* Name */}
-          <motion.h1
-            className="text-white mt-4"
-            style={{ fontSize: '22px', fontWeight: 500, fontFamily: 'Plus Jakarta Sans, sans-serif', willChange: 'filter, transform, opacity' }}
-            initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
-            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-            transition={{ delay: 0.4, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
-          >
-            {analysis.personName}
-          </motion.h1>
+              <motion.h1
+                className="text-white mt-4"
+                style={{ fontSize: '22px', fontWeight: 500, fontFamily: 'Plus Jakarta Sans, sans-serif', willChange: 'filter, transform, opacity' }}
+                initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
+                animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                transition={{ delay: 0.4, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
+              >
+                {analysis.personName}
+              </motion.h1>
+            </>
+          )}
 
           {/* Relationship Status Pill */}
           {relStatusOption && (
