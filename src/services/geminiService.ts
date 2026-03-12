@@ -2015,3 +2015,342 @@ JSON only:
     return null;
   }
 }
+
+// ============================================
+// PHASE 2B: DEEP PROFILE ANALYSIS
+// ============================================
+// Runs in PARALLEL with Phase 2A (Detailed).
+// Generates: Behavioral Fingerprints, Vital Signs with narrative,
+// Hard Truths with chat evidence, Reality Check personalized.
+// The girl never waits — this runs while she reads ResultsPage.
+
+export interface DeepProfileResult {
+  behavioralFingerprint: {
+    responseTimePattern: 'instant' | 'hours' | 'days' | 'erratic';
+    messageLengthPattern: 'one-word' | 'short' | 'matching' | 'paragraphs';
+    initiatorBalance: number; // 0-100 (0 = she always, 100 = he always)
+    deflectionStyle: 'humor' | 'silence' | 'blame-shift' | 'topic-change' | 'none';
+    vulnerabilityLevel: number; // 0-10
+    consistencyScore: number; // 0-10 (says one thing, does another?)
+    controlTactics: string[]; // specific: "guilt-trip", "silent-treatment", "gaslighting", etc.
+  };
+  userBehavioralFingerprint: {
+    messageLengthPattern: 'short' | 'matching' | 'paragraphs' | 'essays';
+    initiatorBalance: number; // 0-100 (from her perspective: 0 = never, 100 = always)
+    emotionalLabor: number; // 0-10 (how much emotional work she does vs him)
+    boundaryMoments: number; // count: times she said no, pushed back, set a limit
+    selfErasureMoments: number; // count: times she gave in, changed her mind for him, apologized unnecessarily
+    overExplainingCount: number; // count: messages where she justifies herself in paragraphs
+  };
+  vitalSigns: {
+    emotionalAge: { score: number; narrative: string };
+    heLikesYou: { score: number; narrative: string };
+    justWantsSex: { score: number; narrative: string };
+    ghostRisk: { score: number; narrative: string };
+    manipulationLevel: { score: number; narrative: string };
+    powerOverYou: { score: number; narrative: string };
+  };
+  hardTruths: Array<{
+    question: string;
+    verdict: string; // short: "YES", "NO", "WEEKS", "MONTHS", etc.
+    proof: string; // 2-3 sentences citing real chat evidence
+    verdictColor: string; // hex
+    category: 'archetype' | 'metric' | 'trajectory' | 'universal';
+  }>;
+  realityCheck: {
+    statement: string; // 2-3 sentences, brutally honest, cites chat patterns
+    shift: string; // 1-2 sentences, specific actionable advice for THIS situation
+  };
+}
+
+const DEEP_PROFILE_PROMPT = `You are a brutally honest relationship analyst. You're talking DIRECTLY to the girl who uploaded this chat. Your job: make her say "holy shit, this app actually READ our chat."
+
+EVERY number you produce and EVERY sentence you write MUST reference SPECIFIC patterns from THIS chat. NEVER write anything that could apply to any random couple. If you can't point to a specific moment in the chat, don't say it.
+
+${TONE_CALIBRATION}
+
+You will produce 5 sections. Here's what each one needs:
+
+=== SECTION 1: BEHAVIORAL FINGERPRINT (his communication DNA) ===
+Analyze HIS messages objectively:
+- responseTimePattern: Based on conversation flow. "instant" = replies immediately in rapid back-and-forth. "hours" = noticeable gaps, conversation is fragmented. "days" = dead air between exchanges. "erratic" = sometimes instant, sometimes vanishes.
+- messageLengthPattern: "one-word" = mostly "ok", "yeah", "lol". "short" = 2-8 words avg. "matching" = similar length to hers. "paragraphs" = he writes more than her.
+- initiatorBalance: 0-100. Count who starts new conversation topics or messages after silence. 0 = she ALWAYS starts. 50 = balanced. 100 = he always starts.
+- deflectionStyle: How does he avoid hard topics? "humor" = cracks jokes when it gets serious. "silence" = goes quiet/ignores. "blame-shift" = turns it on her. "topic-change" = pivots to something else. "none" = he doesn't avoid.
+- vulnerabilityLevel: 0-10. Does he open up about feelings, fears, insecurities? 0 = fortress. 10 = completely open.
+- consistencyScore: 0-10. Does what he says match what he does in the chat? 0 = constantly contradicting himself. 10 = rock solid.
+- controlTactics: List SPECIFIC tactics you observe. Options: "guilt-trip", "silent-treatment", "gaslighting", "love-bombing", "breadcrumbing", "blame-shifting", "stonewalling", "future-faking", "triangulation", "negging". Empty array if none.
+
+=== SECTION 2: USER BEHAVIORAL FINGERPRINT (her communication DNA) ===
+Analyze HER messages objectively:
+- messageLengthPattern: Relative to his. "short" = she writes less. "matching" = similar. "paragraphs" = she writes notably more. "essays" = she sends walls of text while he gives one-liners.
+- initiatorBalance: 0-100. Same as above but from HER side. How often does SHE start topics or re-engage after silence?
+- emotionalLabor: 0-10. Who does the emotional heavy lifting? 0 = he does all the work. 5 = balanced. 10 = she carries everything (asks how he is, manages the mood, de-escalates, fills silences).
+- boundaryMoments: Count specific moments where she said no, pushed back, called him out, or held her ground. If she never pushes back, this is 0.
+- selfErasureMoments: Count specific moments where she changed her mind to accommodate him, apologized when she didn't need to, backed down from a valid point, or softened a legitimate complaint. 0 if she held firm.
+- overExplainingCount: Count messages where she writes 3+ sentences justifying herself, her feelings, or her actions. When she explains herself in paragraphs while he gives one line — that's over-explaining.
+
+=== SECTION 3: VITAL SIGNS (6 metrics with personalized narratives) ===
+Each vital sign gets a score (0-100) AND a narrative (1-2 sentences, under 30 words).
+
+The narrative MUST cite specific behavior from the chat. NOT generic statements.
+
+BAD narrative (generic, could be anyone): "He shows signs of emotional immaturity and struggles to communicate effectively."
+GOOD narrative (specific to THIS chat): "You asked how he felt about you. He sent a meme. That's his emotional vocabulary — deflection dressed as humor."
+
+BAD: "There are concerning signs of manipulation in this dynamic."
+GOOD: "He said 'if you actually cared you wouldn't do that.' That's guilt-trip 101. He used your feelings as leverage."
+
+BAD: "He seems to lack genuine interest in pursuing this further."
+GOOD: "You started 6 of the 8 conversations. He never asked you a single question about your day. Interest looks different."
+
+The 6 vital signs:
+- emotionalAge (0-100): How emotionally mature is he? Score based on: vulnerability level, deflection frequency, ability to discuss feelings, response to her emotions. 0-20 = child, 20-40 = teenager, 40-60 = developing, 60-80 = mature, 80-100 = evolved.
+- heLikesYou (0-100): Does he genuinely like her? Score based on: initiator balance, effort in messages, asking about her life, vulnerability, consistency. NOT just flirting — genuine interest.
+- justWantsSex (0-100): Is he just after physical? Score based on: how often he steers toward physical topics, avoids emotional depth, responds more to flirty messages than serious ones, effort outside of physical context.
+- ghostRisk (0-100): Will he disappear? Score based on: response time pattern, declining message length, deflection of future plans, erratic availability, emotional distance.
+- manipulationLevel (0-100): Is he manipulating? Score based on: control tactics observed, consistency score, blame patterns, guilt-tripping, gaslighting.
+- powerOverYou (0-100): How much power does he have over her? Score based on: her selfErasure count, her over-explaining, who adapts to whom, who sets the tone, who compromises more.
+
+=== SECTION 4: HARD TRUTHS (5 questions with evidence-based answers) ===
+Generate exactly 5 questions. Each one must feel like it's reading her mind — questions she's been asking herself.
+
+Choose questions based on what you ACTUALLY see in this chat:
+- If you see manipulation → "Ti sta manipolando?" (Is he manipulating you?)
+- If you see ghosting risk → "Sparira'?" (Will he disappear?)
+- If you see one-sided effort → "Ci tiene per davvero?" (Does he actually care?)
+- If you see her losing power → "Chi ha il controllo qui?" (Who's in control here?)
+- If you see mixed signals → "Cosa vuole da te?" (What does he want from you?)
+- If it's healthy → "E' quello giusto?" (Is he the right one?)
+- Universal: "Qual e' il suo punto debole?" (What's his biggest weakness?)
+- Universal: "La verita' che non vuoi sentire?" (The truth you don't want to hear?)
+
+Rules for proof:
+- MUST quote or paraphrase at least one specific moment from the chat
+- MUST explain WHY that moment proves the verdict
+- 2-3 sentences max, under 35 words
+- Same tone as TONE_CALIBRATION: sharp, direct, screenshot-worthy
+- NEVER generic therapy language
+
+VERDICT must be a short, punchy word/phrase:
+- "YES", "NO", "MAYBE", "WEEKS", "MONTHS", "100%", "ZERO", "HE DOESN'T", "ALREADY STARTED", etc.
+
+=== SECTION 5: REALITY CHECK (personalized gut-punch) ===
+- statement: 2-3 sentences that describe the REAL dynamic happening in this chat. Reference specific patterns. This should make her go "...fuck, that's true." Under 40 words.
+- shift: 1-2 sentences of specific, actionable advice for THIS EXACT situation. Not generic "set boundaries." Something like "Stop sending the first message for a week. If he doesn't reach out, you already have your answer." Under 25 words.
+
+=== JSON RESPONSE FORMAT ===
+{
+  "behavioralFingerprint": {
+    "responseTimePattern": "<instant|hours|days|erratic>",
+    "messageLengthPattern": "<one-word|short|matching|paragraphs>",
+    "initiatorBalance": <0-100>,
+    "deflectionStyle": "<humor|silence|blame-shift|topic-change|none>",
+    "vulnerabilityLevel": <0-10>,
+    "consistencyScore": <0-10>,
+    "controlTactics": ["<tactic1>", ...]
+  },
+  "userBehavioralFingerprint": {
+    "messageLengthPattern": "<short|matching|paragraphs|essays>",
+    "initiatorBalance": <0-100>,
+    "emotionalLabor": <0-10>,
+    "boundaryMoments": <count>,
+    "selfErasureMoments": <count>,
+    "overExplainingCount": <count>
+  },
+  "vitalSigns": {
+    "emotionalAge": { "score": <0-100>, "narrative": "<specific to THIS chat, max 30 words>" },
+    "heLikesYou": { "score": <0-100>, "narrative": "<specific to THIS chat, max 30 words>" },
+    "justWantsSex": { "score": <0-100>, "narrative": "<specific to THIS chat, max 30 words>" },
+    "ghostRisk": { "score": <0-100>, "narrative": "<specific to THIS chat, max 30 words>" },
+    "manipulationLevel": { "score": <0-100>, "narrative": "<specific to THIS chat, max 30 words>" },
+    "powerOverYou": { "score": <0-100>, "narrative": "<specific to THIS chat, max 30 words>" }
+  },
+  "hardTruths": [
+    {
+      "question": "<question she is asking herself>",
+      "verdict": "<1-3 word punch>",
+      "proof": "<2-3 sentences with chat evidence, max 35 words>",
+      "verdictColor": "<#ef4444 for bad, #facc15 for mixed, #4ade80 for good>",
+      "category": "<archetype|metric|trajectory|universal>"
+    }
+  ],
+  "realityCheck": {
+    "statement": "<2-3 sentences, specific to THIS chat, max 40 words>",
+    "shift": "<1-2 sentences, specific actionable advice, max 25 words>"
+  }
+}`;
+
+/**
+ * PHASE 2B: Deep Profile Analysis — runs in PARALLEL with Phase 2A.
+ * Generates behavioral fingerprints, evidence-based vital signs,
+ * hard truths with chat citations, and personalized reality check.
+ */
+export async function analyzeDeepProfile(
+  extraction: ExtractionResult,
+  phase1Scores: AnalysisScores,
+  phase1Reasoning?: ContextReasoning,
+  personSoulType?: string,
+  userSoulType?: string,
+  previousAnalyses?: PreviousAnalysisSummary[],
+  relationshipStatus?: string | null
+): Promise<DeepProfileResult> {
+  const genAI = getGeminiClient();
+
+  console.log('[Gemini Phase 2B] Starting deep profile analysis...');
+
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.0-flash',
+    generationConfig: {
+      temperature: 0.5,
+      maxOutputTokens: 5000,
+    },
+  });
+
+  const transcript = extraction.messages
+    .map((m) => {
+      const label = m.sender === 'person' ? '[THEIR MESSAGE]' : '[YOUR MESSAGE]';
+      return `${label}: "${m.text}"`;
+    })
+    .join('\n');
+
+  const personMessages = extraction.messages.filter((m) => m.sender === 'person');
+  const userMessages = extraction.messages.filter((m) => m.sender === 'user');
+
+  const continuityContext = buildContinuityContext(previousAnalyses || [], relationshipStatus);
+
+  const contextBlock = `
+PHASE 1 SCORES (from quick analysis of this SAME chat):
+- Overall Toxicity: ${phase1Scores.overall}/100
+- Warmth: ${phase1Scores.warmth}/100
+- Communication: ${phase1Scores.communication}/100
+- Drama: ${phase1Scores.drama}/100
+- Distance: ${phase1Scores.distance}/100
+- Passion: ${phase1Scores.passion}/100
+${phase1Reasoning ? `- Vibe: ${phase1Reasoning.overallVibe}
+- Context: ${phase1Reasoning.chatContext}
+- Toxicity Assessment: ${phase1Reasoning.toxicityAssessment}` : ''}
+${personSoulType ? `- His Soul Type: "${personSoulType}"` : ''}
+${userSoulType ? `- Her Soul Type: "${userSoulType}"` : ''}
+
+MESSAGE STATS:
+- His messages: ${personMessages.length}
+- Her messages: ${userMessages.length}
+- Total: ${extraction.messages.length}
+${continuityContext || ''}`;
+
+  const prompt = `${DEEP_PROFILE_PROMPT}
+${contextBlock}
+CHAT TRANSCRIPT:
+--- TRANSCRIPT ---
+${transcript}
+--- END ---
+
+CRITICAL REMINDERS:
+- Every vital sign narrative MUST cite a specific behavior or message pattern from THIS chat
+- Every hard truth proof MUST reference something that ACTUALLY happened in the transcript
+- NEVER use names from chat headers. Use "he"/"him" or "she"/"her"
+- NEVER write generic phrases that could apply to any couple
+- Your scores MUST be consistent with Phase 1 scores above
+- If Phase 1 says toxicity is low, your manipulation/ghostRisk should also be low
+- Write the hard truth questions in the SAME LANGUAGE as the chat (if chat is Italian, questions are Italian)
+- Respond with ONLY the JSON object, no markdown wrapping`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const content = result.response.text();
+
+    if (!content) {
+      throw new Error('No response from Gemini deep profile analysis');
+    }
+
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('Could not extract JSON from deep profile response');
+    }
+
+    const deepProfile = JSON.parse(jsonMatch[0]) as DeepProfileResult;
+
+    // Validate and clamp scores
+    if (deepProfile.vitalSigns) {
+      for (const key of Object.keys(deepProfile.vitalSigns) as Array<keyof typeof deepProfile.vitalSigns>) {
+        const vs = deepProfile.vitalSigns[key];
+        if (vs) {
+          vs.score = Math.max(0, Math.min(100, Math.round(vs.score)));
+        }
+      }
+    }
+
+    // Ensure hardTruths has exactly 5 entries
+    if (deepProfile.hardTruths) {
+      deepProfile.hardTruths = deepProfile.hardTruths.slice(0, 5);
+    }
+
+    // Validate fingerprint ranges
+    if (deepProfile.behavioralFingerprint) {
+      const bf = deepProfile.behavioralFingerprint;
+      bf.initiatorBalance = Math.max(0, Math.min(100, Math.round(bf.initiatorBalance)));
+      bf.vulnerabilityLevel = Math.max(0, Math.min(10, Math.round(bf.vulnerabilityLevel)));
+      bf.consistencyScore = Math.max(0, Math.min(10, Math.round(bf.consistencyScore)));
+      if (!Array.isArray(bf.controlTactics)) bf.controlTactics = [];
+    }
+
+    if (deepProfile.userBehavioralFingerprint) {
+      const ubf = deepProfile.userBehavioralFingerprint;
+      ubf.initiatorBalance = Math.max(0, Math.min(100, Math.round(ubf.initiatorBalance)));
+      ubf.emotionalLabor = Math.max(0, Math.min(10, Math.round(ubf.emotionalLabor)));
+      ubf.boundaryMoments = Math.max(0, Math.round(ubf.boundaryMoments));
+      ubf.selfErasureMoments = Math.max(0, Math.round(ubf.selfErasureMoments));
+      ubf.overExplainingCount = Math.max(0, Math.round(ubf.overExplainingCount));
+    }
+
+    console.log('[Gemini Phase 2B] Deep profile complete!');
+    console.log('[Gemini Phase 2B] Vital Signs scores:', Object.entries(deepProfile.vitalSigns || {}).map(([k, v]) => `${k}: ${v.score}`).join(', '));
+    console.log('[Gemini Phase 2B] Hard Truths count:', deepProfile.hardTruths?.length);
+    console.log('[Gemini Phase 2B] Control tactics:', deepProfile.behavioralFingerprint?.controlTactics);
+
+    return deepProfile;
+  } catch (error) {
+    console.error('[Gemini Phase 2B] Failed:', error);
+
+    // Return a safe fallback so the app still works with old formula-based logic
+    return getDeepProfileFallback(phase1Scores);
+  }
+}
+
+/**
+ * Fallback deep profile using Phase 1 scores.
+ * Used when Phase 2B fails — the frontend will detect empty narratives
+ * and fall back to the old formula-based display.
+ */
+function getDeepProfileFallback(scores: AnalysisScores): DeepProfileResult {
+  return {
+    behavioralFingerprint: {
+      responseTimePattern: 'erratic',
+      messageLengthPattern: 'short',
+      initiatorBalance: 50,
+      deflectionStyle: 'none',
+      vulnerabilityLevel: 5,
+      consistencyScore: 5,
+      controlTactics: [],
+    },
+    userBehavioralFingerprint: {
+      messageLengthPattern: 'matching',
+      initiatorBalance: 50,
+      emotionalLabor: 5,
+      boundaryMoments: 0,
+      selfErasureMoments: 0,
+      overExplainingCount: 0,
+    },
+    vitalSigns: {
+      emotionalAge: { score: Math.round(scores.communication * 0.5 + scores.warmth * 0.3 + (100 - scores.drama) * 0.2), narrative: '' },
+      heLikesYou: { score: Math.round(scores.warmth * 0.5 + scores.passion * 0.3 + (100 - scores.distance) * 0.2), narrative: '' },
+      justWantsSex: { score: Math.round(scores.passion * 0.4 + (100 - scores.warmth) * 0.3 + (100 - scores.communication) * 0.3), narrative: '' },
+      ghostRisk: { score: Math.round(scores.distance * 0.5 + (100 - scores.warmth) * 0.25 + (100 - scores.passion) * 0.25), narrative: '' },
+      manipulationLevel: { score: Math.round(scores.drama * 0.6 + (100 - scores.communication) * 0.4), narrative: '' },
+      powerOverYou: { score: Math.round((100 - scores.communication) * 0.4 + scores.drama * 0.3 + scores.distance * 0.3), narrative: '' },
+    },
+    hardTruths: [],
+    realityCheck: { statement: '', shift: '' },
+  };
+}

@@ -704,19 +704,163 @@ Poi in Xcode: seleziona iPhone 17 Pro → Play (triangolo)
 5. iPhone: Impostazioni → Generali → Gestione Dispositivo → fidati del profilo
 6. L'app scade ogni 7 giorni, AltStore rinnova automaticamente (PC + iPhone stessa WiFi)
 
-## TODO — PROSSIMI STEP (da dove riprendere)
+## Deep Profile Intelligence System (2026-03-12) — IN CORSO
 
-### DA FARE: Share Dynamic Overlay (approvato, non ancora implementato)
-Creare `ShareDynamicOverlay.tsx` — stessa struttura di `CallOutOverlay.tsx` ma mostra la facciata frontale della DynamicCard:
-- Card 9:16: due immagini side profile + `mix-blend-mode: lighten` su `#111111`, glassmorphism + gradient scuro, dynamic name, subtitle, "His Soul Type"/"Your Soul Type" blocks, logo `logo-group59.png` in fondo
-- Stessi 4 bottoni share (Instagram Stories, Save video, Copy link, More...)
-- In `ResultsPage.tsx`: stato `showShareDynamic`, bottone "SHARE YOUR DYNAMIC" apre overlay (non piu' `handleShareArchetype` diretto), montare `<ShareDynamicOverlay>` con dati dynamic + archetypes
-- Video generation: `generateShareVideo` con immagini side profile
+### Obiettivo
+Portare la personalizzazione di PersonProfile (profili ragazzi) e My Soul da 4.2/10 a ~8/10. Le ragazze devono pensare "cazzo, ha letto veramente la nostra chat e ha azzeccato Marco." ZERO frasi generiche, ZERO lookup tables.
+
+### Problema attuale
+- **Category Cards**: 8/10 — Gemini scrive direttamente, funzionano benissimo
+- **Message Insights**: 9/10 — Gemini cita messaggi reali, ottime
+- **Vital Signs**: 4/10 — formule `weighted average(warmth*0.5 + passion*0.3 + ...)` in `personProfileService.ts`, narrative generiche
+- **Hard Truths**: 3/10 — 20 funzioni con threshold-based verdicts, proof generici tipo "Based on your conversation patterns"
+- **Reality Check**: 3/10 — cascading if-else su powerBalance/dramaScore, frasi template
+- **Your Two Sides**: 2/10 — 128 tratti hardcoded in `soulTypeDuality.ts`, rotano ogni 4 giorni, zero connessione alla chat
+- **You Are Becoming**: 2/10 — lookup `EVOLUTION_MAP[archetype][trend]`, fake confidence
+- **Mistakes**: 3/10 — 12 templates con funzioni condizionali e priorita', frasi generiche
+- **Soul Compatibility**: 3/10 — formula `base 50 + energy modifier + keyword overlap`
+- **Attracted Soul Type**: 2/10 — conta frequenza archetipo maschile, usa `ATTRACTION_REASONS` lookup
+
+### Architettura soluzione: Hybrid (dati + narrativa)
+**Strada 1 (dati strutturati)**: Gemini estrae fingerprint comportamentali → numeri, pattern, conteggi → aggregabili cross-analisi
+**Strada 2 (narrativa personalizzata)**: Gemini scrive testi specifici alla chat → citazioni reali, "oh shit" moments
+
+### Fasi di analisi (timing):
+```
+Ragazza uploada chat
+  → Phase 1 (Quick, ~5s): score + soul type match → mostra ResultsPage
+  → Phase 1.5 (micro-call, ~2s): personalizza descrizione Soul Type
+  → Phase 2A (Detailed, background ~15s): 5 category cards + message insights
+  → Phase 2B (Deep Profile, background ~10s, PARALLELO a 2A): NEW
+      → behavioral fingerprints (his + hers)
+      → vital signs con narrative evidence-based
+      → hard truths con citazioni chat reali
+      → reality check personalizzato
+  → Phase 3 (Soul Synthesis, on-demand): quando apre My Soul
+      → aggrega fingerprint di TUTTE le analisi
+      → Gemini scrive Your Two Sides, Mistakes, Becoming, Compatibility personalizzati
+      → cached in DB, refresh quando nuova analisi
+```
+
+### COSA E' GIA' STATO FATTO (Step 1 completato):
+
+**File: `src/services/geminiService.ts`** (linee 2019-2357, +339 righe)
+- ✅ `DeepProfileResult` interface completa (linea 2027)
+- ✅ `DEEP_PROFILE_PROMPT` costante (~116 righe, linea 2066) — 5 sezioni: behavioral fingerprint, user fingerprint, vital signs, hard truths, reality check
+- ✅ `analyzeDeepProfile()` funzione (linea 2189) — chiama Gemini 2.0 Flash, temp 0.5, 5000 token, valida e clampa tutti gli score
+- ✅ `getDeepProfileFallback()` (linea 2326) — fallback safe con narrative vuote (frontend detecta e usa formule vecchie)
+
+**Interfaccia DeepProfileResult** (per riferimento):
+```typescript
+{
+  behavioralFingerprint: { responseTimePattern, messageLengthPattern, initiatorBalance, deflectionStyle, vulnerabilityLevel, consistencyScore, controlTactics[] }
+  userBehavioralFingerprint: { messageLengthPattern, initiatorBalance, emotionalLabor, boundaryMoments, selfErasureMoments, overExplainingCount }
+  vitalSigns: { emotionalAge, heLikesYou, justWantsSex, ghostRisk, manipulationLevel, powerOverYou } // each: { score: 0-100, narrative: string }
+  hardTruths: [{ question, verdict, proof, verdictColor, category }] // exactly 5
+  realityCheck: { statement, shift }
+}
+```
+
+### STEP 2 — IN CORSO: Integrare Phase 2B in analysisService.ts
+
+**Problema chiave da risolvere**: `analyzeDeepProfile()` ha bisogno di `ExtractionResult` (trascrizione chat). Ma:
+- **DEV mode** (`processTwoPhaseAnalysis`, linea 1346): ✅ l'extraction e' GIA' disponibile dopo `analyzeQuick()` che ritorna `{ quick, extraction }`
+- **Production mode** (`runAIAnalysis`, linea 627): ❌ usa `analyzeChatScreenshots()` che combina extraction+analisi in UNA sola call e NON ritorna l'extraction separatamente
+
+**Soluzione pianificata**:
+1. Modificare `analyzeChatScreenshots()` in `geminiService.ts` per ritornare ANCHE l'extraction: `{ result, extraction }` (o aggiungere un campo all'output)
+2. Oppure (piu' semplice): in `runAIAnalysis`, dopo la call principale, estrarre i messaggi separatamente con `extractMessagesFromImages()` solo per Phase 2B
+
+**Per DEV mode** (la parte facile, linea ~1690 di analysisService.ts):
+```typescript
+// Attualmente:
+const detailed = await analyzeDetailed(extraction, quick.reasoning);
+// Diventa:
+const [detailed, deepProfile] = await Promise.all([
+  analyzeDetailed(extraction, quick.reasoning),
+  analyzeDeepProfile(extraction, quick.scores, quick.reasoning, personMatched?.title, userMatched?.title)
+]);
+// Poi salvare deepProfile nel localStorage result object
+```
+
+**Per Production mode** (piu' complesso, linea ~638):
+- Dopo `analyzeChatScreenshots()`, lanciare Phase 2B come fire-and-forget (Promise che aggiorna DB quando finisce)
+- L'extraction va ottenuta separatamente (o `analyzeChatScreenshots` deve esporre extraction)
+
+**Storage**:
+- Production: colonna `deep_profile` JSON nella tabella `analysis_results` (Supabase)
+- DEV: merge nel `StoredAnalysisResult` object in localStorage
+
+### STEP 3: DB Migration
+- Aggiungere colonna `deep_profile` (tipo JSONB) alla tabella `analysis_results` in Supabase
+- Default: NULL (analisi vecchie senza deep profile)
+
+### STEP 4: PersonProfile — Vital Signs legge da deep_profile
+- `personProfileService.ts`: se `analysis.deep_profile?.vitalSigns` esiste E narrative non vuote → usa score + narrative da deep_profile
+- Altrimenti: fallback alle formule weighted-average attuali (backward compatible)
+
+### STEP 5: PersonProfile — Hard Truths legge da deep_profile
+- Se `deep_profile?.hardTruths` esiste e ha 5 entries → usa quelli (question, verdict, proof, verdictColor)
+- Altrimenti: fallback alle ~20 funzioni answer attuali con threshold
+
+### STEP 6: PersonProfile — Reality Check legge da deep_profile
+- Se `deep_profile?.realityCheck?.statement` non vuoto → usa statement + shift da deep_profile
+- Altrimenti: fallback al cascading if-else attuale
+
+### STEP 7: Phase 3 — Soul Synthesis prompt + interface in geminiService.ts
+- Nuovo prompt che riceve TUTTI i `behavioralFingerprint` + `userBehavioralFingerprint` di ogni analisi
+- Genera: Your Two Sides personalizzati, Mistakes basati su pattern reali, You Are Becoming con vera traiettoria, Attracted Soul Type con motivo vero
+- Interface `SoulSynthesisResult`
+
+### STEP 8: DB — creare tabella `soul_profile_synthesis`
+- Campi: user_id, synthesis_data (JSONB), last_analysis_count (int), updated_at
+- Cache: se `last_analysis_count == current count` → usa cache, altrimenti rigenera
+
+### STEP 9: SoulPage — fetchSoulProfile integra Phase 3
+- `soulProfileService.ts`: check cache → se stale, chiama Phase 3 → salva → ritorna dati
+- Se Phase 3 non ancora pronta: fallback ai dati vecchi (lookup tables)
+
+### STEP 10: SoulPage — sezioni leggono da synthesis
+- Your Two Sides: da Phase 3 invece di `soulTypeDuality.ts` (128 tratti hardcoded)
+- Mistakes: da Phase 3 invece di `MISTAKE_TEMPLATES` (12 template con condizioni)
+- You Are Becoming: da Phase 3 invece di `EVOLUTION_MAP` (lookup statico)
+- Soul You Attract: da Phase 3 con motivo vero basato su pattern
+
+### STEP 11: Compatibility — blend formula + dati reali
+- Se l'utente ha analisi reali con un certo Soul Type → blend punteggio formula con dati reali
+- Es: se ha 3 analisi con "Iron Veil" e tutte tossiche → compatibilita' bassa anche se la formula dice alta
+
+### Altre cose fatte oggi (2026-03-12)
+
+**ShareDynamicOverlay.tsx** (NUOVO file, ~200 righe):
+- Overlay share per la DynamicCard (front face)
+- Card 9:16 con side profiles + mix-blend-mode lighten su #111111
+- 4 bottoni share: Instagram Stories, Save video, Copy link, More...
+- Usa `generateDynamicShareVideo()` e `generateDynamicShareImage()` da shareVideo.ts
+
+**CallOutOverlay.tsx** (modificato, +23/-17):
+- Miglioramenti UI e fix
+
+**ResultsPage.tsx** (modificato, +29 righe):
+- `pb-4` → `pb-24` fix bottone tagliato
+- Integrazione ShareDynamicOverlay
+
+**shareVideo.ts** (modificato, +271 righe):
+- `generateDynamicShareVideo()` e `generateDynamicShareImage()` — funzioni per generare video/immagine share della DynamicCard
+
+**Playwright test setup** (NUOVO):
+- `playwright.config.ts` — config per Mobile Chrome (Pixel 5), baseURL localhost:5173
+- `tests/analysis.spec.ts` — test E2E: upload screenshot → analisi → verifica risultati
+- `tests/example.spec.ts` — test di esempio Playwright
+
+**phone-bot/TEST-LOG.md** — aggiornato con test recenti
 
 ### Fix gia' applicato (2026-03-12):
 - `pb-4` → `pb-24` nel container principale ResultsPage (linea 590) — il bottone "SHARE YOUR DYNAMIC" era tagliato dal fondo pagina
 
-### PRIORITA' 1: iOS App — prossimi step
+## TODO — ALTRI PROSSIMI STEP
+
+### iOS App — prossimi step
 
 **Step 1 — Riaprire MacInCloud e riprendere dal simulatore**
 1. Accedere a MacInCloud via RDP
@@ -745,14 +889,14 @@ Creare `ShareDynamicOverlay.tsx` — stessa struttura di `CallOutOverlay.tsx` ma
 - Serve Apple Developer Program ($99/anno)
 - Xcode → Archive → Distribute → App Store Connect
 
-### PRIORITA' 2: Phone-Bot (rimasto da fare)
+### Phone-Bot (rimasto da fare)
 - Convertire ~100+ `time.sleep(N)` letterali in timing log-normal (tiktok.py ~40, instagram.py ~40, adb.py ~5, proxy.py ~3)
 - Spostare proxy credentials in env vars
 - Scan `random.random() < 0.` per probabilita' fisse rimaste
 - Testare search_explore_session su telefono reale (verificare coordinate griglia)
 - Testare typing rhythm (verificare che i 4 ritmi producano delay diversi)
 
-### PRIORITA' 3: n8n Pipeline
+### n8n Pipeline
 - Re-importare `unified-pipeline-fixed.json` su VPS
 - Pulire Video Runs con status='started'
 - Testare auto-produce (verificare 15 check hardening)

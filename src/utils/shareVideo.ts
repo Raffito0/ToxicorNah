@@ -34,7 +34,7 @@ export async function generateShareVideo({
   tagline,
   score,
   duration = 6000,
-}: ShareVideoParams): Promise<Blob> {
+}: ShareVideoParams, imageOnly = false): Promise<Blob> {
   // ---- Layout constants (2x scale for quality) ----
   // Logo is now INSIDE the card, so container = just padding + card
   const S = 2;
@@ -189,6 +189,15 @@ export async function generateShareVideo({
     ctx.fillText(title, contentCenterX, titleY);
   }
 
+  // ---- Image-only mode: single frame PNG export ----
+  if (imageOnly) {
+    drawFrame();
+    videoEl.pause();
+    return new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Image export failed')), 'image/png');
+    });
+  }
+
   // ---- Record video ----
   const fps = 30;
   const stream = canvas.captureStream(fps);
@@ -236,6 +245,266 @@ export async function generateShareVideo({
   });
 
   return recordingDone;
+}
+
+// ---- Dynamic Card Share Video ----
+
+export interface DynamicShareVideoParams {
+  personImageSrc: string;
+  userImageSrc: string;
+  dynamicName: string;
+  subtitle: string;
+  personSoulType: string;
+  userSoulType: string;
+  duration?: number; // ms, default 6000
+}
+
+export async function generateDynamicShareVideo({
+  personImageSrc,
+  userImageSrc,
+  dynamicName,
+  subtitle,
+  personSoulType,
+  userSoulType,
+  duration = 6000,
+}: DynamicShareVideoParams, imageOnly = false): Promise<Blob> {
+  const S = 2;
+  const containerW = 340 * S;
+  const pad = 12 * S;
+  const cardW = containerW - pad * 2;
+  const cardH = Math.round(cardW * 16 / 9);
+  const cardR = 24 * S;
+  const containerH = pad + cardH + pad;
+  const cardX = pad;
+  const cardY = pad;
+
+  // Load resources in parallel
+  const [personImg, userImg, logoImg] = await Promise.all([
+    loadImage(personImageSrc),
+    loadImage(userImageSrc),
+    loadImage('/logo-group59.png'),
+  ]);
+
+  // Create canvas
+  const canvas = document.createElement('canvas');
+  canvas.width = containerW;
+  canvas.height = containerH;
+  const ctx = canvas.getContext('2d')!;
+
+  // Pre-render blurred composite for glassmorphism
+  const blurCanvas = document.createElement('canvas');
+  blurCanvas.width = cardW;
+  blurCanvas.height = cardH;
+  const blurCtx = blurCanvas.getContext('2d')!;
+
+  // Draw both images with lighten blend into blur canvas
+  function drawBlendedImages(targetCtx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+    targetCtx.save();
+    targetCtx.globalCompositeOperation = 'source-over';
+    // Fill black background first (lighten blend needs dark base)
+    targetCtx.fillStyle = '#111111';
+    targetCtx.fillRect(x, y, w, h);
+    // Draw person image (left-aligned)
+    drawCoverWithPosition(targetCtx, personImg, x, y, w, h, 'left center');
+    // Draw user image with lighten blend (right-aligned)
+    targetCtx.globalCompositeOperation = 'lighten';
+    drawCoverWithPosition(targetCtx, userImg, x, y, w, h, 'right center');
+    targetCtx.globalCompositeOperation = 'source-over';
+    targetCtx.restore();
+  }
+
+  // Blur version
+  blurCtx.filter = 'blur(40px)';
+  drawBlendedImages(blurCtx, 0, 0, cardW, cardH);
+  blurCtx.filter = 'none';
+
+  // Text fonts
+  const titleFont = `500 ${28 * S}px Outfit, sans-serif`;
+  const subtitleFont = `200 ${14 * S}px "Plus Jakarta Sans", sans-serif`;
+  const labelFont = `200 ${9 * S}px "Plus Jakarta Sans", sans-serif`;
+  const typeFont = `400 ${14 * S}px Outfit, sans-serif`;
+
+  function drawFrame() {
+    ctx.clearRect(0, 0, containerW, containerH);
+
+    // Background
+    ctx.fillStyle = '#0a0a0a';
+    roundRect(ctx, 0, 0, containerW, containerH, 32 * S);
+    ctx.fill();
+
+    // Card (clipped)
+    ctx.save();
+    roundRectClip(ctx, cardX, cardY, cardW, cardH, cardR);
+
+    // Draw blended images
+    drawBlendedImages(ctx, cardX, cardY, cardW, cardH);
+
+    // Glassmorphism: bottom 50%
+    const glassH = Math.round(cardH * 0.50);
+    const glassY = cardY + cardH - glassH;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(cardX, glassY, cardW, glassH);
+    ctx.clip();
+    ctx.drawImage(blurCanvas, cardX, cardY, cardW, cardH);
+    const glassMask = ctx.createLinearGradient(cardX, glassY, cardX, glassY + glassH);
+    glassMask.addColorStop(0, 'rgba(0,0,0,0)');
+    glassMask.addColorStop(0.5, 'rgba(0,0,0,0.35)');
+    glassMask.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = glassMask;
+    ctx.fillRect(cardX, glassY, cardW, glassH);
+    ctx.restore();
+
+    // Dark gradient overlay (bottom 45%)
+    const gradH = Math.round(cardH * 0.45);
+    const gradY = cardY + cardH - gradH;
+    const grad = ctx.createLinearGradient(cardX, gradY, cardX, cardY + cardH);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(0.4, 'rgba(0,0,0,0.3)');
+    grad.addColorStop(0.7, 'rgba(0,0,0,0.6)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.85)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(cardX, gradY, cardW, gradH);
+
+    ctx.restore(); // end card clip
+
+    // ---- Text content ----
+    const contentCenterX = cardX + cardW / 2;
+    const contentBottom = cardY + cardH - 8 * S;
+
+    // Logo at very bottom
+    const logoH = 24 * S;
+    const logoScale = logoH / logoImg.naturalHeight;
+    const logoW = logoImg.naturalWidth * logoScale;
+    const logoX = contentCenterX - logoW / 2;
+    const logoY = contentBottom - logoH;
+    ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
+
+    // Soul Type blocks (above logo)
+    const blocksY = logoY - 20 * S;
+    const blockW = 120 * S;
+    const dividerX = contentCenterX;
+    const leftBlockX = dividerX - 10 * S - blockW / 2;
+    const rightBlockX = dividerX + 10 * S + blockW / 2;
+
+    // Divider line
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1 * S;
+    ctx.beginPath();
+    ctx.moveTo(dividerX, blocksY - 30 * S);
+    ctx.lineTo(dividerX, blocksY + 6 * S);
+    ctx.stroke();
+
+    // His Soul Type (left)
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.font = typeFont;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(personSoulType, leftBlockX, blocksY);
+    ctx.font = labelFont;
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('HIS SOUL TYPE', leftBlockX, blocksY - 18 * S);
+
+    // Your Soul Type (right)
+    ctx.font = typeFont;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(userSoulType, rightBlockX, blocksY);
+    ctx.font = labelFont;
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('YOUR SOUL TYPE', rightBlockX, blocksY - 18 * S);
+
+    // Subtitle (above soul type blocks)
+    const subtitleY = blocksY - 46 * S;
+    ctx.font = subtitleFont;
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(subtitle, contentCenterX, subtitleY);
+
+    // Dynamic Name (above subtitle)
+    const titleY = subtitleY - 8 * S;
+    ctx.font = titleFont;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(dynamicName, contentCenterX, titleY);
+  }
+
+  // Image-only mode: single frame PNG export
+  if (imageOnly) {
+    drawFrame();
+    return new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Image export failed')), 'image/png');
+    });
+  }
+
+  // Record video
+  const fps = 30;
+  const stream = canvas.captureStream(fps);
+  const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
+    ? 'video/mp4;codecs=avc1'
+    : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+    ? 'video/webm;codecs=vp9'
+    : 'video/webm';
+
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
+  const chunks: Blob[] = [];
+  recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+  const recordingDone = new Promise<Blob>((resolve) => {
+    recorder.onstop = () => {
+      const ext = mimeType.startsWith('video/mp4') ? 'video/mp4' : 'video/webm';
+      resolve(new Blob(chunks, { type: ext }));
+    };
+  });
+
+  recorder.start();
+
+  const startTime = performance.now();
+  await new Promise<void>((resolve) => {
+    function tick() {
+      const elapsed = performance.now() - startTime;
+      if (elapsed >= duration) {
+        recorder.stop();
+        resolve();
+        return;
+      }
+      drawFrame();
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
+
+  return recordingDone;
+}
+
+/** Generate a single-frame PNG image of the Soul Type share card. */
+export function generateShareImage(params: Omit<ShareVideoParams, 'duration'>): Promise<Blob> {
+  return generateShareVideo({ ...params }, true);
+}
+
+/** Generate a single-frame PNG image of the Dynamic share card. */
+export function generateDynamicShareImage(params: Omit<DynamicShareVideoParams, 'duration'>): Promise<Blob> {
+  return generateDynamicShareVideo({ ...params }, true);
+}
+
+/** Draw image in cover mode with object-position support */
+function drawCoverWithPosition(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  dx: number, dy: number, dw: number, dh: number,
+  position: string,
+) {
+  const sw = img.naturalWidth;
+  const sh = img.naturalHeight;
+  const scale = Math.max(dw / sw, dh / sh);
+  const tw = sw * scale;
+  const th = sh * scale;
+  // Parse position
+  let tx = dx + (dw - tw) / 2;
+  const ty = dy + (dh - th) / 2;
+  if (position.includes('left')) tx = dx;
+  else if (position.includes('right')) tx = dx + dw - tw;
+  ctx.drawImage(img, tx, ty, tw, th);
 }
 
 // ---- Helpers ----

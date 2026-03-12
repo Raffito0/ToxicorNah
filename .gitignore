@@ -38,3 +38,24 @@ test-*.png
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+.playwright-mcp/
+
+# Python
+__pycache__/
+*.pyc
+
+# Temp files
+fullpage.png
+test_padding.png
+assemble_orig_temp.js
+deep_forensic_analysis.cjs
+temp_*.cjs
+test_deflicker.cjs
+test_drawtext.cjs
+test_full_hardening.cjs
+test_verify_hardening.cjs
+temp_reupload.cjs
+
+# Phone-bot data
+phone-bot/data/logs/
+phone-bot/data/*.json

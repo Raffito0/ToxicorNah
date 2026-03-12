@@ -19,6 +19,7 @@ import { isDevMode } from '../utils/platform';
 import { RELATIONSHIP_STATUS_OPTIONS } from '../services/personProfileService';
 import { getAvatarBackground } from '../data/soulTypes';
 import { CallOutOverlay } from './CallOutOverlay';
+import { ShareDynamicOverlay } from './ShareDynamicOverlay';
 
 // ===== Loading Screen =====
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
@@ -177,6 +178,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   const [showArchetypeContent, setShowArchetypeContent] = useState(false);
   const [isGeneratingShare, setIsGeneratingShare] = useState(false);
   const [showCallOutPreview, setShowCallOutPreview] = useState(false);
+  const [showShareDynamic, setShowShareDynamic] = useState(false);
   const [showKeepEyeModal, setShowKeepEyeModal] = useState(false);
   const [keepEyeModalDismissed, setKeepEyeModalDismissed] = useState(false);
 
@@ -1040,9 +1042,8 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             transition={{ delay: 0.15, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
           >
             <button
-              onClick={handleShareArchetype}
-              disabled={isGeneratingShare}
-              className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-full active:scale-95 transition-all disabled:opacity-50"
+              onClick={() => setShowShareDynamic(true)}
+              className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-full active:scale-95 transition-all"
               style={{
                 background: '#7200B4',
                 fontFamily: 'Plus Jakarta Sans, sans-serif',
@@ -1052,7 +1053,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             >
               <img src="/devil (1).png" alt="" className="w-5 h-5" />
               <span className="text-white font-medium" style={{ fontSize: '15px' }}>
-                {isGeneratingShare ? 'GENERATING...' : 'SHARE YOUR DYNAMIC'}
+                SHARE YOUR DYNAMIC
               </span>
             </button>
           </motion.div>
@@ -1073,6 +1074,26 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
           gradientFrom={analysis.personArchetype.gradientFrom}
           gradientTo={analysis.personArchetype.gradientTo}
           sideProfileImageUrl={analysis.personArchetype.sideProfileImageUrl}
+        />
+      )}
+
+      {/* SHARE YOUR DYNAMIC — Preview Overlay */}
+      {analysis && (
+        <ShareDynamicOverlay
+          isOpen={showShareDynamic}
+          onClose={() => setShowShareDynamic(false)}
+          dynamicName={analysis.relationshipDynamic.name}
+          subtitle={analysis.relationshipDynamic.subtitle}
+          personArchetype={{
+            title: analysis.personArchetype.title,
+            imageUrl: analysis.personArchetype.imageUrl,
+            sideProfileImageUrl: analysis.personArchetype.sideProfileImageUrl,
+          }}
+          userArchetype={{
+            title: analysis.userArchetype.title,
+            imageUrl: analysis.userArchetype.imageUrl,
+            sideProfileImageUrl: analysis.userArchetype.sideProfileImageUrl,
+          }}
         />
       )}
 
