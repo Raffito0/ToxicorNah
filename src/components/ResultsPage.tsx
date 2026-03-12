@@ -227,6 +227,8 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
       return;
     }
 
+    let interval: ReturnType<typeof setInterval> | null = null;
+
     const checkResults = async () => {
       const status = getAnalysisStatus(analysisId);
 
@@ -241,17 +243,21 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             // Check if Phase 2 is done
             if (status === 'completed') {
               setIsDetailedLoading(false);
+              // Stop polling — analysis is fully complete
+              if (interval) clearInterval(interval);
             }
           }
         } catch (error) {
           console.error('Error loading analysis:', error);
           setIsLoading(false);
           setIsDetailedLoading(false);
+          if (interval) clearInterval(interval);
         }
       } else if (status === 'error') {
         console.error('Analysis failed');
         setIsLoading(false);
         setIsDetailedLoading(false);
+        if (interval) clearInterval(interval);
       }
       // If still 'pending', keep polling
     };
@@ -260,9 +266,9 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
     checkResults();
 
     // Poll every 500ms
-    const interval = setInterval(checkResults, 500);
+    interval = setInterval(checkResults, 500);
 
-    return () => clearInterval(interval);
+    return () => { if (interval) clearInterval(interval); };
   }, [analysisId]);
 
   async function loadUserState() {
@@ -581,9 +587,9 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
       )}
 
       {/* Content — overlaps hero by 40px to hide any seam (same pattern as PersonProfile) */}
-      <div className="relative flex flex-col items-center justify-center pb-4 bg-black" style={{ marginTop: isFirstTime ? '0px' : '-40px', zIndex: 10 }}>
+      <div className="relative flex flex-col items-center justify-center pb-24 bg-black" style={{ marginTop: (!analysis?.personName || analysis.personName === 'Him' || analysis.personName === 'Unknown') ? '0px' : '-40px', zIndex: 10 }}>
         <div className="w-full max-w-md px-[30px]">
-          <div className="bg-black pt-4 pb-12">
+          <div className="bg-black pb-12" style={{ paddingTop: (!analysis?.personName || analysis.personName === 'Him' || analysis.personName === 'Unknown') ? '60px' : '16px' }}>
             <div className="text-center mb-3">
               <motion.p
                 className="text-white/50 uppercase tracking-widest mb-2"

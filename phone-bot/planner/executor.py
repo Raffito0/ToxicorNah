@@ -20,7 +20,10 @@ from ..core.proxy import ProxyQueue
 from ..actions.tiktok import TikTokBot
 from ..actions.instagram import InstagramBot
 from .warmup import AccountWarmupState, generate_warmup_sessions, generate_warmup_plan
-from delivery import get_next_video, download_video, push_to_phone, mark_posted, mark_draft, mark_skipped
+try:
+    from delivery import get_next_video, download_video, push_to_phone, mark_posted, mark_draft, mark_skipped
+except ImportError:
+    get_next_video = download_video = push_to_phone = mark_posted = mark_draft = mark_skipped = None
 
 log = logging.getLogger(__name__)
 

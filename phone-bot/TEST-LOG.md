@@ -127,11 +127,81 @@ Phases: arrival=0.0-0.2, warmup=0.2-0.6, peak=0.6-1.3, fatigue=1.3-1.8, exit=1.8
 
 ---
 
+## Test 3: 5-min Scroll with Fatigue/Dead Zone Verification (2026-03-12, ~13:31)
+**Command**: `ADB_PATH=... PHONEBOT_TEST=1 python -m phone-bot --scroll-only --phone 4 --duration 5`
+**Duration**: 5 minutes
+**Result**: 23 videos in 305s — **PASS**
+
+### Setup Issues (first run on work PC)
+- ADB not installed: downloaded `platform-tools` to Desktop, set `ADB_PATH` env var
+- Missing Python packages: installed `Pillow`, `httpx`, `google-generativeai`
+- `delivery` module not found: path pointed to home PC (`OneDrive/Desktop/Toxic or Nah/`). Fixed: made import optional with try/except in `executor.py`
+
+### Raw Data
+```
+Video #1:  Watch 10.2s → Swipe (408,1187)->(399,420) 339ms [FAILED - popup blocked input]
+Video #2:  Watch 2.3s  → Swipe (404,1183)->(398,396) 302ms
+Video #3:  Watch 22.4s → Swipe (412,1194)->(395,410) 306ms
+Video #4:  Watch 5.0s  → Swipe (407,1207)->(396,387) 318ms
+Video #5:  Watch 4.1s  → Swipe (408,1195)->(400,426) 271ms
+Video #6:  Watch 9.2s  → Swipe (418,1223)->(402,385) 316ms
+Video #7:  Watch 25.4s → Swipe (400,1191)->(393,396) 386ms
+Video #8:  Watch 22.0s → Swipe (399,1208)->(410,409) 320ms  [DEAD ZONE: 10.01s delay before this]
+Video #9:  Watch 22.0s → Swipe (408,1208)->(390,394) 307ms
+Video #10: Watch 6.7s  → Swipe (402,1210)->(399,369) 382ms
+Video #11: Watch 24.2s → Swipe (415,1202)->(384,405) 303ms
+Video #12: Watch 26.2s → Swipe (397,1209)->(405,387) 296ms
+Video #13: Watch 3.7s  → Swipe (413,1209)->(390,390) 344ms  [DEAD ZONE: 6.37s delay before this]
+Video #14: Watch 5.1s  → Swipe (417,1213)->(402,412) 285ms
+Video #15: Watch 9.4s  → Swipe (400,1211)->(399,386) 350ms
+Video #16: Watch 3.8s  → Swipe (418,1204)->(402,385) 296ms
+Video #17: Watch 3.5s  → Swipe (406,1224)->(401,413) 295ms
+Video #18: Watch 13.8s → Swipe (387,1199)->(400,371) 329ms
+Video #19: Watch 6.3s  → Swipe (417,1200)->(400,377) 343ms
+Video #20: Watch 4.7s  → Swipe (412,1223)->(391,388) 347ms
+Video #21: Watch 5.3s  → Swipe (422,1223)->(382,364) 389ms  [DEAD ZONE: 3.77s delay before this]
+Video #22: Watch 2.6s  → Swipe (402,1206)->(384,401) 342ms
+Video #23: Watch 7.6s  → Swipe (406,1181)->(403,384) 332ms
+```
+
+### Analysis
+
+**Fatigue drift** ✅:
+- Early (video 1-8): avg speed ~305ms
+- Late (video 18-23): avg speed ~340ms
+- Gradual slowdown visible toward end of session
+
+**Dead zones** ✅ (3 occurrences):
+- Video 7→8: **10.01s** delay (bot "zoned out")
+- Video 12→13: **6.37s** delay
+- Video 20→21: **3.77s** delay
+- Rest: 0.35s-2.13s (normal)
+
+**Session phases** ✅:
+- Arrival (0-0.5 min): short watches, fast swipes
+- Peak (1.5-2.9 min): long watches 22-26s (video 7-12)
+- Fatigue (2.9-4.5 min): shorter watches, faster scrolling
+- Exit (4.5-5 min): rapid short videos (2.6-7.6s)
+
+**INJECT_EVENTS error on swipe #1**: TikTok policy update popup appeared on app open (same as TikTok Shop popup in Test 1). User dismissed manually, all subsequent swipes worked. Confirms need for popup handler.
+
+**No crashes, no freezes, no double-skips.**
+
+### Session Metadata
+```
+Mood: normal, energy=0.89, social=1.48
+Personality: reels=23%, stories=33%, dbl_tap=49%
+Phases: arrival=0.0-0.5, warmup=0.5-1.5, peak=1.5-2.9, fatigue=2.9-4.5, exit=4.5-5.0
+```
+
+---
+
 ## Known Issues / Future Work
 
 ### Popups
-- TikTok Shop popup appeared on first open. Currently not handled automatically.
-- Solution: Use `adb.find_on_screen("close button")` with Gemini Vision to detect and dismiss popups before starting scroll.
+- TikTok Shop popup appeared on first open (Test 1). TikTok policy update popup appeared on app open (Test 3). Currently not handled automatically — user must dismiss manually.
+- Both popups block `input swipe` with `INJECT_EVENTS permission` error
+- Solution: After opening TikTok, take screenshot + Gemini Vision (or simple pattern match) to detect and dismiss popups before starting scroll. Must handle: policy update, TikTok Shop, notification permission, location permission.
 
 ### Test Safety
 - Don't run multiple tests in quick succession on the same account — TikTok monitors session frequency.
@@ -375,8 +445,8 @@ Dopo warmup: Test 7.x (sessione completa con weekly plan)
 | Test | Stato | Data | Note |
 |------|-------|------|------|
 | 1.1  | ✅ PASS | 2026-03-11 | 7 video, swipe umano |
-| 1.2  | ⏳ NEXT | — | Aspettare 45 min |
-| 1.3  | ⬜ | — | |
+| 1.2  | ✅ PASS | 2026-03-12 | 23 video, fatigue+dead zones OK, popup policy |
+| 1.3  | ⏳ NEXT | — | Aspettare 45 min |
 | 2.1-2.5 | ⬜ | — | |
 | 3.1-3.5 | ⬜ | — | |
 | 4.1-4.3 | ⬜ | — | Serve Samsung |

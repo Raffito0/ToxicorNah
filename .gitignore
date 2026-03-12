@@ -31,3 +31,10 @@ nul
 test-*.png
 
 .vercel
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

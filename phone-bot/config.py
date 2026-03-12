@@ -275,7 +275,7 @@ LOGS_DIR = os.path.join(DATA_DIR, "logs")
 
 # Delivery module (existing, in Weekly & Daily Plan)
 DELIVERY_MODULE_DIR = os.path.join(
-    os.path.expanduser("~"), "OneDrive", "Desktop", "Toxic or Nah", "Weekly & Daily Plan"
+    os.path.expanduser("~"), "Desktop", "Weekly & Daily Plan"
 )
 import sys
 if DELIVERY_MODULE_DIR not in sys.path:

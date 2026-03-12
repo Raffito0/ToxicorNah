@@ -706,6 +706,16 @@ Poi in Xcode: seleziona iPhone 17 Pro → Play (triangolo)
 
 ## TODO — PROSSIMI STEP (da dove riprendere)
 
+### DA FARE: Share Dynamic Overlay (approvato, non ancora implementato)
+Creare `ShareDynamicOverlay.tsx` — stessa struttura di `CallOutOverlay.tsx` ma mostra la facciata frontale della DynamicCard:
+- Card 9:16: due immagini side profile + `mix-blend-mode: lighten` su `#111111`, glassmorphism + gradient scuro, dynamic name, subtitle, "His Soul Type"/"Your Soul Type" blocks, logo `logo-group59.png` in fondo
+- Stessi 4 bottoni share (Instagram Stories, Save video, Copy link, More...)
+- In `ResultsPage.tsx`: stato `showShareDynamic`, bottone "SHARE YOUR DYNAMIC" apre overlay (non piu' `handleShareArchetype` diretto), montare `<ShareDynamicOverlay>` con dati dynamic + archetypes
+- Video generation: `generateShareVideo` con immagini side profile
+
+### Fix gia' applicato (2026-03-12):
+- `pb-4` → `pb-24` nel container principale ResultsPage (linea 590) — il bottone "SHARE YOUR DYNAMIC" era tagliato dal fondo pagina
+
 ### PRIORITA' 1: iOS App — prossimi step
 
 **Step 1 — Riaprire MacInCloud e riprendere dal simulatore**
