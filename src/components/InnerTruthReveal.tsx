@@ -102,7 +102,7 @@ export function InnerTruthReveal({ content, onClose }: InnerTruthRevealProps) {
           style={{
             fontSize: '11px',
             letterSpacing: '0.2em',
-            fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+            fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200,
             color: 'rgba(212, 175, 55, 0.8)',
           }}
           initial={{ opacity: 0, y: 10 }}

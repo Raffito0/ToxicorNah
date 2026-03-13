@@ -67,7 +67,7 @@ export function SigilsScreen({ isOpen, onClose, onStateChange }: SigilsScreenPro
           <div>
             <p
               className="text-white/50 uppercase tracking-widest mb-1"
-              style={{ fontSize: '12px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
+              style={{ fontSize: '12px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
             >
               SIGILS
             </p>
@@ -209,7 +209,7 @@ function InnerTruthCard({ state, nextDropIn, onBreakSeal }: InnerTruthCardProps)
         <span
           style={{
             fontSize: '10px',
-            fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+            fontFamily: 'Plus Jakarta Sans, sans-serif',
             color: getStatusColor(),
             fontWeight: 600,
             letterSpacing: '0.05em',
@@ -250,7 +250,7 @@ function InnerTruthCard({ state, nextDropIn, onBreakSeal }: InnerTruthCardProps)
       <div className="absolute bottom-0 left-0 right-0 p-6">
         <p
           className="text-white/50 uppercase tracking-widest mb-1"
-          style={{ fontSize: '10px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
+          style={{ fontSize: '10px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
         >
           INNER TRUTH
         </p>
@@ -365,7 +365,7 @@ function MirrorCard({ newCount, waitingCount, hasSummary }: MirrorCardProps) {
         <span
           style={{
             fontSize: '10px',
-            fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+            fontFamily: 'Plus Jakarta Sans, sans-serif',
             color: getStatusColor(),
             fontWeight: 600,
             letterSpacing: '0.05em',
@@ -379,7 +379,7 @@ function MirrorCard({ newCount, waitingCount, hasSummary }: MirrorCardProps) {
       <div className="absolute bottom-0 left-0 right-0 p-6">
         <p
           className="text-white/50 uppercase tracking-widest mb-1"
-          style={{ fontSize: '10px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
+          style={{ fontSize: '10px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
         >
           MIRROR
         </p>
