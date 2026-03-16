@@ -5,21 +5,21 @@ const config: CapacitorConfig = {
   appName: 'Toxic or Nah',
   webDir: 'dist',
   android: {
-    backgroundColor: '#111111',
+    backgroundColor: '#000000',
   },
   ios: {
-    backgroundColor: '#111111',
+    backgroundColor: '#000000',
     contentInset: 'always',
     preferredContentMode: 'mobile',
   },
   plugins: {
     SplashScreen: {
       launchShowDuration: 0,
-      backgroundColor: '#111111',
+      backgroundColor: '#000000',
     },
     StatusBar: {
       style: 'DARK',
-      backgroundColor: '#111111',
+      backgroundColor: '#000000',
     },
   },
 };

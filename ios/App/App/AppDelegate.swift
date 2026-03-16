@@ -10,7 +10,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Match native background to web app #111111 — eliminates
         // the dark gray bands at status bar and home indicator areas
-        let bgColor = UIColor(red: 17.0/255.0, green: 17.0/255.0, blue: 17.0/255.0, alpha: 1.0)
+        let bgColor = UIColor(red: 0, green: 0, blue: 0, alpha: 1.0)
 
         DispatchQueue.main.async {
             guard let window = self.window else { return }

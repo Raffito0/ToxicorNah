@@ -4,7 +4,7 @@
 
 /* iOS safe-area: background extends edge-to-edge behind status bar & home indicator */
 html, body, #root {
-  background-color: #111111;
+  background-color: #000000;
 }
 
 #root {
