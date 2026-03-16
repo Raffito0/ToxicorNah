@@ -347,7 +347,7 @@ function VitalCard({ numericValue, suffix, label, accentColor, delay, background
       {/* Label */}
       <p
         className="text-white/70 mt-1.5 relative z-10"
-        style={{ fontSize: '13px', letterSpacing: '0.02em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
+        style={{ fontSize: '13px', letterSpacing: '0.02em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
       >
         {label}
       </p>
@@ -1730,7 +1730,7 @@ function ReceiptsSection({ data, isLocked, onUnlockClick }: { data: PersonProfil
     <Section className="pt-24">
       <p
         className="text-white/50 uppercase tracking-widest mb-2"
-        style={{ letterSpacing: '0.15em', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
+        style={{ letterSpacing: '0.15em', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
       >
         Message Breakdown
       </p>
@@ -1877,7 +1877,7 @@ function ReceiptsSection({ data, isLocked, onUnlockClick }: { data: PersonProfil
                           fontSize: '12px',
                           lineHeight: '1.35',
                           fontWeight: 400,
-                          fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+                          fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px',
                           display: '-webkit-box',
                           WebkitLineClamp: 4,
                           WebkitBoxOrient: 'vertical' as const,
@@ -1925,7 +1925,7 @@ function ReceiptsSection({ data, isLocked, onUnlockClick }: { data: PersonProfil
                           fontSize: '13px',
                           lineHeight: '1.35',
                           fontWeight: 400,
-                          fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+                          fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px',
                           color: 'rgba(255, 255, 255, 0.6)',
                           display: '-webkit-box',
                           WebkitLineClamp: descriptionLineClamp,
@@ -2265,7 +2265,7 @@ function PowerMoveSection({ data, onAnalyzeNew }: { data: PersonProfileData; onA
             >
               <p
                 className="text-white/40 uppercase tracking-widest mb-3"
-                style={{ fontSize: '12px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
+                style={{ fontSize: '12px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
               >
                 Pattern Break
               </p>
@@ -2283,7 +2283,7 @@ function PowerMoveSection({ data, onAnalyzeNew }: { data: PersonProfileData; onA
             >
               <p
                 className="text-white/40 uppercase tracking-widest mb-3"
-                style={{ fontSize: '12px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
+                style={{ fontSize: '12px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200 }}
               >
                 The Script
               </p>

@@ -800,7 +800,7 @@ function GoodBadTraitsSection({ data }: { data: SoulProfileData }) {
             {/* Label */}
             <p
               className="text-xs uppercase tracking-widest mb-2"
-              style={{ color: '#ff9f9f', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', letterSpacing: '0.15em' }}
+              style={{ color: '#ff9f9f', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '0.15em' }}
             >
               Your Shadow
             </p>
@@ -880,7 +880,7 @@ function GoodBadTraitsSection({ data }: { data: SoulProfileData }) {
             {/* Label */}
             <p
               className="text-xs uppercase tracking-widest mb-2"
-              style={{ color: '#c8ff9f', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', letterSpacing: '0.15em' }}
+              style={{ color: '#c8ff9f', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '0.15em' }}
             >
               Your Light
             </p>
@@ -2311,7 +2311,7 @@ function SettingsSectionHeader({ title }: { title: string }) {
       className="px-4 pt-5 pb-2 uppercase tracking-wider"
       style={{
         fontSize: '11px',
-        fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+        fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200,
         color: 'rgba(255, 255, 255, 0.35)',
         letterSpacing: '0.08em',
       }}
@@ -2703,7 +2703,7 @@ function SettingsBottomSheet({ isOpen, onClose, userData }: SettingsBottomSheetP
                     className="px-2.5 py-1 rounded-full"
                     style={{
                       fontSize: '11px',
-                      fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+                      fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px',
                       fontWeight: 600,
                       background: userData.isPremium ? 'rgba(212, 175, 55, 0.2)' : 'rgba(255, 255, 255, 0.1)',
                       color: userData.isPremium ? '#d4af37' : 'rgba(255, 255, 255, 0.5)',

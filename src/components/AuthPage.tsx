@@ -284,7 +284,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
               disabled={loading}
               className="w-full text-white rounded-full px-6 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed text-base"
               style={{
-                fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+                fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px',
                 background: 'linear-gradient(135deg, #B794F4 0%, #8B5CF6 100%)',
                 fontSize: '16px',
                 fontWeight: 600,
@@ -381,7 +381,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
                 disabled={loading || verificationCode.join('').length !== 6}
                 className="w-full text-white rounded-full px-6 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed mb-4"
                 style={{
-                  fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+                  fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px',
                   background: 'linear-gradient(135deg, #B794F4 0%, #8B5CF6 100%)',
                   fontSize: '16px',
                   fontWeight: 600,
@@ -500,7 +500,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
               disabled={loading}
               className="w-full text-white rounded-full px-6 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed text-base"
               style={{
-                fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+                fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px',
                 background: 'linear-gradient(135deg, #B794F4 0%, #8B5CF6 100%)',
                 fontSize: '16px',
                 fontWeight: 600,
@@ -597,7 +597,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
                 disabled={loading || verificationCode.join('').length !== 6}
                 className="w-full text-white rounded-full px-6 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed mb-4"
                 style={{
-                  fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+                  fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px',
                   background: 'linear-gradient(135deg, #B794F4 0%, #8B5CF6 100%)',
                   fontSize: '16px',
                   fontWeight: 600,

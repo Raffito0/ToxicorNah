@@ -70,7 +70,7 @@ export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
                 transition={{ duration: 0.2 }}
                 style={{
                   fontSize: '12px',
-                  fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
+                  fontFamily: 'Plus Jakarta Sans, sans-serif', letterSpacing: '1.5px',
                   fontWeight: isActive ? 600 : 400,
                   color: 'white',
                 }}
