@@ -9,11 +9,11 @@ import { SigilIcon } from './SigilIcon';
 import { SigilsScreen } from './SigilsScreen';
 import { PaywallModal } from './PaywallModal';
 import { getUserState, UserState, canPurchaseSingleUnlock } from '../services/userStateService';
-import { createSubscriptionCheckout, createSingleUnlockCheckout, createCustomerPortalSession, getSubscriptionDetails } from '../services/stripeService';
+import { manageSubscription, restorePurchases as restorePurchasesService, subscribe, singleUnlock } from '../services/purchaseService';
 import { supabase } from '../lib/supabase';
 import { getMaleSoulTypeByName, getFemaleSoulTypeByName } from '../data/soulTypes';
 import { getDailyDuality } from '../data/soulTypeDuality';
-import { isDevMode } from '../utils/platform';
+import { isDevMode, isIOSNative } from '../utils/platform';
 
 // ===== Section animation wrapper =====
 function Section({ children, className = '', style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
@@ -91,6 +91,7 @@ function FilmOverlay({
           style={{
             background: `radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, ${vignetteIntensity}) 100%)`,
             backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
           }}
         />
       )}
@@ -103,6 +104,7 @@ function FilmOverlay({
             backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")`,
             mixBlendMode: 'overlay',
             backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
           }}
         />
       )}
@@ -112,6 +114,7 @@ function FilmOverlay({
         style={{
           boxShadow: `inset 0 0 40px ${glowColor}`,
           backfaceVisibility: 'hidden',
+          WebkitBackfaceVisibility: 'hidden',
         }}
       />
     </>
@@ -562,28 +565,16 @@ export function SoulPage() {
   };
 
   async function handleSubscribe(plan: 'annual' | 'monthly') {
-    const { url, error } = await createSubscriptionCheckout(undefined, plan);
-
-    if (error) {
-      console.error('Subscription checkout error:', error);
-      throw new Error(error);
-    }
-
-    if (url) {
-      window.location.href = url;
+    const result = await subscribe(plan);
+    if (result.success && isIOSNative()) {
+      window.location.reload();
     }
   }
 
   async function handleSingleUnlock() {
-    const { url, error } = await createSingleUnlockCheckout('soul-profile');
-
-    if (error) {
-      console.error('Single unlock checkout error:', error);
-      throw new Error(error);
-    }
-
-    if (url) {
-      window.location.href = url;
+    const result = await singleUnlock('soul-profile');
+    if (result.success && isIOSNative()) {
+      window.location.reload();
     }
   }
 
@@ -670,6 +661,13 @@ export function SoulPage() {
         canUseSingleUnlock={paywallState.canUseSingleUnlock}
         singleUnlocksRemaining={paywallState.singleUnlocksRemaining}
         isFirstAnalysis={paywallState.isFirstAnalysis}
+        isNativeIOS={isIOSNative()}
+        onRestore={async () => {
+          const { restored } = await restorePurchasesService();
+          if (restored) {
+            window.location.reload();
+          }
+        }}
       />
     </div>
   );
@@ -679,12 +677,22 @@ export function SoulPage() {
 function GoodBadTraitsSection({ data }: { data: SoulProfileData }) {
   const [shadowRevealed, setShadowRevealed] = useState(false);
 
-  // Dynamic data from Soul Type duality map — changes daily
+  // Use AI synthesis traits if available, else daily rotation from lookup table
+  const synthesis = data.soulSynthesis?.yourTwoSides;
   const dailyDuality = getDailyDuality(data.dominantArchetype.title);
 
-  // Fallback if soul type not in map
-  const todaysLight = dailyDuality?.light || { trait: "Self-Aware", tagline: "You see your patterns clearly." };
-  const todaysShadow = dailyDuality?.shadow || { trait: "Pattern Repeater", tagline: "Knowing isn't the same as changing." };
+  let todaysLight: { trait: string; tagline: string };
+  let todaysShadow: { trait: string; tagline: string };
+
+  if (synthesis?.light?.length && synthesis?.shadow?.length) {
+    // AI-generated: rotate through the 4 traits daily
+    const dayIndex = new Date().getDate() % Math.min(synthesis.light.length, 4);
+    todaysLight = synthesis.light[dayIndex];
+    todaysShadow = synthesis.shadow[dayIndex % synthesis.shadow.length];
+  } else {
+    todaysLight = dailyDuality?.light || { trait: "Self-Aware", tagline: "You see your patterns clearly." };
+    todaysShadow = dailyDuality?.shadow || { trait: "Pattern Repeater", tagline: "Knowing isn't the same as changing." };
+  }
 
   const handleRevealShadow = () => {
     setShadowRevealed(true);
@@ -724,7 +732,9 @@ function GoodBadTraitsSection({ data }: { data: SoulProfileData }) {
           width: `${CARD_WIDTH}px`,
           height: `${CARD_HEIGHT}px`,
           perspective: '1000px',
-        }}
+          WebkitPerspective: '1000px',
+          transform: 'translate3d(0,0,0)',
+        } as React.CSSProperties}
         onClick={handleRevealShadow}
       >
         {/* Shadow Card (Behind) */}
@@ -739,14 +749,17 @@ function GoodBadTraitsSection({ data }: { data: SoulProfileData }) {
           transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
           style={{
             transformStyle: 'preserve-3d',
+            WebkitTransformStyle: 'preserve-3d',
             backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            backgroundColor: '#111111',
             borderTop: '1px solid rgba(239, 68, 68, 0.3)',
             borderLeft: '1px solid rgba(239, 68, 68, 0.3)',
             borderRight: '1px solid rgba(239, 68, 68, 0.3)',
             borderBottom: 'none',
             zIndex: shadowRevealed ? 2 : 1,
             boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
-          }}
+          } as React.CSSProperties}
         >
           {/* Background Image */}
           <img
@@ -821,14 +834,17 @@ function GoodBadTraitsSection({ data }: { data: SoulProfileData }) {
           transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
           style={{
             transformStyle: 'preserve-3d',
+            WebkitTransformStyle: 'preserve-3d',
             backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            backgroundColor: '#111111',
             borderTop: '1px solid rgba(34, 197, 94, 0.3)',
             borderLeft: '1px solid rgba(34, 197, 94, 0.3)',
             borderRight: '1px solid rgba(34, 197, 94, 0.3)',
             borderBottom: 'none',
             zIndex: shadowRevealed ? 1 : 2,
             boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
-          }}
+          } as React.CSSProperties}
         >
           {/* Background Image */}
           <img
@@ -1111,15 +1127,17 @@ function TypeYouAttractSection({ data, isLocked = false, onUnlockClick }: { data
         className="relative w-full cursor-pointer"
         style={{
           perspective: '1000px',
+          WebkitPerspective: '1000px',
           aspectRatio: '9/16',
           filter: isLocked ? 'blur(12px)' : 'none',
           pointerEvents: isLocked ? 'none' : 'auto',
-        }}
+          transform: 'translate3d(0,0,0)',
+        } as React.CSSProperties}
         onClick={handleFlip}
       >
         <motion.div
           className="relative w-full h-full"
-          style={{ transformStyle: 'preserve-3d' }}
+          style={{ transformStyle: 'preserve-3d', WebkitTransformStyle: 'preserve-3d' } as React.CSSProperties}
           initial={false}
           animate={{ rotateY: isFlipped ? 180 : 0 }}
           transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
@@ -1130,8 +1148,9 @@ function TypeYouAttractSection({ data, isLocked = false, onUnlockClick }: { data
             style={{
               backgroundColor: '#111111',
               backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
               boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-            }}
+            } as React.CSSProperties}
           >
             {/* Full vertical archetype image/video */}
             <SoulTypeMedia
@@ -1234,7 +1253,9 @@ function TypeYouAttractSection({ data, isLocked = false, onUnlockClick }: { data
             style={{
               backgroundColor: '#111111',
               backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
               transform: 'rotateY(180deg)',
+              WebkitTransform: 'rotateY(180deg)',
               boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
             }}
           >
@@ -1393,7 +1414,8 @@ function SoulCompatibilitySection({ data, isLocked = false, onUnlockClick }: { d
                 style={{
                   zIndex: visualIndex,
                   perspective: '1000px',
-                  transform: `translateY(${translateY}px)`,
+                  WebkitPerspective: '1000px',
+                  transform: `translate3d(0, ${translateY}px, 0)`,
                 }}
               >
                 <motion.div
@@ -1430,7 +1452,7 @@ function SoulCompatibilitySection({ data, isLocked = false, onUnlockClick }: { d
                 >
                   <motion.div
                     className="relative w-full h-full"
-                    style={{ transformStyle: 'preserve-3d' }}
+                    style={{ transformStyle: 'preserve-3d', WebkitTransformStyle: 'preserve-3d' } as React.CSSProperties}
                     initial={false}
                     animate={{ rotateY: isFlipped ? 180 : 0 }}
                     transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
@@ -1441,11 +1463,12 @@ function SoulCompatibilitySection({ data, isLocked = false, onUnlockClick }: { d
                       style={{
                         backgroundColor: '#111111',
                         backfaceVisibility: 'hidden',
+                        WebkitBackfaceVisibility: 'hidden',
                         transform: 'rotateY(0deg)',
                         borderRadius: '28px',
                         clipPath: 'inset(0 round 28px)',
                         WebkitClipPath: 'inset(0 round 28px)',
-                      }}
+                      } as React.CSSProperties}
                     >
                       {/* Lock overlay on each card */}
                       {isLocked && (
@@ -1553,9 +1576,11 @@ function SoulCompatibilitySection({ data, isLocked = false, onUnlockClick }: { d
                       style={{
                         backgroundColor: '#111111',
                         backfaceVisibility: 'hidden',
+                        WebkitBackfaceVisibility: 'hidden',
                         transform: 'rotateY(180deg)',
+                        WebkitTransform: 'rotateY(180deg)',
                         boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-                      }}
+                      } as React.CSSProperties}
                     >
                       {/* Background image/video - blurred for glassmorphism effect */}
                       <SoulTypeMedia
@@ -1714,7 +1739,9 @@ function MistakesSection({ data, isLocked = false, onUnlockClick }: { data: Soul
                 style={{
                   zIndex: visualIndex,
                   perspective: '1000px',
-                }}
+                  WebkitPerspective: '1000px',
+                  transform: 'translate3d(0,0,0)',
+                } as React.CSSProperties}
                 initial={false}
                 animate={{
                   rotate: rotation,
@@ -1759,7 +1786,7 @@ function MistakesSection({ data, isLocked = false, onUnlockClick }: { data: Soul
                       handleFlip(mistake.originalIndex);
                     }
                   }}
-                  style={{ transformStyle: 'preserve-3d' }}
+                  style={{ transformStyle: 'preserve-3d', WebkitTransformStyle: 'preserve-3d' } as React.CSSProperties}
                 >
                   {/* Lock overlay */}
                   {isLocked && isTop && (
@@ -1793,10 +1820,12 @@ function MistakesSection({ data, isLocked = false, onUnlockClick }: { data: Soul
                     transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
                     style={{
                       transformStyle: 'preserve-3d',
+                      WebkitTransformStyle: 'preserve-3d',
                       backfaceVisibility: 'hidden',
+                      WebkitBackfaceVisibility: 'hidden',
                       background: '#111111',
                       boxShadow: '0 10px 40px rgba(0, 0, 0, 0.4)',
-                    }}
+                    } as React.CSSProperties}
                   >
                     {/* Background image - only if exists */}
                     {mistake.image && (
@@ -1895,10 +1924,12 @@ function MistakesSection({ data, isLocked = false, onUnlockClick }: { data: Soul
                     transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
                     style={{
                       transformStyle: 'preserve-3d',
+                      WebkitTransformStyle: 'preserve-3d',
                       backfaceVisibility: 'hidden',
+                      WebkitBackfaceVisibility: 'hidden',
                       background: '#111111',
                       boxShadow: '0 10px 40px rgba(0, 0, 0, 0.4)',
-                    }}
+                    } as React.CSSProperties}
                   >
                     {/* Background image - only if exists */}
                     {mistake.image && (
@@ -2354,14 +2385,9 @@ function SettingsBottomSheet({ isOpen, onClose, userData }: SettingsBottomSheetP
     setIsLoading('subscription');
     haptics.light();
     try {
-      const { url, error } = await createCustomerPortalSession();
-      if (url) {
-        window.location.href = url;
-      } else if (error) {
-        alert('Unable to open subscription management. Please try again.');
-      }
+      await manageSubscription();
     } catch (err) {
-      alert('Something went wrong. Please try again.');
+      alert('Unable to open subscription management. Please try again.');
     } finally {
       setIsLoading(null);
     }
@@ -2371,8 +2397,8 @@ function SettingsBottomSheet({ isOpen, onClose, userData }: SettingsBottomSheetP
     setIsLoading('restore');
     haptics.light();
     try {
-      const { isActive } = await getSubscriptionDetails();
-      if (isActive) {
+      const { restored } = await restorePurchasesService();
+      if (restored) {
         alert('Your subscription has been restored successfully!');
         window.location.reload();
       } else {

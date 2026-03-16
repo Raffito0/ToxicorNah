@@ -238,7 +238,6 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                 className="absolute inset-0"
                 style={{
                   zIndex: visualIndex,
-                  willChange: 'transform, filter',
                 }}
                 initial={false}
                 animate={hasDealt ? {
@@ -265,7 +264,7 @@ export function SwipeableCardDeck({ analysisId, isFirstTimeFree = false, onPaywa
                 {/* Inner div: handles drag only (separate from stack position) */}
                 <motion.div
                   className={`w-full h-full ${isTop ? 'cursor-pointer' : ''}`}
-                  style={{ touchAction: 'none', willChange: 'transform' }}
+                  style={{ touchAction: 'none' }}
                   drag={isTop ? true : false}
                   dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
                   dragElastic={0.7}

@@ -10,6 +10,7 @@ import { ShareLandingPage } from './components/ShareLandingPage';
 import { BottomNav, TabId } from './components/BottomNav';
 import { supabase } from './lib/supabase';
 import { loadScenario, loadScenarioFromSupabase } from './services/contentModeService';
+import { initPurchases } from './services/purchaseService';
 import type { ContentScenario } from './types/contentScenario';
 
 function App() {
@@ -25,6 +26,9 @@ function App() {
   const [guestMode, setGuestMode] = useState(false);
 
   useEffect(() => {
+    // Initialize in-app purchases (no-op on web, sets up StoreKit on iOS)
+    initPurchases().catch(console.error);
+
     // Handle App Link sid injected by Android MainActivity
     const handleApplinkSid = (e: Event) => {
       const sid = (e as CustomEvent).detail as string;
@@ -137,7 +141,7 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
+      <div className="min-h-screen bg-[#111111] flex items-center justify-center">
         <div className="text-white text-lg" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}>
           Loading...
         </div>
@@ -179,7 +183,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-black overflow-x-hidden">
+    <div className="min-h-screen bg-[#111111] overflow-x-hidden">
       <div className={guestMode ? '' : 'pb-[72px]'}>
         {renderTabContent()}
       </div>

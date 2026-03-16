@@ -85,14 +85,16 @@ export function DynamicCard({
         className="relative w-full cursor-pointer"
         style={{
           perspective: '1000px',
+          WebkitPerspective: '1000px',
           aspectRatio: '9/16',
-          transform: 'translateZ(0)',
+          transform: 'translate3d(0,0,0)',
+          WebkitTransform: 'translate3d(0,0,0)',
         }}
         onClick={handleClick}
       >
         <motion.div
           className="relative w-full h-full"
-          style={{ transformStyle: 'preserve-3d' }}
+          style={{ transformStyle: 'preserve-3d', WebkitTransformStyle: 'preserve-3d' } as React.CSSProperties}
           initial={false}
           animate={{ rotateY: isFlipped ? 180 : 0 }}
           transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
@@ -103,8 +105,9 @@ export function DynamicCard({
             style={{
               backgroundColor: '#111111',
               backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
               boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-            }}
+            } as React.CSSProperties}
           >
             {/* Side profile images - male left, female right, overlapping with blend */}
             <img
@@ -265,8 +268,11 @@ export function DynamicCard({
             className="absolute inset-0 rounded-[28px] overflow-hidden flex flex-col justify-center"
             style={{
               backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
               transform: 'rotateY(180deg)',
-            }}
+              WebkitTransform: 'rotateY(180deg)',
+              backgroundColor: '#111111',
+            } as React.CSSProperties}
           >
             {/* Blurred background images container */}
             <div

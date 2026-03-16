@@ -13,9 +13,9 @@ import { KeepEyeOnHimModal } from './KeepEyeOnHimModal';
 import { SoulTypeMedia } from './SoulTypeMedia';
 import { getAnalysisResult, getAnalysisStatus, StoredAnalysisResult, computeDynamicGradient } from '../services/analysisService';
 import { getUserState, canPurchaseSingleUnlock, canUseFirstFreeAnalysis } from '../services/userStateService';
-import { createSubscriptionCheckout, createSingleUnlockCheckout } from '../services/stripeService';
+import { subscribe, singleUnlock } from '../services/purchaseService';
 import { supabase } from '../lib/supabase';
-import { isDevMode } from '../utils/platform';
+import { isDevMode, isIOSNative } from '../utils/platform';
 import { RELATIONSHIP_STATUS_OPTIONS } from '../services/personProfileService';
 import { getAvatarBackground } from '../data/soulTypes';
 import { CallOutOverlay } from './CallOutOverlay';
@@ -330,16 +330,12 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   }, [isGeneratingShare, analysis]);
 
   async function handleSubscribe(plan: 'annual' | 'monthly') {
-    const { url, error } = await createSubscriptionCheckout(analysisId, plan, isGuest);
-
-    if (error) {
-      console.error('Subscription checkout error:', error);
-      throw new Error(error);
+    const result = await subscribe(plan, analysisId || undefined, isGuest);
+    if (result.success && isIOSNative()) {
+      // IAP completed inline — refresh state
+      window.location.reload();
     }
-
-    if (url) {
-      window.location.href = url;
-    }
+    // Web: Stripe redirect is handled inside subscribe()
   }
 
   async function handleSingleUnlock() {
@@ -347,16 +343,12 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
       throw new Error('No analysis ID');
     }
 
-    const { url, error } = await createSingleUnlockCheckout(analysisId, isGuest);
-
-    if (error) {
-      console.error('Single unlock checkout error:', error);
-      throw new Error(error);
+    const result = await singleUnlock(analysisId, isGuest);
+    if (result.success && isIOSNative()) {
+      // IAP completed inline — refresh state
+      window.location.reload();
     }
-
-    if (url) {
-      window.location.href = url;
-    }
+    // Web: Stripe redirect is handled inside singleUnlock()
   }
 
   async function handleLogout() {
@@ -521,7 +513,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             <>
               <motion.div
                 className="relative"
-                style={{ willChange: 'filter, transform, opacity' }}
+                style={{ /* willChange removed for iOS scroll stability */ }}
                 initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
                 animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
                 transition={{ delay: 0.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -546,7 +538,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
 
               <motion.h1
                 className="text-white mt-4"
-                style={{ fontSize: '22px', fontWeight: 500, fontFamily: 'Plus Jakarta Sans, sans-serif', willChange: 'filter, transform, opacity' }}
+                style={{ fontSize: '22px', fontWeight: 500, fontFamily: 'Plus Jakarta Sans, sans-serif', /* willChange removed for iOS scroll stability */ }}
                 initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
                 animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
                 transition={{ delay: 0.4, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -564,7 +556,6 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
                 background: 'rgba(255, 255, 255, 0.1)',
                 backdropFilter: 'blur(8px)',
                 WebkitBackdropFilter: 'blur(8px)',
-                willChange: 'filter, transform, opacity',
               }}
               initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
@@ -595,7 +586,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             <div className="text-center mb-3">
               <motion.p
                 className="text-white/50 uppercase tracking-widest mb-2"
-                style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, willChange: 'filter, transform, opacity' }}
+                style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, /* willChange removed for iOS scroll stability */ }}
                 initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
                 animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
                 transition={{ delay: 0.7, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -604,7 +595,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
               </motion.p>
               <motion.h1
                 className="text-white text-3xl mb-2"
-                style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px', willChange: 'filter, transform, opacity' }}
+                style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px', /* willChange removed for iOS scroll stability */ }}
                 initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
                 animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
                 transition={{ delay: 0.85, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -615,7 +606,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
 
             <motion.div
               className="my-8"
-              style={{ willChange: 'filter, transform, opacity' }}
+              style={{ /* willChange removed for iOS scroll stability */ }}
               initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               transition={{ delay: 1.0, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -625,7 +616,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
 
             <motion.div
               className="text-center mb-4"
-              style={{ willChange: 'filter, transform, opacity' }}
+              style={{ /* willChange removed for iOS scroll stability */ }}
               initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               transition={{ delay: 1.5, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -638,7 +629,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
 
             <motion.p
               className="text-center mb-8 px-2"
-              style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', color: 'rgba(255, 255, 255, 0.55)', willChange: 'filter, transform, opacity' }}
+              style={{ fontSize: '14px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px', color: 'rgba(255, 255, 255, 0.55)', /* willChange removed for iOS scroll stability */ }}
               initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               transition={{ delay: 1.7, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -655,7 +646,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
           <div className="mb-6 text-center">
             <motion.p
               className="text-white/50 uppercase mb-2"
-              style={{ fontSize: '16px', letterSpacing: '1.5px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, willChange: 'filter, transform, opacity' }}
+              style={{ fontSize: '16px', letterSpacing: '1.5px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, /* willChange removed for iOS scroll stability */ }}
               initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               transition={{ delay: 1.9, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -664,7 +655,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             </motion.p>
             <motion.h2
               className="text-white text-3xl"
-              style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px', willChange: 'filter, transform, opacity' }}
+              style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px', /* willChange removed for iOS scroll stability */ }}
               initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
               animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               transition={{ delay: 2.05, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -675,7 +666,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
 
           {/* Archetype Card - Flippable, starts showing back */}
           <motion.div
-            style={{ willChange: 'filter, transform, opacity' }}
+            style={{ /* willChange removed for iOS scroll stability */ }}
             initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
             animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
             transition={{ delay: 2.2, duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -684,8 +675,10 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             className="relative w-full cursor-pointer"
             style={{
               perspective: '1000px',
+              WebkitPerspective: '1000px',
               aspectRatio: '9/16',
-            }}
+              transform: 'translate3d(0,0,0)',
+            } as React.CSSProperties}
             onClick={() => {
               // Only allow flip if not already flipped (one-way flip)
               if (!isArchetypeCardFlipped) {
@@ -697,7 +690,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
           >
             <motion.div
               className="relative w-full h-full"
-              style={{ transformStyle: 'preserve-3d' }}
+              style={{ transformStyle: 'preserve-3d', WebkitTransformStyle: 'preserve-3d' } as React.CSSProperties}
               initial={false}
               animate={{ rotateY: isArchetypeCardFlipped ? 0 : 180 }}
               transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
@@ -707,9 +700,10 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
                 className="absolute inset-0 rounded-[28px] overflow-hidden"
                 style={{
                   backfaceVisibility: 'hidden',
+                  WebkitBackfaceVisibility: 'hidden',
                   backgroundColor: '#111111',
                   boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-                }}
+                } as React.CSSProperties}
               >
                 {/* Full vertical archetype image */}
                 <SoulTypeMedia
@@ -869,9 +863,12 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
                 className="absolute inset-0 rounded-[28px] overflow-hidden"
                 style={{
                   backfaceVisibility: 'hidden',
+                  WebkitBackfaceVisibility: 'hidden',
                   transform: 'rotateY(180deg)',
+                  WebkitTransform: 'rotateY(180deg)',
+                  backgroundColor: '#111111',
                   boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-                }}
+                } as React.CSSProperties}
               >
                 {/* Background image - blurred for glassmorphism effect */}
                 <SoulTypeMedia
@@ -980,7 +977,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
           <div className="text-center mb-8">
             <motion.p
               className="text-white/50 uppercase mb-2"
-              style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, willChange: 'filter, transform, opacity' }}
+              style={{ letterSpacing: '1.5px', fontSize: '16px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, /* willChange removed for iOS scroll stability */ }}
               initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
               whileInView={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               viewport={{ once: true, margin: '-80px' }}
@@ -990,7 +987,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             </motion.p>
             <motion.h2
               className="text-white text-3xl mb-2"
-              style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px', willChange: 'filter, transform, opacity' }}
+              style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 500, letterSpacing: '1.5px', /* willChange removed for iOS scroll stability */ }}
               initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
               whileInView={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
               viewport={{ once: true, margin: '-80px' }}
@@ -1000,7 +997,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             </motion.h2>
           </div>
           <motion.div
-            style={{ willChange: 'filter, transform, opacity' }}
+            style={{ /* willChange removed for iOS scroll stability */ }}
             initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
             whileInView={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
             viewport={{ once: true, margin: '-80px' }}
@@ -1035,7 +1032,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
           {/* Share Dynamic Button */}
           <motion.div
             className="mt-6"
-            style={{ willChange: 'filter, transform, opacity' }}
+            style={{ /* willChange removed for iOS scroll stability */ }}
             initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }}
             whileInView={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
             viewport={{ once: true, margin: '-80px' }}
@@ -1058,6 +1055,11 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
             </button>
           </motion.div>
         </div>
+
+        {/* AI Disclosure */}
+        <p className="text-center text-white/25 text-xs mt-8 px-4" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 300, letterSpacing: '0.5px' }}>
+          Analysis powered by AI · For entertainment purposes only
+        </p>
 
       </div>
 
@@ -1121,6 +1123,16 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
         singleUnlocksRemaining={userState.singleUnlocksRemaining}
         isFirstAnalysis={userState.isFirstAnalysis}
         showSingleUnlock={true}
+        isNativeIOS={isIOSNative()}
+        onRestore={async () => {
+          const { restorePurchases } = await import('../services/purchaseService');
+          const { restored } = await restorePurchases();
+          if (restored) {
+            window.location.reload();
+          } else {
+            alert('No active subscription found.');
+          }
+        }}
       />
     </div>
   );

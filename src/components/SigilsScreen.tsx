@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
-import { fetchSigilsState, SigilsState, markInnerTruthOpened, markMirrorTruthSeen } from '../services/sigilsService';
+import { fetchSigilsState, SigilsState, markInnerTruthOpened } from '../services/sigilsService';
 import { haptics } from '../utils/haptics';
 import { InnerTruthReveal } from './InnerTruthReveal';
 
@@ -40,16 +40,6 @@ export function SigilsScreen({ isOpen, onClose, onStateChange }: SigilsScreenPro
   const handleCloseInnerTruth = () => {
     setShowInnerTruth(false);
     loadState(); // Refresh state
-  };
-
-  const handleOpenMirror = () => {
-    haptics.light();
-    // Mark all mirror truths as seen
-    state?.mirror.newTruths.forEach(truth => {
-      markMirrorTruthSeen(truth.id);
-    });
-    onStateChange?.();
-    // TODO: Open Mirror sub-screen
   };
 
   if (!isOpen) return null;
@@ -97,22 +87,11 @@ export function SigilsScreen({ isOpen, onClose, onStateChange }: SigilsScreenPro
               </p>
             </div>
           ) : (
-            <>
-              {/* Module 1: Inner Truth */}
               <InnerTruthCard
                 state={state?.innerTruth.state || 'waiting'}
                 nextDropIn={state?.innerTruth.nextDropIn || 0}
                 onBreakSeal={handleBreakSeal}
               />
-
-              {/* Module 2: Mirror */}
-              <MirrorCard
-                newCount={state?.mirror.newTruths.filter(t => t.isNew).length || 0}
-                waitingCount={state?.mirror.waitingCount || 0}
-                hasSummary={!!state?.mirror.summary}
-                onOpen={handleOpenMirror}
-              />
-            </>
           )}
         </div>
 
@@ -301,121 +280,6 @@ function InnerTruthCard({ state, nextDropIn, onBreakSeal }: InnerTruthCardProps)
             View again
           </motion.button>
         )}
-      </div>
-    </motion.div>
-  );
-}
-
-// ===== MIRROR CARD =====
-interface MirrorCardProps {
-  newCount: number;
-  waitingCount: number;
-  hasSummary: boolean;
-  onOpen: () => void;
-}
-
-function MirrorCard({ newCount, waitingCount, hasSummary }: MirrorCardProps) {
-  const getStatusText = () => {
-    if (hasSummary) return 'SUMMARY UNLOCKED';
-    if (newCount > 0) return `${newCount} NEW TRUTH${newCount !== 1 ? 'S' : ''}`;
-    if (waitingCount > 0) return `WAITING: ${waitingCount} MORE`;
-    return 'ACTIVE';
-  };
-
-  const getStatusColor = () => {
-    if (hasSummary) return 'rgba(167, 139, 250, 0.8)'; // Purple
-    if (newCount > 0) return 'rgba(147, 197, 253, 0.8)'; // Blue
-    return 'rgba(255, 255, 255, 0.4)';
-  };
-
-  return (
-    <motion.div
-      className="relative w-full rounded-[28px] overflow-hidden"
-      style={{
-        background: 'linear-gradient(135deg, #1a1a2e 0%, #0f0f1a 100%)',
-        border: '1px solid rgba(147, 197, 253, 0.1)',
-        aspectRatio: '1 / 0.55',
-      }}
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.2 }}
-    >
-      {/* Glass/reflection effect */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, transparent 50%, rgba(255, 255, 255, 0.02) 100%)',
-        }}
-      />
-      <div
-        className="absolute top-0 left-0 right-0 h-1/2"
-        style={{
-          background: 'linear-gradient(to bottom, rgba(147, 197, 253, 0.05) 0%, transparent 100%)',
-        }}
-      />
-
-      {/* Status badge */}
-      <div
-        className="absolute top-4 right-4 px-3 py-1 rounded-full"
-        style={{
-          background: 'rgba(0, 0, 0, 0.3)',
-          border: `1px solid ${getStatusColor()}`,
-        }}
-      >
-        <span
-          style={{
-            fontSize: '10px',
-            fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
-            color: getStatusColor(),
-            fontWeight: 600,
-            letterSpacing: '0.05em',
-          }}
-        >
-          {getStatusText()}
-        </span>
-      </div>
-
-      {/* Content */}
-      <div className="absolute bottom-0 left-0 right-0 p-6">
-        <p
-          className="text-white/50 uppercase tracking-widest mb-1"
-          style={{ fontSize: '10px', letterSpacing: '0.15em', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
-        >
-          MIRROR
-        </p>
-        <h3
-          className="text-white font-bold mb-1"
-          style={{ fontSize: '20px', fontFamily: 'Satoshi, sans-serif' }}
-        >
-          Anonymous truths
-        </h3>
-        <p
-          className="text-white/40 mb-4"
-          style={{ fontSize: '13px', fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px' }}
-        >
-          From your circle.
-        </p>
-
-        {/* CTA */}
-        <motion.button
-          className="w-full py-3 rounded-full font-medium"
-          style={{
-            background: newCount > 0
-              ? 'linear-gradient(135deg, rgba(147, 197, 253, 0.2) 0%, rgba(147, 197, 253, 0.05) 100%)'
-              : 'rgba(255, 255, 255, 0.05)',
-            border: newCount > 0
-              ? '1px solid rgba(147, 197, 253, 0.3)'
-              : '1px solid rgba(255, 255, 255, 0.1)',
-            color: newCount > 0
-              ? 'rgba(147, 197, 253, 0.9)'
-              : 'rgba(255, 255, 255, 0.5)',
-            fontSize: '14px',
-            fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 200, letterSpacing: '1.5px',
-          }}
-          whileTap={{ scale: 0.98 }}
-        >
-          Open Mirror
-        </motion.button>
       </div>
     </motion.div>
   );

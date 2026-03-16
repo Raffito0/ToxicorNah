@@ -3,7 +3,28 @@
  * Capacitor injects window.Capacitor when running inside a native WebView.
  */
 export function isNativeApp(): boolean {
-  return !!(window as any).Capacitor;
+  return !!(window as any).Capacitor?.isNativePlatform?.();
+}
+
+// Platform detection for payment routing
+export function isIOSNative(): boolean {
+  try {
+    return isNativeApp() && (window as any).Capacitor?.getPlatform?.() === 'ios';
+  } catch {
+    return false;
+  }
+}
+
+export function isAndroidNative(): boolean {
+  try {
+    return isNativeApp() && (window as any).Capacitor?.getPlatform?.() === 'android';
+  } catch {
+    return false;
+  }
+}
+
+export function isWeb(): boolean {
+  return !isNativeApp();
 }
 
 /**

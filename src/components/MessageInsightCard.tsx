@@ -137,7 +137,6 @@ export function MessageInsightCard({
         zIndex: visualIndex,
         height: '220px',
         top: 0,
-        willChange: 'transform, filter',
       }}
       initial={false}
       animate={hasDealt ? {
@@ -196,11 +195,12 @@ export function MessageInsightCard({
           damping: 30,
         }}
       >
-        <div style={{ perspective: '1000px', height: '100%', width: '100%' }}>
+        <div style={{ perspective: '1000px', WebkitPerspective: '1000px', height: '100%', width: '100%', transform: 'translate3d(0,0,0)' } as React.CSSProperties}>
         <motion.div
           className="relative w-full h-full"
           style={{
             transformStyle: 'preserve-3d',
+            WebkitTransformStyle: 'preserve-3d',
             borderRadius: '28px',
             transformOrigin: 'center center',
           }}
@@ -232,6 +232,7 @@ export function MessageInsightCard({
             className="absolute inset-0 h-full flex"
             style={{
               backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
               borderRadius: '28px',
               overflow: 'hidden',
               background: '#111111',
@@ -377,7 +378,9 @@ export function MessageInsightCard({
             className="absolute inset-0 h-full"
             style={{
               backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
               transform: 'rotateY(180deg)',
+              WebkitTransform: 'rotateY(180deg)',
               borderRadius: '28px',
               overflow: 'hidden',
               backgroundColor: '#111111',

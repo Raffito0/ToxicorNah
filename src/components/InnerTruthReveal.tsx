@@ -16,7 +16,20 @@ export function InnerTruthReveal({ content, onClose }: InnerTruthRevealProps) {
   const handleSave = () => {
     haptics.medium();
     setIsSaved(true);
-    // TODO: Save to local storage or backend
+
+    // Save to localStorage
+    try {
+      const key = 'toxicornah_saved_truths';
+      const existing = JSON.parse(localStorage.getItem(key) || '[]');
+      const alreadySaved = existing.some((t: any) => t.rubric === content.rubric && t.bigLine === content.bigLine);
+      if (!alreadySaved) {
+        existing.push({ rubric: content.rubric, rubricLabel: content.rubricLabel, bigLine: content.bigLine, move: content.move, savedAt: Date.now() });
+        localStorage.setItem(key, JSON.stringify(existing));
+      }
+    } catch (e) {
+      // localStorage full or unavailable — silent fail, UI still shows saved
+    }
+
     setTimeout(() => setIsSaved(false), 2000);
   };
 

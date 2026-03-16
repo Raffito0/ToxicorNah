@@ -173,7 +173,7 @@ export function ToxicOrb({
       {/* Orb container */}
       <div
         className="relative flex items-center justify-center"
-        style={{ width: sizeStr, height: sizeStr }}
+        style={{ width: sizeStr, height: sizeStr, isolation: 'isolate' }}
       >
         {/* The Orb with fluid flame animation + glassmorphism entrance */}
         <motion.div
@@ -280,6 +280,10 @@ export function ToxicOrb({
             grid-template-areas: "stack";
             overflow: visible;
             position: absolute;
+            background: transparent;
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+            will-change: transform, border-radius;
             animation: blob-morph 12s ease-in-out infinite;
           }
 

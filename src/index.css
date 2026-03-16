@@ -2,6 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+/* iOS safe-area: background extends edge-to-edge behind status bar & home indicator */
+html, body {
+  background-color: #111111;
+}
+
+/* Allow content to flow into safe areas while background fills edge-to-edge */
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
 /* Satoshi Black font for titles and bold text */
 @font-face {
   font-family: 'Satoshi';

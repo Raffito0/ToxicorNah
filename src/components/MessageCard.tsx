@@ -14,12 +14,12 @@ export function MessageCard({ title, message, description, cardNumber }: Message
   return (
     <div
       className="relative rounded-3xl overflow-hidden cursor-pointer"
-      style={{ perspective: '1000px', minHeight: '280px' }}
+      style={{ perspective: '1000px', WebkitPerspective: '1000px', minHeight: '280px', transform: 'translate3d(0,0,0)' } as React.CSSProperties}
       onClick={() => setIsFlipped(!isFlipped)}
     >
       <motion.div
         className="relative w-full h-full"
-        style={{ transformStyle: 'preserve-3d' }}
+        style={{ transformStyle: 'preserve-3d', WebkitTransformStyle: 'preserve-3d' } as React.CSSProperties}
         animate={{ rotateY: isFlipped ? 180 : 0 }}
         transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
       >
@@ -28,7 +28,8 @@ export function MessageCard({ title, message, description, cardNumber }: Message
           style={{
             backfaceVisibility: 'hidden',
             WebkitBackfaceVisibility: 'hidden',
-          }}
+            backgroundColor: '#111111',
+          } as React.CSSProperties}
         >
           <div className="flex items-center gap-2 mb-4">
             <div className="w-5 h-5 rounded-full bg-red-500/30 flex items-center justify-center">
@@ -56,7 +57,9 @@ export function MessageCard({ title, message, description, cardNumber }: Message
             backfaceVisibility: 'hidden',
             WebkitBackfaceVisibility: 'hidden',
             transform: 'rotateY(180deg)',
-          }}
+            WebkitTransform: 'rotateY(180deg)',
+            backgroundColor: '#111111',
+          } as React.CSSProperties}
         >
           <motion.div
             initial={{ opacity: 0 }}

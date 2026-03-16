@@ -24,9 +24,9 @@ import { DynamicCard } from './DynamicCard';
 import { haptics } from '../utils/haptics';
 import { getAvatarBackground } from '../data/soulTypes';
 import { CallOutOverlay } from './CallOutOverlay';
-import { isDevMode } from '../utils/platform';
+import { isDevMode, isIOSNative } from '../utils/platform';
 import { getUserState, UserState, canPurchaseSingleUnlock } from '../services/userStateService';
-import { createSubscriptionCheckout, createSingleUnlockCheckout } from '../services/stripeService';
+import { subscribe, singleUnlock } from '../services/purchaseService';
 
 interface PersonProfileProps {
   personId: string;
@@ -425,7 +425,7 @@ function getToxicityLabel(score: number): string {
 }
 
 // Fallback image for development
-const DEV_ARCHETYPE_IMAGE_FALLBACK = '/Adobe Express - file 1 (3).png';
+const DEV_ARCHETYPE_IMAGE_FALLBACK = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 160" fill="%23222"><rect width="90" height="160"/><circle cx="45" cy="50" r="20" fill="%23333"/><ellipse cx="45" cy="120" rx="30" ry="35" fill="%23333"/></svg>';
 
 // Light accent color for user's archetype card (warm coral/peach tone)
 const DEV_USER_ARCHETYPE_ACCENT_LIGHT = '#fda4af'; // Light rose accent for title
@@ -444,13 +444,15 @@ function ArchetypeCardSection({ data }: { data: PersonProfileData }) {
         className="relative w-full cursor-pointer"
         style={{
           perspective: '1000px',
+          WebkitPerspective: '1000px',
           aspectRatio: '9/16',
-        }}
+          transform: 'translate3d(0,0,0)',
+        } as React.CSSProperties}
         onClick={() => setIsFlipped(!isFlipped)}
       >
         <motion.div
           className="relative w-full h-full"
-          style={{ transformStyle: 'preserve-3d' }}
+          style={{ transformStyle: 'preserve-3d', WebkitTransformStyle: 'preserve-3d' } as React.CSSProperties}
           initial={false}
           animate={{ rotateY: isFlipped ? 180 : 0 }}
           transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
@@ -461,8 +463,9 @@ function ArchetypeCardSection({ data }: { data: PersonProfileData }) {
             style={{
               backgroundColor: '#111111',
               backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
               boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-            }}
+            } as React.CSSProperties}
           >
             {/* Full vertical archetype image/video */}
             <SoulTypeMedia
@@ -542,9 +545,11 @@ function ArchetypeCardSection({ data }: { data: PersonProfileData }) {
             style={{
               backgroundColor: '#111111',
               backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
               transform: 'rotateY(180deg)',
+              WebkitTransform: 'rotateY(180deg)',
               boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-            }}
+            } as React.CSSProperties}
           >
             {/* Mirrored background image/video */}
             <SoulTypeMedia
@@ -1417,7 +1422,8 @@ function HardTruthsSection({ data, isLocked, onUnlockClick }: { data: PersonProf
                           ? '0 20px 45px rgba(0,0,0,0.5), 0 8px 20px rgba(0,0,0,0.3)'
                           : '0 10px 25px rgba(0,0,0,0.4)',
                         backfaceVisibility: 'hidden',
-                      }}
+                        WebkitBackfaceVisibility: 'hidden',
+                      } as React.CSSProperties}
                     >
                       {/* Lock overlay on each card */}
                       {isLocked && (
@@ -2740,28 +2746,16 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
   }
 
   async function handleSubscribe(plan: 'annual' | 'monthly') {
-    const { url, error } = await createSubscriptionCheckout(undefined, plan);
-
-    if (error) {
-      console.error('Subscription checkout error:', error);
-      throw new Error(error);
-    }
-
-    if (url) {
-      window.location.href = url;
+    const result = await subscribe(plan);
+    if (result.success && isIOSNative()) {
+      window.location.reload();
     }
   }
 
   async function handleSingleUnlock() {
-    const { url, error } = await createSingleUnlockCheckout(personId);
-
-    if (error) {
-      console.error('Single unlock checkout error:', error);
-      throw new Error(error);
-    }
-
-    if (url) {
-      window.location.href = url;
+    const result = await singleUnlock(personId);
+    if (result.success && isIOSNative()) {
+      window.location.reload();
     }
   }
 
@@ -2874,6 +2868,13 @@ export function PersonProfile({ personId, onBack, onAnalyzeNew }: PersonProfileP
         canUseSingleUnlock={paywallState.canUseSingleUnlock}
         singleUnlocksRemaining={paywallState.singleUnlocksRemaining}
         isFirstAnalysis={paywallState.isFirstAnalysis}
+        isNativeIOS={isIOSNative()}
+        onRestore={async () => {
+          const { restorePurchases } = await import('../services/purchaseService');
+          const { restored } = await restorePurchases();
+          if (restored) window.location.reload();
+          else alert('No active subscription found.');
+        }}
       />
 
       {/* Settings Bottom Sheet */}

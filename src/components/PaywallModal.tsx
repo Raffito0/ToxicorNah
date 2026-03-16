@@ -13,6 +13,8 @@ interface PaywallModalProps {
   singleUnlocksRemaining: number;
   isFirstAnalysis?: boolean;
   showSingleUnlock?: boolean;
+  isNativeIOS?: boolean;  // Shows Restore Purchases on iOS
+  onRestore?: () => void; // Restore Purchases handler for iOS
 }
 
 export function PaywallModal({
@@ -23,7 +25,9 @@ export function PaywallModal({
   canUseSingleUnlock,
   singleUnlocksRemaining,
   isFirstAnalysis = false,
-  showSingleUnlock = false
+  showSingleUnlock = false,
+  isNativeIOS = false,
+  onRestore
 }: PaywallModalProps) {
   const [billingPeriod, setBillingPeriod] = useState<'annual' | 'monthly'>('annual');
   const [selectedPlan, setSelectedPlan] = useState<PlanType>('annual');
@@ -435,6 +439,17 @@ export function PaywallModal({
                 {getReassuranceText()}
               </motion.p>
             </AnimatePresence>
+
+            {/* Restore Purchases — iOS only (Apple requires this) */}
+            {isNativeIOS && onRestore && (
+              <button
+                onClick={onRestore}
+                className="w-full text-center text-white/40 text-xs py-3 hover:text-white/60 transition-colors"
+                style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', fontWeight: 300, letterSpacing: '0.5px' }}
+              >
+                Restore Purchases
+              </button>
+            )}
 
           </div>
         </motion.div>

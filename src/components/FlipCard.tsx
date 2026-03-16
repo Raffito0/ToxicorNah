@@ -13,12 +13,12 @@ export function FlipCard({ front, back, className = '' }: FlipCardProps) {
   return (
     <div
       className={`relative cursor-pointer ${className}`}
-      style={{ perspective: '1000px' }}
+      style={{ perspective: '1000px', WebkitPerspective: '1000px', transform: 'translate3d(0,0,0)' } as React.CSSProperties}
       onClick={() => setIsFlipped(!isFlipped)}
     >
       <motion.div
         className="relative w-full h-full"
-        style={{ transformStyle: 'preserve-3d' }}
+        style={{ transformStyle: 'preserve-3d', WebkitTransformStyle: 'preserve-3d' } as React.CSSProperties}
         animate={{ rotateY: isFlipped ? 180 : 0 }}
         transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
       >
@@ -27,7 +27,8 @@ export function FlipCard({ front, back, className = '' }: FlipCardProps) {
           style={{
             backfaceVisibility: 'hidden',
             WebkitBackfaceVisibility: 'hidden',
-          }}
+            backgroundColor: '#111111',
+          } as React.CSSProperties}
         >
           {front}
         </div>
@@ -37,7 +38,9 @@ export function FlipCard({ front, back, className = '' }: FlipCardProps) {
             backfaceVisibility: 'hidden',
             WebkitBackfaceVisibility: 'hidden',
             transform: 'rotateY(180deg)',
-          }}
+            WebkitTransform: 'rotateY(180deg)',
+            backgroundColor: '#111111',
+          } as React.CSSProperties}
         >
           <motion.div
             className="w-full h-full"
