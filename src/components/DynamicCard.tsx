@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Lock } from 'lucide-react';
 import { SkeletonCard } from './SkeletonCard';
@@ -49,6 +49,21 @@ export function DynamicCard({
   void _personName;
 
   const [isFlipped, setIsFlipped] = useState(false);
+  // iOS WebView bug: backfaceVisibility:'hidden' fails with mix-blend-mode.
+  // Nuclear fix: completely hide the non-visible face via visibility+opacity toggle
+  // that swaps at the 90-degree midpoint of the flip animation.
+  const [showFront, setShowFront] = useState(true);
+  const [showBack, setShowBack] = useState(false);
+
+  // Swap face visibility at the 90-degree midpoint of the flip animation.
+  // onUpdate fires every frame with current animated values from framer-motion.
+  const handleRotationUpdate = useCallback((latest: { rotateY?: number }) => {
+    if (latest.rotateY === undefined) return;
+    const normalized = Math.abs(latest.rotateY % 360);
+    const past90 = normalized > 90 && normalized < 270;
+    setShowFront(!past90);
+    setShowBack(past90);
+  }, []);
 
   // Back side is locked for first-time free users
   const isBackSideLocked = isFirstTimeFree;
@@ -98,6 +113,7 @@ export function DynamicCard({
           initial={false}
           animate={{ rotateY: isFlipped ? 180 : 0 }}
           transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
+          onUpdate={handleRotationUpdate}
         >
           {/* FRONT SIDE - Like His Soul Type card */}
           <div
@@ -106,7 +122,12 @@ export function DynamicCard({
               backgroundColor: '#111111',
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden',
+              transform: 'translateZ(1px)',
+              WebkitTransform: 'translateZ(1px)',
               boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+              // iOS WebView nuclear fix: hide front face when past 90 degrees
+              visibility: showFront ? 'visible' : 'hidden',
+              opacity: showFront ? 1 : 0,
             } as React.CSSProperties}
           >
             {/* Side profile images - male left, female right, overlapping with blend */}
@@ -269,9 +290,12 @@ export function DynamicCard({
             style={{
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden',
-              transform: 'rotateY(180deg)',
-              WebkitTransform: 'rotateY(180deg)',
+              transform: 'rotateY(180deg) translateZ(1px)',
+              WebkitTransform: 'rotateY(180deg) translateZ(1px)',
               backgroundColor: '#111111',
+              // iOS WebView nuclear fix: hide back face when before 90 degrees
+              visibility: showBack ? 'visible' : 'hidden',
+              opacity: showBack ? 1 : 0,
             } as React.CSSProperties}
           >
             {/* Blurred background images container */}

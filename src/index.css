@@ -3,8 +3,12 @@
 @tailwind utilities;
 
 /* iOS safe-area: background extends edge-to-edge behind status bar & home indicator */
-html, body {
+html, body, #root {
   background-color: #111111;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 /* Allow content to flow into safe areas while background fills edge-to-edge */

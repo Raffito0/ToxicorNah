@@ -195,7 +195,7 @@ export function MessageInsightCard({
           damping: 30,
         }}
       >
-        <div style={{ perspective: '1000px', WebkitPerspective: '1000px', height: '100%', width: '100%', transform: 'translate3d(0,0,0)' } as React.CSSProperties}>
+        <div style={{ perspective: '1000px', WebkitPerspective: '1000px', height: '100%', width: '100%', transform: 'translate3d(0,0,0)', transformStyle: 'preserve-3d', WebkitTransformStyle: 'preserve-3d' } as React.CSSProperties}>
         <motion.div
           className="relative w-full h-full"
           style={{
@@ -233,6 +233,8 @@ export function MessageInsightCard({
             style={{
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden',
+              transform: 'translateZ(1px)',
+              WebkitTransform: 'translateZ(1px)',
               borderRadius: '28px',
               overflow: 'hidden',
               background: '#111111',
@@ -379,8 +381,8 @@ export function MessageInsightCard({
             style={{
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden',
-              transform: 'rotateY(180deg)',
-              WebkitTransform: 'rotateY(180deg)',
+              transform: 'rotateY(180deg) translateZ(2px)',
+              WebkitTransform: 'rotateY(180deg) translateZ(2px)',
               borderRadius: '28px',
               overflow: 'hidden',
               backgroundColor: '#111111',
