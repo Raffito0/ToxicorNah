@@ -323,7 +323,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
   }
 
   return (
-    <div className="min-h-screen bg-black text-white overflow-y-auto flex flex-col">
+    <div className="min-h-screen bg-black text-white overflow-y-auto flex flex-col" style={{ overscrollBehavior: 'none', WebkitOverflowScrolling: 'touch' }}>
       <div className="flex flex-col items-center flex-1 min-h-0" style={{ paddingLeft: '30px', paddingRight: '30px', paddingTop: '16px', paddingBottom: '16px' }}>
         <div className="w-full max-w-md flex flex-col flex-1 min-h-0">
           <div className="bg-black pt-12 pb-4 flex flex-col flex-1 min-h-0">

@@ -359,7 +359,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
     // Fullscreen video + glassmorphism + progressive loading phrases
     return (
       <motion.div
-        className="min-h-screen bg-black text-white relative overflow-hidden"
+        className="fixed inset-0 bg-black text-white overflow-hidden"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
@@ -473,7 +473,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   });
 
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="min-h-screen bg-black text-white" style={{ overscrollBehavior: 'none' }}>
       {/* ===== Profile Hero Section (hidden when no person was selected/created) ===== */}
       {analysis.personName && analysis.personName !== 'Him' && analysis.personName !== 'Unknown' && (
       <div className="relative w-full overflow-hidden" style={{ minHeight: '38vh' }}>
@@ -580,7 +580,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
       )}
 
       {/* Content — overlaps hero by 40px to hide any seam (same pattern as PersonProfile) */}
-      <div className="relative flex flex-col items-center justify-center pb-24 bg-black" style={{ marginTop: (!analysis?.personName || analysis.personName === 'Him' || analysis.personName === 'Unknown') ? '0px' : '-40px', zIndex: 10 }}>
+      <div className="relative flex flex-col items-center justify-center pb-12 bg-black" style={{ marginTop: (!analysis?.personName || analysis.personName === 'Him' || analysis.personName === 'Unknown') ? '0px' : '-40px', zIndex: 10 }}>
         <div className="w-full max-w-md px-[30px]">
           <div className="bg-black pb-12" style={{ paddingTop: (!analysis?.personName || analysis.personName === 'Him' || analysis.personName === 'Unknown') ? '60px' : '16px' }}>
             <div className="text-center mb-3">
