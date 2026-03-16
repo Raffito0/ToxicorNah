@@ -8,7 +8,29 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Match native background to web app #111111 — eliminates
+        // the dark gray bands at status bar and home indicator areas
+        let bgColor = UIColor(red: 17.0/255.0, green: 17.0/255.0, blue: 17.0/255.0, alpha: 1.0)
+
+        DispatchQueue.main.async {
+            guard let window = self.window else { return }
+            window.backgroundColor = bgColor
+
+            if let rootVC = window.rootViewController {
+                rootVC.view.backgroundColor = bgColor
+
+                // Walk subviews to color the WKWebView and its scroll view
+                for subview in rootVC.view.subviews {
+                    subview.backgroundColor = bgColor
+                    if let webView = subview as? WKWebView {
+                        webView.isOpaque = false
+                        webView.backgroundColor = bgColor
+                        webView.scrollView.backgroundColor = bgColor
+                    }
+                }
+            }
+        }
+
         return true
     }
 
