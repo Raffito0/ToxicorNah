@@ -57,31 +57,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        // Handle toxicornah:// deep links (e.g. toxicornah://results?sid=xxx)
-        handleDeepLink(url)
+        // Capacitor's ApplicationDelegateProxy forwards the URL to @capacitor/app plugin
+        // which fires 'appUrlOpen' event in JavaScript — handles both cold start and warm resume
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
-    }
-
-    private func handleDeepLink(_ url: URL) {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let sid = components.queryItems?.first(where: { $0.name == "sid" })?.value,
-              !sid.isEmpty else { return }
-
-        // Validate sid is a UUID format only (prevent XSS injection)
-        let uuidPattern = try? NSRegularExpression(pattern: "^[0-9a-fA-F\\-]+$")
-        let range = NSRange(sid.startIndex..., in: sid)
-        guard uuidPattern?.firstMatch(in: sid, range: range) != nil else { return }
-
-        // Wait for WebView to be ready, then inject sid (500ms is enough for WebView init)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if let webView = self.window?.rootViewController?.view.subviews
-                .compactMap({ $0 as? WKWebView }).first {
-                let safeSid = sid.replacingOccurrences(of: "'", with: "")
-                    .replacingOccurrences(of: "\\", with: "")
-                let js = "window.__pendingSid = '\(safeSid)'; window.dispatchEvent(new CustomEvent('applink-sid', { detail: '\(safeSid)' }));"
-                webView.evaluateJavaScript(js, completionHandler: nil)
-            }
-        }
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([any UIUserActivityRestoring]?) -> Void) -> Bool {

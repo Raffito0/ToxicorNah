@@ -11,6 +11,7 @@ import { BottomNav, TabId } from './components/BottomNav';
 import { supabase } from './lib/supabase';
 import { loadScenario, loadScenarioFromSupabase } from './services/contentModeService';
 import { initPurchases } from './services/purchaseService';
+import { isNativeApp } from './utils/platform';
 import type { ContentScenario } from './types/contentScenario';
 
 function App() {
@@ -29,7 +30,7 @@ function App() {
     // Initialize in-app purchases (no-op on web, sets up StoreKit on iOS)
     initPurchases().catch(console.error);
 
-    // Handle App Link sid injected by native code (iOS AppDelegate / Android MainActivity)
+    // Handle deep links via Capacitor App plugin (works for both cold start + warm resume)
     const loadDeepLinkScenario = (sid: string) => {
       loadScenarioFromSupabase(sid)
         .then((scenario) => {
@@ -39,33 +40,32 @@ function App() {
         .catch((err) => console.error('[AppLink] Failed to load scenario:', err));
     };
 
+    let appUrlListener: any = null;
+    if (isNativeApp()) {
+      import('@capacitor/app').then(({ App: CapApp }) => {
+        // This fires on BOTH cold start and warm resume — Capacitor handles the timing
+        appUrlListener = CapApp.addListener('appUrlOpen', ({ url }) => {
+          try {
+            const urlObj = new URL(url);
+            const sid = urlObj.searchParams.get('sid');
+            if (sid) loadDeepLinkScenario(sid);
+          } catch (e) {
+            console.error('[AppLink] Invalid URL:', url);
+          }
+        });
+      });
+    }
+
+    // Fallback: legacy event for Android MainActivity (if still used)
     const handleApplinkSid = (e: Event) => {
       const sid = (e as CustomEvent).detail as string;
       if (sid) loadDeepLinkScenario(sid);
     };
     window.addEventListener('applink-sid', handleApplinkSid);
 
-    // Check if sid was injected before this component mounted
-    const pendingSid = (window as any).__pendingSid;
-    if (pendingSid) {
-      loadDeepLinkScenario(pendingSid);
-    }
-
-    // Poll for __pendingSid for 3 seconds (iOS AppDelegate injects it after WebView loads)
-    let pollCount = 0;
-    const pollInterval = setInterval(() => {
-      pollCount++;
-      const sid = (window as any).__pendingSid;
-      if (sid && !pendingSid) {
-        clearInterval(pollInterval);
-        loadDeepLinkScenario(sid);
-      }
-      if (pollCount >= 15) clearInterval(pollInterval); // Stop after 3s (15 x 200ms)
-    }, 200);
-
     return () => {
       window.removeEventListener('applink-sid', handleApplinkSid);
-      clearInterval(pollInterval);
+      appUrlListener?.remove?.();
     };
   }, []);
 
