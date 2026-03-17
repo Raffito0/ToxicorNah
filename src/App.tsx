@@ -29,26 +29,44 @@ function App() {
     // Initialize in-app purchases (no-op on web, sets up StoreKit on iOS)
     initPurchases().catch(console.error);
 
-    // Handle App Link sid injected by Android MainActivity
+    // Handle App Link sid injected by native code (iOS AppDelegate / Android MainActivity)
+    const loadDeepLinkScenario = (sid: string) => {
+      loadScenarioFromSupabase(sid)
+        .then((scenario) => {
+          setContentScenario(scenario);
+          setGuestMode(false); // Override guest mode — we have a scenario to show
+        })
+        .catch((err) => console.error('[AppLink] Failed to load scenario:', err));
+    };
+
     const handleApplinkSid = (e: Event) => {
       const sid = (e as CustomEvent).detail as string;
-      if (sid) {
-        loadScenarioFromSupabase(sid)
-          .then(setContentScenario)
-          .catch((err) => console.error('[AppLink] Failed to load scenario:', err));
-      }
+      if (sid) loadDeepLinkScenario(sid);
     };
     window.addEventListener('applink-sid', handleApplinkSid);
 
-    // Also check if sid was injected before this component mounted
+    // Check if sid was injected before this component mounted
     const pendingSid = (window as any).__pendingSid;
     if (pendingSid) {
-      loadScenarioFromSupabase(pendingSid)
-        .then(setContentScenario)
-        .catch((err) => console.error('[AppLink] Failed to load pending scenario:', err));
+      loadDeepLinkScenario(pendingSid);
     }
 
-    return () => window.removeEventListener('applink-sid', handleApplinkSid);
+    // Poll for __pendingSid for 3 seconds (iOS AppDelegate injects it after WebView loads)
+    let pollCount = 0;
+    const pollInterval = setInterval(() => {
+      pollCount++;
+      const sid = (window as any).__pendingSid;
+      if (sid && !pendingSid) {
+        clearInterval(pollInterval);
+        loadDeepLinkScenario(sid);
+      }
+      if (pollCount >= 15) clearInterval(pollInterval); // Stop after 3s (15 x 200ms)
+    }, 200);
+
+    return () => {
+      window.removeEventListener('applink-sid', handleApplinkSid);
+      clearInterval(pollInterval);
+    };
   }, []);
 
   useEffect(() => {

@@ -72,8 +72,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let range = NSRange(sid.startIndex..., in: sid)
         guard uuidPattern?.firstMatch(in: sid, range: range) != nil else { return }
 
-        // Wait for WebView to be ready, then inject sid
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        // Wait for WebView to be ready, then inject sid (500ms is enough for WebView init)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             if let webView = self.window?.rootViewController?.view.subviews
                 .compactMap({ $0 as? WKWebView }).first {
                 let safeSid = sid.replacingOccurrences(of: "'", with: "")
