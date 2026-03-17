@@ -6,70 +6,114 @@ import Capacitor
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
+    var pendingDeepLinkSid: String?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Match native background to web app #111111 — eliminates
-        // the dark gray bands at status bar and home indicator areas
+        // Match native background to web app
         let bgColor = UIColor(red: 0, green: 0, blue: 0, alpha: 1.0)
 
         DispatchQueue.main.async {
             guard let window = self.window else { return }
             window.backgroundColor = bgColor
-
             if let rootVC = window.rootViewController {
                 rootVC.view.backgroundColor = bgColor
-
-                // Walk subviews to color the WKWebView and its scroll view
-                for subview in rootVC.view.subviews {
-                    subview.backgroundColor = bgColor
-                    if let webView = subview as? WKWebView {
-                        webView.isOpaque = false
-                        webView.backgroundColor = bgColor
-                        webView.scrollView.backgroundColor = bgColor
-                    }
-                }
             }
+        }
+
+        // Check if app was launched with a URL (cold start)
+        if let url = launchOptions?[.url] as? URL {
+            extractAndStoreSid(from: url)
         }
 
         return true
     }
 
-    func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
-    }
-
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-        // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
-    }
-
-    func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
-    }
-
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
-    }
-
-    func applicationWillTerminate(_ application: UIApplication) {
-        // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
-    }
-
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        // Capacitor's ApplicationDelegateProxy forwards the URL to @capacitor/app plugin
-        // which fires 'appUrlOpen' event in JavaScript — handles both cold start and warm resume
+        // Called for warm resume (app already in background)
+        extractAndStoreSid(from: url)
+        // Also forward to Capacitor
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([any UIUserActivityRestoring]?) -> Void) -> Bool {
-        // Called when the app was launched with an activity, including Universal Links.
-        // Feel free to add additional processing here, but if you want the App API to support
-        // tracking app url opens, make sure to keep this call
         if let url = userActivity.webpageURL {
             return ApplicationDelegateProxy.shared.application(application, open: url, options: [:])
         }
         return false
     }
 
+    private func extractAndStoreSid(from url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let sid = components.queryItems?.first(where: { $0.name == "sid" })?.value,
+              !sid.isEmpty else { return }
+
+        // Validate UUID format
+        let uuidPattern = try? NSRegularExpression(pattern: "^[0-9a-fA-F\\-]+$")
+        let range = NSRange(sid.startIndex..., in: sid)
+        guard uuidPattern?.firstMatch(in: sid, range: range) != nil else { return }
+
+        pendingDeepLinkSid = sid
+
+        // Retry injecting into WebView until it works (up to 5 seconds)
+        injectSidIntoWebView(sid: sid, attempt: 0)
+    }
+
+    private func injectSidIntoWebView(sid: String, attempt: Int) {
+        guard attempt < 25 else { return } // 25 x 200ms = 5 seconds max
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            // In Capacitor, the WKWebView IS the rootViewController's view
+            guard let rootVC = self.window?.rootViewController else {
+                self.injectSidIntoWebView(sid: sid, attempt: attempt + 1)
+                return
+            }
+
+            // Try: view IS the WebView (Capacitor standard)
+            var webView = rootVC.view as? WKWebView
+
+            // Fallback: search subviews recursively
+            if webView == nil {
+                webView = self.findWebView(in: rootVC.view)
+            }
+
+            guard let wv = webView else {
+                self.injectSidIntoWebView(sid: sid, attempt: attempt + 1)
+                return
+            }
+
+            let safeSid = sid.replacingOccurrences(of: "'", with: "").replacingOccurrences(of: "\\", with: "")
+            let js = """
+            if (window.__deepLinkHandled !== '\(safeSid)') {
+                window.__deepLinkHandled = '\(safeSid)';
+                window.__pendingSid = '\(safeSid)';
+                window.dispatchEvent(new CustomEvent('applink-sid', { detail: '\(safeSid)' }));
+                localStorage.setItem('toxicornah_pending_sid', '\(safeSid)');
+            }
+            """
+            wv.evaluateJavaScript(js) { _, error in
+                if error != nil {
+                    // JS failed (page not loaded yet) — retry
+                    self.injectSidIntoWebView(sid: sid, attempt: attempt + 1)
+                }
+            }
+        }
+    }
+
+    private func findWebView(in view: UIView) -> WKWebView? {
+        if let webView = view as? WKWebView {
+            return webView
+        }
+        for subview in view.subviews {
+            if let found = findWebView(in: subview) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    func applicationWillResignActive(_ application: UIApplication) {}
+    func applicationDidEnterBackground(_ application: UIApplication) {}
+    func applicationWillEnterForeground(_ application: UIApplication) {}
+    func applicationDidBecomeActive(_ application: UIApplication) {}
+    func applicationWillTerminate(_ application: UIApplication) {}
 }

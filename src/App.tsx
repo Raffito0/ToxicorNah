@@ -41,7 +41,7 @@ function App() {
         .catch((err) => console.error('[AppLink] Failed to load scenario:', err));
     };
 
-    // Listen for URL opens via Capacitor (static import — must be registered IMMEDIATELY)
+    // METHOD 1: Capacitor App plugin (fires on warm resume)
     const appUrlListener = CapApp.addListener('appUrlOpen', ({ url }) => {
       try {
         const urlObj = new URL(url);
@@ -52,16 +52,49 @@ function App() {
       }
     });
 
-    // Fallback: legacy event for Android MainActivity (if still used)
+    // METHOD 2: Custom event from AppDelegate JS injection
     const handleApplinkSid = (e: Event) => {
       const sid = (e as CustomEvent).detail as string;
       if (sid) loadDeepLinkScenario(sid);
     };
     window.addEventListener('applink-sid', handleApplinkSid);
 
+    // METHOD 3: Check __pendingSid (set by AppDelegate before React mounted)
+    const pendingSid = (window as any).__pendingSid;
+    if (pendingSid) {
+      loadDeepLinkScenario(pendingSid);
+    }
+
+    // METHOD 4: Check localStorage (set by AppDelegate as last resort)
+    const storedSid = localStorage.getItem('toxicornah_pending_sid');
+    if (storedSid && !pendingSid) {
+      localStorage.removeItem('toxicornah_pending_sid');
+      loadDeepLinkScenario(storedSid);
+    }
+
+    // METHOD 5: Poll for __pendingSid (AppDelegate retries for 5 seconds)
+    let pollCount = 0;
+    const pollInterval = setInterval(() => {
+      pollCount++;
+      const sid = (window as any).__pendingSid;
+      if (sid && sid !== pendingSid) {
+        clearInterval(pollInterval);
+        loadDeepLinkScenario(sid);
+      }
+      // Also check localStorage
+      const lsSid = localStorage.getItem('toxicornah_pending_sid');
+      if (lsSid) {
+        clearInterval(pollInterval);
+        localStorage.removeItem('toxicornah_pending_sid');
+        loadDeepLinkScenario(lsSid);
+      }
+      if (pollCount >= 30) clearInterval(pollInterval); // Stop after 6s
+    }, 200);
+
     return () => {
       window.removeEventListener('applink-sid', handleApplinkSid);
       appUrlListener.remove();
+      clearInterval(pollInterval);
     };
   }, []);
 
