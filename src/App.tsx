@@ -12,6 +12,7 @@ import { supabase } from './lib/supabase';
 import { loadScenario, loadScenarioFromSupabase } from './services/contentModeService';
 import { initPurchases } from './services/purchaseService';
 import { isNativeApp } from './utils/platform';
+import { App as CapApp } from '@capacitor/app';
 import type { ContentScenario } from './types/contentScenario';
 
 function App() {
@@ -40,21 +41,16 @@ function App() {
         .catch((err) => console.error('[AppLink] Failed to load scenario:', err));
     };
 
-    let appUrlListener: any = null;
-    if (isNativeApp()) {
-      import('@capacitor/app').then(({ App: CapApp }) => {
-        // This fires on BOTH cold start and warm resume — Capacitor handles the timing
-        appUrlListener = CapApp.addListener('appUrlOpen', ({ url }) => {
-          try {
-            const urlObj = new URL(url);
-            const sid = urlObj.searchParams.get('sid');
-            if (sid) loadDeepLinkScenario(sid);
-          } catch (e) {
-            console.error('[AppLink] Invalid URL:', url);
-          }
-        });
-      });
-    }
+    // Listen for URL opens via Capacitor (static import — must be registered IMMEDIATELY)
+    const appUrlListener = CapApp.addListener('appUrlOpen', ({ url }) => {
+      try {
+        const urlObj = new URL(url);
+        const sid = urlObj.searchParams.get('sid');
+        if (sid) loadDeepLinkScenario(sid);
+      } catch (e) {
+        console.error('[AppLink] Invalid URL:', url);
+      }
+    });
 
     // Fallback: legacy event for Android MainActivity (if still used)
     const handleApplinkSid = (e: Event) => {
@@ -65,7 +61,7 @@ function App() {
 
     return () => {
       window.removeEventListener('applink-sid', handleApplinkSid);
-      appUrlListener?.remove?.();
+      appUrlListener.remove();
     };
   }, []);
 
