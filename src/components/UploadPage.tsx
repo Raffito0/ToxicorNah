@@ -349,7 +349,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
             <div
               className={`rounded-3xl cursor-pointer transition-all flex items-center justify-center overflow-hidden ${
                 (isContentMode && contentScreenshots.length > 0)
-                  ? 'flex-1 min-h-0 mb-4 max-h-[60vh]'
+                  ? 'flex-1 min-h-0 mb-4 max-h-[45vh]'
                   : 'aspect-square mb-10'
               }`}
               style={{ backgroundColor: '#121212' }}
@@ -359,7 +359,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
             >
           {/* CONTENT MODE: Show captured chat screenshot */}
           {isContentMode && contentScreenshots.length > 0 ? (
-            <div className="w-full h-full flex items-center justify-center px-5 py-8 overflow-hidden">
+            <div className="w-full h-full flex items-center justify-center p-4 overflow-hidden">
               {contentScreenshots.map((dataUrl, index) => (
                 <img
                   key={index}

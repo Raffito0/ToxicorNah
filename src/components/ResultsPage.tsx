@@ -551,7 +551,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
           {/* Relationship Status Pill */}
           {relStatusOption && (
             <motion.div
-              className="mt-2 px-3 py-1 rounded-full flex items-center gap-1.5"
+              className="mt-2 mb-4 px-3 py-1 rounded-full flex items-center gap-1.5"
               style={{
                 background: 'rgba(255, 255, 255, 0.1)',
                 backdropFilter: 'blur(8px)',
@@ -582,7 +582,7 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
       {/* Content — overlaps hero by 40px to hide any seam (same pattern as PersonProfile) */}
       <div className="relative flex flex-col items-center justify-center pb-12 bg-black" style={{ marginTop: (!analysis?.personName || analysis.personName === 'Him' || analysis.personName === 'Unknown') ? '0px' : '-40px', zIndex: 10 }}>
         <div className="w-full max-w-md px-[30px]">
-          <div className="bg-black pb-12" style={{ paddingTop: (!analysis?.personName || analysis.personName === 'Him' || analysis.personName === 'Unknown') ? '60px' : '16px' }}>
+          <div className="bg-black pb-12" style={{ paddingTop: (!analysis?.personName || analysis.personName === 'Him' || analysis.personName === 'Unknown') ? '60px' : '32px' }}>
             <div className="text-center mb-3">
               <motion.p
                 className="text-white/50 uppercase tracking-widest mb-2"
