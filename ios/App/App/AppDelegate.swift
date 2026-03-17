@@ -67,11 +67,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
               let sid = components.queryItems?.first(where: { $0.name == "sid" })?.value,
               !sid.isEmpty else { return }
 
-        // Wait for WebView to be ready, then inject sid (same as Android MainActivity)
+        // Validate sid is a UUID format only (prevent XSS injection)
+        let uuidPattern = try? NSRegularExpression(pattern: "^[0-9a-fA-F\\-]+$")
+        let range = NSRange(sid.startIndex..., in: sid)
+        guard uuidPattern?.firstMatch(in: sid, range: range) != nil else { return }
+
+        // Wait for WebView to be ready, then inject sid
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             if let webView = self.window?.rootViewController?.view.subviews
                 .compactMap({ $0 as? WKWebView }).first {
-                let js = "window.__pendingSid = '\(sid)'; window.dispatchEvent(new CustomEvent('applink-sid', { detail: '\(sid)' }));"
+                let safeSid = sid.replacingOccurrences(of: "'", with: "")
+                    .replacingOccurrences(of: "\\", with: "")
+                let js = "window.__pendingSid = '\(safeSid)'; window.dispatchEvent(new CustomEvent('applink-sid', { detail: '\(safeSid)' }));"
                 webView.evaluateJavaScript(js, completionHandler: nil)
             }
         }
