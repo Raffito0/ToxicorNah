@@ -176,6 +176,20 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
   });
   const [isArchetypeCardFlipped, setIsArchetypeCardFlipped] = useState(false);
   const [showArchetypeContent, setShowArchetypeContent] = useState(false);
+  // iOS WebView bug: filter:blur() drops during 3D rotateY transforms (GPU compositing strips filters).
+  // Nuclear fix: manually toggle face visibility at the 90-degree midpoint so the blurred back face
+  // is fully hidden before the transform angle would cause iOS to strip the blur.
+  // Card starts at rotateY=180 (back visible), flips to rotateY=0 (front visible).
+  const [showArchetypeFront, setShowArchetypeFront] = useState(false);
+  const [showArchetypeBack, setShowArchetypeBack] = useState(true);
+  const handleArchetypeRotationUpdate = useCallback((latest: { rotateY?: number }) => {
+    if (latest.rotateY === undefined) return;
+    const normalized = Math.abs(latest.rotateY % 360);
+    // At 180 = back visible, at 0 = front visible, swap at 90
+    const past90 = normalized < 90 || normalized > 270;
+    setShowArchetypeFront(past90);
+    setShowArchetypeBack(!past90);
+  }, []);
   const [isGeneratingShare, setIsGeneratingShare] = useState(false);
   const [showCallOutPreview, setShowCallOutPreview] = useState(false);
   const [showShareDynamic, setShowShareDynamic] = useState(false);
@@ -694,7 +708,8 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
               initial={false}
               animate={{ rotateY: isArchetypeCardFlipped ? 0 : 180 }}
               transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
-                          >
+              onUpdate={handleArchetypeRotationUpdate}
+            >
               {/* FRONT SIDE - The revealed archetype */}
               <div
                 className="absolute inset-0 rounded-[28px] overflow-hidden"
@@ -703,6 +718,8 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
                   WebkitBackfaceVisibility: 'hidden',
                   backgroundColor: '#111111',
                   boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+                  visibility: showArchetypeFront ? 'visible' : 'hidden',
+                  opacity: showArchetypeFront ? 1 : 0,
                 } as React.CSSProperties}
               >
                 {/* Full vertical archetype image */}
@@ -868,6 +885,8 @@ export function ResultsPage({ analysisId, isGuest = false }: ResultsPageProps) {
                   WebkitTransform: 'rotateY(180deg)',
                   backgroundColor: '#111111',
                   boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+                  visibility: showArchetypeBack ? 'visible' : 'hidden',
+                  opacity: showArchetypeBack ? 1 : 0,
                 } as React.CSSProperties}
               >
                 {/* Background image - blurred for glassmorphism effect */}

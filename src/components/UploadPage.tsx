@@ -349,7 +349,7 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
             <div
               className={`rounded-3xl cursor-pointer transition-all flex items-center justify-center overflow-hidden ${
                 (isContentMode && contentScreenshots.length > 0)
-                  ? 'flex-1 min-h-0 mb-4 max-h-[45vh]'
+                  ? 'mb-4 max-h-[40vh]'
                   : 'aspect-square mb-10'
               }`}
               style={{ backgroundColor: '#121212' }}
@@ -359,13 +359,14 @@ export function UploadPage({ onAnalyze, contentScenario, isGuest }: UploadPagePr
             >
           {/* CONTENT MODE: Show captured chat screenshot */}
           {isContentMode && contentScreenshots.length > 0 ? (
-            <div className="w-full h-full flex items-center justify-center p-4 overflow-hidden">
+            <div className="w-full flex items-center justify-center p-4 overflow-hidden">
               {contentScreenshots.map((dataUrl, index) => (
                 <img
                   key={index}
                   src={dataUrl}
                   alt={`Chat ${index + 1}`}
-                  className="max-w-full max-h-full object-contain rounded-lg"
+                  className="max-w-full object-contain rounded-lg"
+                  style={{ maxHeight: 'calc(40vh - 2rem)' }}
                 />
               ))}
             </div>
