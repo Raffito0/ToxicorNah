@@ -5,6 +5,33 @@ import os
 # When True: skip proxy, use local WiFi, verbose logging, Europe/Rome timezone
 TEST_MODE = os.getenv("PHONEBOT_TEST", "1") == "1"
 
+# --- Phone Config Normalization -----------------------------------------------
+def normalize_phone_config(phone: dict) -> dict:
+    """Fill defaults for optional phone config fields.
+
+    Required fields: "id", "adb_serial" (KeyError if missing).
+    Optional fields with defaults:
+      - name: "Phone {id}"
+      - model: "unknown"
+      - screen_w: None  (triggers ADB auto-detect)
+      - screen_h: None  (triggers ADB auto-detect)
+      - density: None   (triggers ADB auto-detect)
+
+    Returns a new dict with all 7 keys guaranteed present.
+    Extra keys in the input dict are preserved.
+    """
+    pid = phone["id"]
+    _ = phone["adb_serial"]  # validate required
+    defaults = {
+        "name": f"Phone {pid}",
+        "model": "unknown",
+        "screen_w": None,
+        "screen_h": None,
+        "density": None,
+    }
+    return {**defaults, **phone}
+
+
 # --- Phones -------------------------------------------------------------------
 PHONES = [
     {
@@ -14,6 +41,7 @@ PHONES = [
         "adb_serial": None,  # auto-detected on startup
         "screen_w": 1080,
         "screen_h": 2220,
+        "density": 420,
     },
     {
         "id": 2,
@@ -22,6 +50,7 @@ PHONES = [
         "adb_serial": None,
         "screen_w": 1080,
         "screen_h": 2340,
+        "density": 420,
     },
     {
         "id": 3,
@@ -30,6 +59,7 @@ PHONES = [
         "adb_serial": None,
         "screen_w": 1080,
         "screen_h": 2220,
+        "density": 420,
     },
     {
         "id": 4,
@@ -38,8 +68,13 @@ PHONES = [
         "adb_serial": None,
         "screen_w": 720,
         "screen_h": 1600,
+        "density": 280,
     },
 ]
+
+# Normalize all phone entries (fill defaults for optional fields)
+for i, p in enumerate(PHONES):
+    PHONES[i] = normalize_phone_config(p)
 
 # --- Accounts -----------------------------------------------------------------
 ACCOUNTS = [
@@ -77,7 +112,7 @@ AIRTABLE = {
 
 # --- Gemini AI ----------------------------------------------------------------
 GEMINI = {
-    "api_key": os.getenv("GEMINI_API_KEY", ""),
+    "api_key": os.getenv("GEMINI_API_KEY", "AIzaSyDvwh4rbEQu4TnsqmPukaC6wAqXiyINuv8"),
     "model": "gemini-2.0-flash",
     "max_tokens": 256,
 }
@@ -129,8 +164,8 @@ HUMAN = {
     "rabbit_hole_videos_range": (2, 5),
 
     # Daily mood (multipliers)
-    "mood_energy_range": (0.7, 1.3),
-    "mood_social_range": (0.5, 1.5),
+    "mood_energy_range": (0.45, 1.4),
+    "mood_social_range": (0.4, 1.6),
 
     # === 14 Human-Like Behaviors (probabilities + counts) ===
     "zona_morta_prob": 0.15,
@@ -162,7 +197,7 @@ HUMAN = {
     "watch_short": (2.5, 0.4, 0.8, 8),
     "watch_medium": (6.0, 0.4, 2, 18),
     "load_reaction": (3.5, 0.4, 1.0, 12),
-    "interruption_duration": (30.0, 0.8, 3, 300),
+    "interruption_duration": (12.0, 0.6, 3, 30),
     "bg_end_duration": (42.0, 0.3, 15, 120),
     "micro_pause": (0.1, 0.4, 0.02, 0.5),
 
@@ -196,7 +231,65 @@ HUMAN = {
     "t_story_watch": (3.0, 0.5, 1.0, 12),          # watching each story slide
     "t_search_scroll_pause": (1.5, 0.4, 0.5, 5),    # pause between videos in search results
     "t_search_clear": (0.8, 0.3, 0.3, 2),            # time to clear search bar before new keyword
+    "t_tab_load_settle": (1.5, 0.3, 0.8, 3.0),        # settle time after switching to a new top tab
+
+    # --- Comment browsing timing ---
+    "t_comment_load": (1.5, 0.3, 0.8, 4),              # wait for comments sheet to load
+    "t_comment_read": (2.0, 0.5, 0.8, 8),              # reading pause between comment scrolls
+    "t_comment_read_deep": (3.5, 0.5, 1.5, 12),        # longer reading during deep dive (drama/beef)
+    "t_comment_before_write": (1.2, 0.4, 0.4, 4),      # pause before tapping input to write
+    "t_frame_capture_gap": (2.2, 0.4, 1.2, 5),         # gap between multi-frame captures for AI comment
+
+    # --- Page state verification ---
+    "t_popup_dismiss": (0.8, 0.3, 0.3, 2.0),              # pause after dismissing a popup
+    "t_popup_read": (1.5, 0.4, 0.5, 4.0),                 # "reading" the popup before dismissing
+    "t_recovery_settle": (1.2, 0.3, 0.5, 3.0),            # settling after page recovery
+
+    # --- New Section Timings (2026-03-16) ---
+    "t_tab_switch":        (1.0, 0.3, 0.5, 2.5),
+    "t_inbox_glance":      (2.0, 0.4, 1.0, 5.0),
+    "t_shop_popup_read":   (1.5, 0.3, 0.8, 3.0),
+    "t_product_browse":    (4.0, 0.5, 2.0, 10.0),
+    "t_carousel_scroll":   (0.8, 0.2, 0.3, 1.5),
+    "t_follower_read":     (1.5, 0.4, 0.5, 4.0),       # reading one follower row
+    "t_niche_profile_glance": (2.5, 0.4, 1.0, 7.0),  # reading profile before niche eval screenshot
+    "t_niche_video_watch": (4.0, 0.5, 2.0, 12.0),    # watching a video during niche eval
+    "t_notification_read": (1.2, 0.4, 0.4, 3.5),       # reading one notification
+    "t_profile_views_browse": (4.0, 0.5, 2.0, 10.0),   # browsing profile viewers list
+
+    # --- Post-action verification waits (Category A -- CRITICAL) ---
+    "t_back_verify":        (1.2, 0.3, 0.6, 3.0),     # after press_back, before verify screenshot
+    "t_tab_content_load":   (2.5, 0.3, 1.5, 5.0),     # after tab tap, before verify content loaded
+    "t_comment_anim":       (1.8, 0.3, 1.0, 4.0),     # comment sheet open animation
+    "t_profile_load":       (3.0, 0.3, 1.5, 6.0),     # after avatar tap, before profile verify
+    "t_profile_from_story": (3.5, 0.3, 2.0, 7.0),     # profile via Story header (slower)
+    "t_video_open":         (2.0, 0.3, 1.0, 4.0),     # after grid tap, before video page verify
+
+    # --- Anti-detection cosmetic waits (Category B) ---
+    "t_tap_gap":            (0.5, 0.3, 0.2, 1.5),     # brief natural pause between sequential taps
+    "t_anim_complete":      (1.5, 0.4, 0.8, 4.0),     # wait for animation/refresh to complete
+    "t_brief_watch":        (5.0, 0.5, 2.0, 15.0),    # accidentally entered LIVE/video, brief watch
+    "t_product_detail":     (2.0, 0.4, 1.0, 5.0),     # browsing product in Shop
+
+    # --- System recovery waits (Category C) ---
+    "t_home_settle":        (2.0, 0.3, 1.0, 4.0),     # after HOME gesture
+    "t_reopen_app":         (3.5, 0.3, 2.0, 6.0),     # after reopening app from launcher
+    "t_frozen_retry":       (4.0, 0.4, 2.0, 8.0),     # FYP frozen, wait before retry
+    "t_close_before_open":  (3.0, 0.3, 1.5, 6.0),     # after closing app, before reopening
 }
+
+# Max recovery attempts before forcing go_to_fyp()
+PAGE_VERIFY_MAX_RETRIES = 3
+
+# --- PopupGuardian (continuous popup detection) ---
+# Stall threshold: max avg brightness diff to consider screen "unchanged" after swipe.
+# New video: avg_diff typically 40-80+. Same video with popup: typically 3-12.
+# Set conservatively to avoid false positives from static video backgrounds.
+POPUP_STALL_THRESHOLD = 18
+
+# --- Niche Gate (like/follow only in-niche content) ---
+# Follow cap: max follows per rolling 30-minute window
+FOLLOW_CAP_PER_30MIN = 2
 
 # --- Niche Keywords Pool (per-session random sampling, avoids all accounts = same queries) ---
 NICHE_KEYWORDS_POOL = [
@@ -209,6 +302,16 @@ NICHE_KEYWORDS_POOL = [
     "single life", "dating fails", "love language",
 ]
 
+# --- Niche Description (for Gemini niche-fit evaluation prompts) ---
+NICHE_DESCRIPTION = (
+    "Relationship and dating content: toxic relationships, red flags, situationships, "
+    "dating advice, couples content, heartbreak, love advice, breakups, boyfriend/girlfriend "
+    "dynamics, relationship drama, talking stage."
+)
+
+# --- Niche Follow Threshold (base score 0-100, modified by personality) ---
+NICHE_FOLLOW_THRESHOLD = 55
+
 # --- Session Flow Phases (replaces flat ENGAGEMENT_MIX) -----------------------
 # Each phase has a duration range (minutes) and engagement weights.
 # Phases are scaled to fit the actual session duration.
@@ -216,36 +319,46 @@ SESSION_PHASES = {
     "arrival": {
         "duration_range": (2, 3),
         "engagement": {
-            "scroll_fyp": 0.95, "like": 0.02, "comment": 0.00,
-            "search_explore": 0.02, "follow": 0.00, "profile_visit": 0.01,
+            "scroll_fyp": 0.93, "like": 0.03, "comment": 0.00,
+            "search_explore": 0.00, "follow": 0.00, "profile_visit": 0.00,
+            "check_inbox": 0.03, "browse_following": 0.00,
+            "browse_explore": 0.00, "browse_shop": 0.00,
         },
     },
     "warmup": {
         "duration_range": (3, 5),
         "engagement": {
-            "scroll_fyp": 0.70, "like": 0.18, "comment": 0.03,
-            "search_explore": 0.04, "follow": 0.02, "profile_visit": 0.03,
+            "scroll_fyp": 0.77, "like": 0.06, "comment": 0.01,
+            "search_explore": 0.01, "follow": 0.01, "profile_visit": 0.01,
+            "check_inbox": 0.05, "browse_following": 0.04,
+            "browse_explore": 0.03, "browse_shop": 0.01,
         },
     },
     "peak": {
         "duration_range": (7, 12),
         "engagement": {
-            "scroll_fyp": 0.45, "like": 0.25, "comment": 0.12,
-            "search_explore": 0.05, "follow": 0.05, "profile_visit": 0.08,
+            "scroll_fyp": 0.69, "like": 0.06, "comment": 0.04,
+            "search_explore": 0.02, "follow": 0.01, "profile_visit": 0.03,
+            "check_inbox": 0.04, "browse_following": 0.05,
+            "browse_explore": 0.04, "browse_shop": 0.02,
         },
     },
     "fatigue": {
         "duration_range": (5, 10),
         "engagement": {
-            "scroll_fyp": 0.78, "like": 0.12, "comment": 0.03,
-            "search_explore": 0.02, "follow": 0.01, "profile_visit": 0.04,
+            "scroll_fyp": 0.85, "like": 0.05, "comment": 0.01,
+            "search_explore": 0.01, "follow": 0.00, "profile_visit": 0.01,
+            "check_inbox": 0.02, "browse_following": 0.03,
+            "browse_explore": 0.02, "browse_shop": 0.00,
         },
     },
     "exit": {
         "duration_range": (2, 3),
         "engagement": {
-            "scroll_fyp": 0.92, "like": 0.05, "comment": 0.01,
-            "search_explore": 0.01, "follow": 0.00, "profile_visit": 0.01,
+            "scroll_fyp": 0.94, "like": 0.04, "comment": 0.01,
+            "search_explore": 0.00, "follow": 0.00, "profile_visit": 0.00,
+            "check_inbox": 0.01, "browse_following": 0.00,
+            "browse_explore": 0.00, "browse_shop": 0.00,
         },
     },
 }
@@ -261,7 +374,13 @@ PERSONALITY_RANGES = {
     "boredom_rate": (0.06, 0.18),         # how fast boredom accumulates per passive scroll
     "boredom_relief": (0.25, 0.55),       # how much engagement (like/comment) reduces boredom
     "switch_threshold": (0.55, 0.85),     # boredom level that triggers IG view switch
+    "comment_sociality": (0.15, 0.75),    # how much this account browses/reads comments (independent of commenting)
 }
+
+# Comment style per account (persistent, assigned on first load, not in PERSONALITY_RANGES because it's categorical)
+# Styles: "reactor" = emotional reactions, "questioner" = asks questions,
+#          "quoter" = quotes/references video, "hype" = hype/support
+COMMENT_STYLES = ["reactor", "questioner", "quoter", "hype"]
 
 PERSONALITY_DRIFT = 0.015  # max trait shift per session (~1.5%)
 
