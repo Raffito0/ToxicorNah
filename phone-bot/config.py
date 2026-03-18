@@ -417,5 +417,9 @@ if DELIVERY_MODULE_DIR not in sys.path:
 for d in [DATA_DIR, PLANS_DIR, VIDEOS_DIR, LOGS_DIR]:
     os.makedirs(d, exist_ok=True)
 
+# --- Telegram Alerts ----------------------------------------------------------
+TELEGRAM_ALERT_BOT_TOKEN = os.getenv("PHONEBOT_TELEGRAM_TOKEN", "")
+TELEGRAM_ALERT_CHAT_ID = os.getenv("PHONEBOT_TELEGRAM_CHAT", "")
+
 # --- Timezone -----------------------------------------------------------------
 TIMEZONE = "Europe/Rome" if TEST_MODE else "US/Eastern"

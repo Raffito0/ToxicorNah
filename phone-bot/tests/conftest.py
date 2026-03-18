@@ -101,6 +101,23 @@ if _PKG not in sys.modules:
             import warnings
             warnings.warn(f"monitor.py partial import: {e}")
 
+    # Register core.telegram_alerts module
+    ta_path = os.path.join(core_dir, "telegram_alerts.py")
+    if os.path.exists(ta_path):
+        ta_spec = importlib.util.spec_from_file_location(
+            f"{_PKG}.core.telegram_alerts", ta_path,
+            submodule_search_locations=[]
+        )
+        ta_mod = importlib.util.module_from_spec(ta_spec)
+        ta_mod.__package__ = f"{_PKG}.core"
+        sys.modules[f"{_PKG}.core.telegram_alerts"] = ta_mod
+        sys.modules["core.telegram_alerts"] = ta_mod
+        try:
+            ta_spec.loader.exec_module(ta_mod)
+        except ImportError as e:
+            import warnings
+            warnings.warn(f"telegram_alerts.py partial import: {e}")
+
     # Register main_discovery module (uses absolute imports, works via sys.path)
     discovery_path = os.path.join(phone_bot_dir, "main_discovery.py")
     if os.path.exists(discovery_path):

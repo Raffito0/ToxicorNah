@@ -19,7 +19,8 @@ from .. import config  # NOTE: config.py adds delivery module to sys.path
 from ..core.adb import ADBController, DeviceLostError
 from ..core.human import HumanEngine
 from ..core.proxy import ProxyQueue
-from ..core.monitor import init_monitor, log_event as monitor_log, BotEvent, get_logger as get_monitor
+from ..core.monitor import init_monitor, log_event as monitor_log, BotEvent, get_logger as get_monitor, get_action_trace
+from ..core.telegram_alerts import init_alerts, send_alert as tg_alert
 from ..actions.tiktok import TikTokBot
 from ..actions.instagram import InstagramBot
 from .warmup import AccountWarmupState, generate_warmup_sessions, generate_warmup_plan
@@ -282,6 +283,8 @@ class SessionExecutor:
             self._monitor_event(phone_id, account, session_id, "error",
                                 human=human, success=False,
                                 metadata={"error": "session_timeout", "limit_seconds": timeout_seconds})
+            tg_alert(phone_id, account, f"SESSION TIMEOUT after {timeout_seconds:.0f}s",
+                     action_trace=get_action_trace(session_id))
             try:
                 adb.press_home()
             except Exception:
@@ -295,6 +298,8 @@ class SessionExecutor:
             self._monitor_event(phone_id, account, session_id, "device_lost",
                                 human=human, success=False,
                                 metadata={"error": str(e)})
+            tg_alert(phone_id, account, f"DEVICE LOST: {e}",
+                     action_trace=get_action_trace(session_id))
             human.end_session()
             return "device_lost"
 
@@ -969,6 +974,9 @@ class SessionExecutor:
         events_dir = os.path.join(config.DATA_DIR, "events")
         screenshots_dir = os.path.join(config.DATA_DIR, "screenshots")
         init_monitor(events_dir=events_dir, screenshots_dir=screenshots_dir)
+
+        # Initialize Telegram alerts (warns if env vars missing)
+        init_alerts()
 
         # Track phones that lost USB connection (shared across phases)
         dead_phones = set()
