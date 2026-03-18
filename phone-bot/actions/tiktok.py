@@ -1468,6 +1468,11 @@ class TikTokBot:
         Returns True if search page opened."""
         for attempt in range(2):
             log.info("NAV: go_to_search (tap search_icon, attempt %d)", attempt + 1)
+            # Tap center first to reveal top bar if hidden in fullscreen video mode
+            cx, cy = self.adb.screen_w // 2, self.adb.screen_h // 2
+            self.adb.tap(cx, cy)
+            time.sleep(0.3)
+            # Now tap search icon
             x, y = self.adb.get_coord("tiktok", "search_icon")
             x, y = self.human.jitter_tap(x, y)
             self.adb.tap(x, y)
