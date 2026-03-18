@@ -3555,34 +3555,48 @@ JSON only, no markdown."""
         self._find_and_tap(
             'the "Videos" tab text in the horizontal filter bar (Top/Videos/Users/Sounds)',
             y_max_pct=0.20)
+        # Wait for Videos grid to load (shows spinner for 1-3s)
         time.sleep(self.human.timing("t_tab_switch"))
+        time.sleep(self.human.timing("t_feed_refresh"))  # extra wait for grid thumbnails
         return True
 
     def _clear_and_retype(self, keyword: str):
-        """Clear search bar via X button, then type new keyword."""
+        """Clear search bar and type new keyword.
+
+        The X button approach is unreliable: after BACK from video, TikTok may
+        show the search history page where the X is in a different position or
+        absent. Instead: tap search bar → select all → delete → type new keyword.
+        """
         log.info("SEARCH_RETYPE: clearing, new='%s'", keyword)
 
-        # Tap X button to clear (don't tap search bar first — that deselects text
-        # and can make the X disappear)
-        cx, cy = self.adb.get_coord("tiktok", "search_clear")
-        cx, cy = self.human.jitter_tap(cx, cy)
-        self.adb.tap(cx, cy)
-        time.sleep(self.human.timing("t_search_clear"))
-        self.adb.save_screenshot_if_recording("after_search_clear")
-
-        # Tap search bar to focus it and bring up keyboard
+        # Step 1: Tap search bar to focus it
         x, y = self.adb.get_coord("tiktok", "search_bar")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
         time.sleep(self.human.timing("t_tap_gap"))
 
-        # Think about what to search next
-        time.sleep(self.human.timing("t_thinking"))
+        # Step 2: Select all text and delete (works regardless of search state)
+        # KEYCODE_MOVE_HOME + SHIFT+KEYCODE_MOVE_END = select all
+        # Then KEYCODE_DEL to delete selection
+        self.adb.shell("input keyevent KEYCODE_MOVE_HOME")
+        time.sleep(0.1)
+        self.adb.shell("input keyevent --longpress KEYCODE_SHIFT_LEFT KEYCODE_MOVE_END")
+        time.sleep(0.1)
+        self.adb.shell("input keyevent KEYCODE_DEL")
+        time.sleep(self.human.timing("t_tap_gap"))
 
+        # Step 3: Type new keyword
+        time.sleep(self.human.timing("t_thinking"))
         self.human.type_with_errors(self.adb, keyword)
         time.sleep(self.human.timing("micro_pause"))
         self.adb.press_enter()
         time.sleep(self.human.timing("t_browse_results"))
+
+        # Step 4: Tap "Videos" tab again (BACK from video returns to "Top" tab)
+        self._find_and_tap(
+            'the "Videos" tab text in the horizontal filter bar (Top/Videos/Users/Sounds)',
+            y_max_pct=0.20)
+        time.sleep(self.human.timing("t_tab_switch"))
 
     async def search_explore_session(self, niche_keywords: list = None, entry: str = "search_icon"):
         """Human-like search mini-session. Every decision driven by
