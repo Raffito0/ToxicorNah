@@ -3544,6 +3544,13 @@ JSON only, no markdown."""
         self.adb.press_enter()
         time.sleep(self.human.timing("t_browse_results"))
         self.adb.save_screenshot_if_recording("after_search_enter")
+
+        # TikTok shows "Top" tab by default (accounts/hashtags, not videos).
+        # Tap "Videos" tab to get the video grid we can actually browse.
+        self._find_and_tap(
+            'the "Videos" tab text in the horizontal filter bar (Top/Videos/Users/Sounds)',
+            y_max_pct=0.20)
+        time.sleep(self.human.timing("t_tab_switch"))
         return True
 
     def _clear_and_retype(self, keyword: str):
@@ -3687,18 +3694,26 @@ JSON only, no markdown."""
             gx, gy = self.human.jitter_tap(gx, gy, target_size="medium")
             self.adb.tap(gx, gy)
 
-            # Verify video opened with retry (slow phones / slow network)
+            # Verify video opened: check for sidebar icons (video) vs grid (search results).
+            # Can't use page!="search" because fullscreen video from search still shows
+            # a "Search · keyword" bar at bottom — Gemini sees it and says "search".
+            # Instead: sidebar scan. If sidebar icons found → video is open.
+            def _verify_search_video_opened(shot):
+                from ..core.sidebar import find_sidebar_icons
+                icons = find_sidebar_icons(shot, self.adb.screen_w, self.adb.screen_h)
+                return icons is not None  # sidebar found = fullscreen video playing
             vr = wait_and_verify(
                 adb=self.adb, human=self.human,
-                verify_fn=lambda shot: gemini.identify_page_with_recovery(shot).get("page") != "search",
+                verify_fn=_verify_search_video_opened,
                 action_name="open_search_video",
                 first_wait="t_video_open",
-                is_slow_verify=True,
-                max_attempts=2,
-                max_total_s=12.0,
+                is_slow_verify=False,  # pixel check = fast, needs retry_wait
+                retry_wait="t_tap_gap",
+                max_attempts=3,
+                max_total_s=8.0,
             )
             if not vr.success:
-                log.warning("Search grid tap missed — still on search page, skipping")
+                log.warning("Search grid tap missed — no sidebar detected, skipping")
                 continue
 
             # Watch the video
