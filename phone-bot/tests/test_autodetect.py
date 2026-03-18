@@ -1,5 +1,6 @@
 """Tests for device auto-detect: config normalization, ADB detection, serial discovery."""
 import copy
+from unittest.mock import patch, MagicMock
 import pytest
 
 
@@ -73,6 +74,232 @@ class TestNormalizePhoneConfig:
         original = {"id": 5, "adb_serial": "X"}
         result = self.normalize(original)
         assert result is not original
+
+
+# ---------------------------------------------------------------------------
+# Section 02 — ADB screen auto-detect helpers
+# ---------------------------------------------------------------------------
+
+class TestParseWmSize:
+    """Tests for _parse_wm_size helper."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from core.adb import _parse_wm_size
+        self.parse = _parse_wm_size
+
+    def test_physical_and_override_returns_override(self):
+        output = "Physical size: 1080x2220\nOverride size: 1080x2340"
+        assert self.parse(output) == (1080, 2340)
+
+    def test_physical_only(self):
+        output = "Physical size: 1080x2220"
+        assert self.parse(output) == (1080, 2220)
+
+    def test_override_only(self):
+        output = "Override size: 720x1600"
+        assert self.parse(output) == (720, 1600)
+
+    def test_override_before_physical(self):
+        output = "Override size: 1080x2340\nPhysical size: 1080x2220"
+        assert self.parse(output) == (1080, 2340)
+
+    def test_garbage_returns_none(self):
+        assert self.parse("some random text") is None
+
+    def test_empty_returns_none(self):
+        assert self.parse("") is None
+
+
+class TestParseWmDensity:
+    """Tests for _parse_wm_density helper."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from core.adb import _parse_wm_density
+        self.parse = _parse_wm_density
+
+    def test_physical_and_override_returns_override(self):
+        output = "Physical density: 420\nOverride density: 280"
+        assert self.parse(output) == 280
+
+    def test_physical_only(self):
+        output = "Physical density: 420"
+        assert self.parse(output) == 420
+
+    def test_garbage_returns_none(self):
+        assert self.parse("no density here") is None
+
+
+# ---------------------------------------------------------------------------
+# Section 02 — ADB sanity checks + fallback chain
+# ---------------------------------------------------------------------------
+
+def _make_mock_run(size_output="Physical size: 1080x2340",
+                   density_output="Physical density: 420"):
+    """Returns a function that mimics ADBController._run() for wm commands."""
+    def mock_run(self_or_args, args=None, timeout=15):
+        # Handle both bound method (self, args) and direct call patterns
+        if args is None:
+            actual_args = self_or_args
+        else:
+            actual_args = args
+        cmd = " ".join(actual_args)
+        if "wm size" in cmd:
+            return size_output
+        if "wm density" in cmd:
+            return density_output
+        return ""
+    return mock_run
+
+
+def _full_phone_config(**overrides):
+    base = {
+        "id": 1, "name": "Test", "model": "test", "adb_serial": "TEST123",
+        "screen_w": 1080, "screen_h": 2220, "density": 420,
+    }
+    base.update(overrides)
+    return base
+
+
+def _minimal_phone_config(**overrides):
+    base = {
+        "id": 1, "name": "Phone 1", "model": "unknown", "adb_serial": "TEST123",
+        "screen_w": None, "screen_h": None, "density": None,
+    }
+    base.update(overrides)
+    return base
+
+
+class TestADBSanityChecks:
+    """Sanity check validation for detected screen params."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from core.adb import _parse_wm_size
+        self.parse = _parse_wm_size
+
+    def test_width_zero_fails_sanity(self):
+        result = self.parse("Physical size: 0x2340")
+        # Parser returns the values; sanity check is in __init__
+        assert result == (0, 2340)
+
+    def test_normal_values_pass(self):
+        result = self.parse("Physical size: 1080x2340")
+        assert result == (1080, 2340)
+
+
+class TestADBFallbackChain:
+    """Test ADB detection -> config fallback -> DeviceConfigError chain."""
+
+    @patch("core.adb.subprocess")
+    def test_adb_success_overrides_config(self, mock_subprocess):
+        """ADB succeeds -> uses detected values, ignores config."""
+        from core.adb import ADBController
+        mock_run = _make_mock_run(
+            size_output="Physical size: 720x1600",
+            density_output="Physical density: 280"
+        )
+        with patch.object(ADBController, '_run', mock_run):
+            ctrl = ADBController("TEST", _full_phone_config())
+        assert ctrl.screen_w == 720
+        assert ctrl.screen_h == 1600
+        assert ctrl._density == 280
+
+    @patch("core.adb.subprocess")
+    def test_adb_fails_uses_config(self, mock_subprocess):
+        """ADB fails -> uses config values."""
+        from core.adb import ADBController
+        mock_run = _make_mock_run(size_output="", density_output="")
+        with patch.object(ADBController, '_run', mock_run):
+            ctrl = ADBController("TEST", _full_phone_config())
+        assert ctrl.screen_w == 1080
+        assert ctrl.screen_h == 2220
+
+    @patch("core.adb.subprocess")
+    def test_adb_fails_config_none_raises(self, mock_subprocess):
+        """ADB fails + config is None -> raises DeviceConfigError."""
+        from core.adb import ADBController, DeviceConfigError
+        mock_run = _make_mock_run(size_output="", density_output="")
+        with patch.object(ADBController, '_run', mock_run):
+            with pytest.raises(DeviceConfigError):
+                ADBController("TEST", _minimal_phone_config())
+
+    @patch("core.adb.subprocess")
+    def test_adb_detects_different_than_config(self, mock_subprocess):
+        """ADB detects different values than config -> ADB wins."""
+        from core.adb import ADBController
+        mock_run = _make_mock_run(
+            size_output="Physical size: 720x1600",
+            density_output="Physical density: 280"
+        )
+        with patch.object(ADBController, '_run', mock_run):
+            ctrl = ADBController("TEST", _full_phone_config(screen_w=1080, screen_h=2340, density=420))
+        assert ctrl.screen_w == 720  # ADB wins
+        assert ctrl.screen_h == 1600
+        assert ctrl._density == 280
+
+    @patch("core.adb.subprocess")
+    def test_minimal_config_working_adb(self, mock_subprocess):
+        """Minimal config (None screen params) + working ADB -> auto-detected."""
+        from core.adb import ADBController
+        mock_run = _make_mock_run(
+            size_output="Physical size: 1080x2340",
+            density_output="Physical density: 420"
+        )
+        with patch.object(ADBController, '_run', mock_run):
+            ctrl = ADBController("TEST", _minimal_phone_config())
+        assert ctrl.screen_w == 1080
+        assert ctrl.screen_h == 2340
+        assert ctrl._density == 420
+
+    @patch("core.adb.subprocess")
+    def test_sanity_fail_falls_to_config(self, mock_subprocess):
+        """ADB returns insane values -> falls back to config."""
+        from core.adb import ADBController
+        mock_run = _make_mock_run(
+            size_output="Physical size: 0x99999",
+            density_output="Physical density: 420"
+        )
+        with patch.object(ADBController, '_run', mock_run):
+            ctrl = ADBController("TEST", _full_phone_config())
+        assert ctrl.screen_w == 1080  # config fallback
+        assert ctrl.screen_h == 2220
+
+    @patch("core.adb.subprocess")
+    def test_density_default_280_when_all_fail(self, mock_subprocess):
+        """Density defaults to 280 when ADB and config both fail."""
+        from core.adb import ADBController
+        mock_run = _make_mock_run(
+            size_output="Physical size: 1080x2340",
+            density_output=""
+        )
+        with patch.object(ADBController, '_run', mock_run):
+            ctrl = ADBController("TEST", _minimal_phone_config())
+        assert ctrl._density == 280
+
+    @patch("core.adb.subprocess")
+    def test_run_exception_falls_to_config(self, mock_subprocess):
+        """_run raising exception falls back to config values."""
+        from core.adb import ADBController
+        def mock_run_raise(self_unused, args=None, timeout=15):
+            raise subprocess.TimeoutExpired(cmd="adb", timeout=5)
+        import subprocess
+        with patch.object(ADBController, '_run', mock_run_raise):
+            ctrl = ADBController("TEST", _full_phone_config())
+        assert ctrl.screen_w == 1080
+        assert ctrl.screen_h == 2220
+
+    @patch("core.adb.subprocess")
+    def test_run_exception_config_none_raises(self, mock_subprocess):
+        """_run raising exception + config None -> DeviceConfigError."""
+        from core.adb import ADBController, DeviceConfigError
+        import subprocess
+        def mock_run_raise(self_unused, args=None, timeout=15):
+            raise subprocess.TimeoutExpired(cmd="adb", timeout=5)
+        with patch.object(ADBController, '_run', mock_run_raise):
+            with pytest.raises(DeviceConfigError):
+                ADBController("TEST", _minimal_phone_config())
 
 
 class TestPhonesNormalized:
