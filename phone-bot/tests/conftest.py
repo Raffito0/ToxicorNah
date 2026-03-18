@@ -67,6 +67,23 @@ if _PKG not in sys.modules:
         import warnings
         warnings.warn(f"adb.py partial import (some deps missing): {e}")
 
+    # Register core.proxy module
+    proxy_path = os.path.join(core_dir, "proxy.py")
+    if os.path.exists(proxy_path):
+        proxy_spec = importlib.util.spec_from_file_location(
+            f"{_PKG}.core.proxy", proxy_path,
+            submodule_search_locations=[]
+        )
+        proxy_mod = importlib.util.module_from_spec(proxy_spec)
+        proxy_mod.__package__ = f"{_PKG}.core"
+        sys.modules[f"{_PKG}.core.proxy"] = proxy_mod
+        sys.modules["core.proxy"] = proxy_mod
+        try:
+            proxy_spec.loader.exec_module(proxy_mod)
+        except ImportError as e:
+            import warnings
+            warnings.warn(f"proxy.py partial import: {e}")
+
     # Register main_discovery module (uses absolute imports, works via sys.path)
     discovery_path = os.path.join(phone_bot_dir, "main_discovery.py")
     if os.path.exists(discovery_path):

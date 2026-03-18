@@ -16,8 +16,9 @@ def normalize_phone_config(phone: dict) -> dict:
       - screen_w: None  (triggers ADB auto-detect)
       - screen_h: None  (triggers ADB auto-detect)
       - density: None   (triggers ADB auto-detect)
+      - retry_tolerance: 3  (max verify retries, Motorola=4)
 
-    Returns a new dict with all 7 keys guaranteed present.
+    Returns a new dict with all 8 keys guaranteed present.
     Extra keys in the input dict are preserved.
     """
     pid = phone["id"]
@@ -28,6 +29,7 @@ def normalize_phone_config(phone: dict) -> dict:
         "screen_w": None,
         "screen_h": None,
         "density": None,
+        "retry_tolerance": 3,
     }
     return {**defaults, **phone}
 
@@ -69,6 +71,7 @@ PHONES = [
         "screen_w": 720,
         "screen_h": 1600,
         "density": 280,
+        "retry_tolerance": 4,
     },
 ]
 

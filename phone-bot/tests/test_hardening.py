@@ -500,3 +500,94 @@ class TestGeminiNoLiteralSleep3:
         import inspect
         source = inspect.getsource(gemini._call_text)
         assert "time.sleep(3)" not in source, "_call_text should not have literal time.sleep(3)"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Section 03: Small Infrastructure Fixes
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# --- WiFi SSID Fix ---
+
+class TestWiFiSSIDMatch:
+    """Test: exact SSID match (not substring)."""
+
+    def test_exact_match_succeeds(self):
+        """'MyWiFi' == 'MyWiFi' should match."""
+        from core.proxy import ssid_matches
+        assert ssid_matches("MyWiFi", "MyWiFi") is True
+
+    def test_substring_no_longer_matches(self):
+        """'home' != 'home2' should NOT match."""
+        from core.proxy import ssid_matches
+        assert ssid_matches("home", "home2") is False
+
+    def test_case_insensitive(self):
+        """'MYWIFI' == 'mywifi' should match."""
+        from core.proxy import ssid_matches
+        assert ssid_matches("MYWIFI", "mywifi") is True
+
+    def test_whitespace_stripped(self):
+        """Leading/trailing spaces should be stripped."""
+        from core.proxy import ssid_matches
+        assert ssid_matches("  MyWiFi  ", "MyWiFi") is True
+
+    def test_empty_connected_no_match(self):
+        """Empty connected SSID should not match."""
+        from core.proxy import ssid_matches
+        assert ssid_matches("MyWiFi", "") is False
+
+
+# --- Model Matching ---
+
+class TestModelMatching:
+    """Test: model string matching in device discovery."""
+
+    def test_exact_model_matches(self):
+        """SM-G965F config matches 'SM-G965F' getprop output."""
+        from main_discovery import model_matches
+        assert model_matches("SM-G965F", "SM-G965F") is True
+
+    def test_substring_model_matches(self):
+        """SM-S901B config matches 'SM-S901B/DS' getprop output."""
+        from main_discovery import model_matches
+        assert model_matches("SM-S901B", "SM-S901B/DS") is True
+
+    def test_motorola_matches(self):
+        """'moto e22i' config matches 'moto e22i' getprop output."""
+        from main_discovery import model_matches
+        assert model_matches("moto e22i", "moto e22i") is True
+
+    def test_no_false_positive(self):
+        """SM-G965F should NOT match SM-S901B."""
+        from main_discovery import model_matches
+        assert model_matches("SM-G965F", "SM-S901B") is False
+
+
+# --- Per-Device Config ---
+
+class TestNormalizePhoneConfig:
+    """Test: normalize_phone_config fills retry_tolerance default."""
+
+    def test_default_retry_tolerance(self):
+        """Phone without retry_tolerance gets default 3."""
+        from config import normalize_phone_config
+        result = normalize_phone_config({"id": 1, "adb_serial": "X"})
+        assert result["retry_tolerance"] == 3
+
+    def test_explicit_retry_tolerance_preserved(self):
+        """Phone with retry_tolerance=4 keeps that value."""
+        from config import normalize_phone_config
+        result = normalize_phone_config({"id": 4, "adb_serial": "Y", "retry_tolerance": 4})
+        assert result["retry_tolerance"] == 4
+
+    def test_motorola_has_higher_tolerance(self):
+        """Motorola (Phone 4) in PHONES should have retry_tolerance=4."""
+        from config import PHONES
+        moto = next(p for p in PHONES if p["id"] == 4)
+        assert moto["retry_tolerance"] == 4
+
+    def test_samsung_has_default_tolerance(self):
+        """Samsung phones should have retry_tolerance=3 (default)."""
+        from config import PHONES
+        samsung = next(p for p in PHONES if p["id"] == 1)
+        assert samsung["retry_tolerance"] == 3

@@ -24,6 +24,13 @@ from .adb import ADBController
 log = logging.getLogger(__name__)
 
 
+def ssid_matches(expected: str, connected: str) -> bool:
+    """Check if connected SSID matches expected (case-insensitive, stripped, exact)."""
+    if not expected or not connected:
+        return False
+    return expected.strip().lower() == connected.strip().lower()
+
+
 class ProxyQueue:
     """Manages which phone is currently connected to the proxy WiFi."""
 
@@ -79,7 +86,7 @@ class ProxyQueue:
 
         # Verify connection
         connected_ssid = ctrl.get_wifi_ssid()
-        if ssid.lower() in connected_ssid.lower():
+        if ssid_matches(ssid, connected_ssid):
             self.active_phone_id = phone_id
             log.info("Phone %d connected to proxy WiFi", phone_id)
             return True

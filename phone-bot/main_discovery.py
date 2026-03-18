@@ -19,6 +19,16 @@ except ImportError:
 log = logging.getLogger("phone_bot.discovery")
 
 
+def model_matches(config_model: str, device_model: str) -> bool:
+    """Check if config model string matches device getprop output (case-insensitive substring).
+
+    Logs a warning for very short model strings (<4 chars) that could cause false positives.
+    """
+    if len(config_model) < 4:
+        log.warning("Model string '%s' is very short (<4 chars), risk of false positive", config_model)
+    return config_model.lower() in device_model.lower()
+
+
 def discover_devices() -> dict[int, ADBController]:
     """Detect connected ADB devices and match them to phone configs.
 
@@ -85,7 +95,7 @@ def discover_devices() -> dict[int, ADBController]:
             )
             device_model = model_output.stdout.strip()
 
-            if model.lower() in device_model.lower():
+            if model_matches(model, device_model):
                 try:
                     phone["adb_serial"] = serial  # assign discovered serial
                     ctrl = ADBController(serial, phone)
