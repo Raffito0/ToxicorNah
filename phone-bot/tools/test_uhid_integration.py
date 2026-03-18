@@ -260,7 +260,7 @@ def run_integration_test(serial: str, no_start: bool, no_destroy: bool) -> bool:
 
     try:
         # --- Step 4: PING → PONG ---
-        print("\n[4] PING → PONG")
+        print("\n[4] PING -> PONG")
         try:
             resp = send_cmd(sock, "PING", timeout_s=5.0)
             if resp == "PONG":

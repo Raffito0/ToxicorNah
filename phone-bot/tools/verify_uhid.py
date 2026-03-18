@@ -75,49 +75,89 @@ class InputDevice:
 def parse_dumpsys_input(text: str) -> list[InputDevice]:
     """Parse 'dumpsys input' text into a list of InputDevice objects.
 
-    Handles the standard 'adb shell dumpsys input' output format.
-    Lines outside a device block are ignored gracefully.
+    Handles two output formats:
+
+    1. Standard (Android 10+):
+         "0: sec_touchscreen  /dev/input/event3"
+           Identifier: bus=0x0000, ...
+           Sources: 0x00001002 (touchScreen)
+           Motion Ranges:
+             X: source=..., min=0, max=32767
+
+    2. Samsung Android 9 (two-section split):
+       Input Reader State section:
+         "  Device 13: sec_touchscreen"
+             Sources: 0x00001002
+             Motion Ranges:
+               X: source=..., min=0, max=4095
+       Event Hub State section (same device_id, different header):
+         "    13: sec_touchscreen"
+               Identifier: bus=0x0003, ...
+
+       Both sections are merged by device_id into a single InputDevice.
     """
-    devices: list[InputDevice] = []
-    current: Optional[InputDevice] = None
+    # Use an ordered dict keyed by device_id so that the same device seen
+    # in two sections (Event Hub + Input Reader on Samsung) gets merged.
+    device_map: dict[int, InputDevice] = {}
+    device_order: list[int] = []   # insertion order
+    current_id: Optional[int] = None
 
-    # Device header at start of line (0-2 spaces of indent).
-    # Examples:
-    #   "0: sec_touchscreen  /dev/input/event3"
-    #   "-1: Virtual"
-    #   "10: sec_touchscreen"
-    device_header_pat = re.compile(r'^\s{0,2}(-?\d+):\s+(\S+)')
+    # Three header patterns tried in priority order:
+    # 1. Samsung Input Reader:  "  Device 13: sec_touchscreen"
+    _PAT_IR = re.compile(r'^\s+Device\s+(-?\d+):\s+(\S+)')
+    # 2. Standard:              "0: sec_touchscreen  /dev/input/event3"
+    _PAT_STD = re.compile(r'^\s{0,2}(-?\d+):\s+(\S+)')
+    # 3. Samsung Event Hub:     "    13: sec_touchscreen"  (4+ leading spaces)
+    _PAT_EH = re.compile(r'^\s{4,}(-?\d+):\s+(\S+)')
 
-    # "  Sources: 0x00001002 (touchScreen)"
     sources_pat = re.compile(r'Sources:\s+(0x[0-9a-fA-F]+)')
-
-    # "  Identifier: bus=0x0003, vendor=0x0000, ..."
     identifier_pat = re.compile(r'Identifier:\s+bus=(0x[0-9a-fA-F]+)')
-
-    # "  Properties: { INPUT_PROP_DIRECT }"
     prop_direct_pat = re.compile(r'Properties:.*INPUT_PROP_DIRECT')
-
-    # "    X: source=0x00001002, min=0.000000, max=4095.000000, ..."
-    # Accept any positive whitespace prefix (handles both spaces and tabs).
+    # Samsung Android 9: INPUT_PROP_DIRECT appears as "Touch Input Mapper (mode - direct)"
+    touch_direct_pat = re.compile(r'Touch Input Mapper \(mode\s*-\s*direct\)')
     motion_range_pat = re.compile(
         r'^\s+(\w+):\s+source=(0x[0-9a-fA-F]+),\s+min=([\d.]+),\s+max=([\d.]+)'
     )
+    # Samsung Android 9: "Raw Touch Axes:" section has pre-normalization HID values.
+    # Format: "        X: min=0, max=4095, flat=0, fuzz=0, resolution=0"
+    # These are the true HID descriptor values; overwrite normalized Motion Ranges.
+    raw_axis_pat = re.compile(r'^\s+(\w+):\s+min=([\d.]+),\s+max=([\d.]+),\s+flat=')
+    _RAW_AXIS_MAP = {
+        "X": "X", "Y": "Y",
+        "Pressure": "PRESSURE",
+        "TouchMajor": "TOUCH_MAJOR",
+        "TouchMinor": "TOUCH_MINOR",
+        "ToolMajor": "TOOL_MAJOR",
+        "ToolMinor": "TOOL_MINOR",
+    }
+
+    def _get_or_create(dev_id: int, name: str) -> InputDevice:
+        if dev_id not in device_map:
+            device_map[dev_id] = InputDevice(device_id=dev_id, name=name)
+            device_order.append(dev_id)
+        return device_map[dev_id]
 
     for line in text.splitlines():
         stripped = line.strip()
 
-        # New device header? Collapses lstrip + length check into one pattern.
-        m = device_header_pat.match(line)
-        if m:
-            if current is not None:
-                devices.append(current)
-            dev_id = int(m.group(1))
-            dev_name = m.group(2)
-            current = InputDevice(device_id=dev_id, name=dev_name)
+        # Try each header pattern in priority order.
+        # Note: axis names (X, Y, PRESSURE, TOUCH_MAJOR) are non-numeric so
+        # motion range lines like "    X: source=..." never match _PAT_EH.
+        matched = False
+        for pat in (_PAT_IR, _PAT_STD, _PAT_EH):
+            m = pat.match(line)
+            if m:
+                current_id = int(m.group(1))
+                _get_or_create(current_id, m.group(2))
+                matched = True
+                break
+        if matched:
             continue
 
-        if current is None:
+        if current_id is None:
             continue
+
+        current = device_map[current_id]
 
         # Sources line
         m = sources_pat.search(stripped)
@@ -131,26 +171,44 @@ def parse_dumpsys_input(text: str) -> list[InputDevice]:
             current.bus_id = int(m.group(1), 16)
             continue
 
-        # Properties line
+        # Properties line (standard format)
         if prop_direct_pat.search(stripped):
             current.has_prop_direct = True
             continue
 
-        # MotionRange entry — accepts any whitespace indent (spaces or tabs)
+        # Samsung Android 9: "Touch Input Mapper (mode - direct)" signals direct touch
+        if touch_direct_pat.search(stripped):
+            current.has_prop_direct = True
+            continue
+
+        # MotionRange entry (standard: has "source=0x...") — normalized values
         m = motion_range_pat.match(line)
         if m:
             axis_name = m.group(1)
             source = int(m.group(2), 16)
             min_val = float(m.group(3))
             max_val = float(m.group(4))
-            current.motion_ranges[axis_name] = MotionRange(
-                name=axis_name, source=source, min_val=min_val, max_val=max_val
-            )
+            # Only set if not already overwritten by raw axes
+            if axis_name not in current.motion_ranges:
+                current.motion_ranges[axis_name] = MotionRange(
+                    name=axis_name, source=source, min_val=min_val, max_val=max_val
+                )
+            continue
 
-    if current is not None:
-        devices.append(current)
+        # Raw Touch Axes entry (Samsung: no "source=", has "flat=") — true HID values.
+        # These overwrite normalized Motion Ranges set above.
+        m = raw_axis_pat.match(line)
+        if m:
+            raw_name = m.group(1)
+            std_name = _RAW_AXIS_MAP.get(raw_name)
+            if std_name:
+                min_val = float(m.group(2))
+                max_val = float(m.group(3))
+                current.motion_ranges[std_name] = MotionRange(
+                    name=std_name, source=0, min_val=min_val, max_val=max_val
+                )
 
-    return devices
+    return [device_map[did] for did in device_order]
 
 
 def find_uhid_device(devices: list[InputDevice]) -> Optional[InputDevice]:
