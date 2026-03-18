@@ -477,13 +477,24 @@ class PopupGuardian:
                  overlay_type, action)
 
         # ── Tier 1: Auto-solve ─────────────────────────────────────────
-        if overlay_type in ("dismissible_safe", "permission"):
+        if overlay_type in ("dismissible_safe", "permission", "anr"):
             result = self._tier1_auto_dismiss(classification, bot_ref)
             if result["resolved"]:
                 return result
             log.info("PopupGuardian: Tier 1 failed, escalating")
 
-        if overlay_type == "captcha_simple":
+        if overlay_type == "content_warning":
+            # Swipe up to skip age-protected content
+            log.info("PopupGuardian: T1 content warning — swiping up to skip")
+            cx = self.adb.screen_w // 2
+            self.adb.swipe(cx, int(self.adb.screen_h * 0.7),
+                           cx, int(self.adb.screen_h * 0.2), 300)
+            time.sleep(self.human.timing("t_popup_dismiss"))
+            self.stats["popups_dismissed"] += 1
+            return {"resolved": True, "action_taken": "content_warning_skipped",
+                    "needs_attention": False}
+
+        if overlay_type in ("captcha_simple", "captcha_puzzle", "captcha_rotate"):
             result = self._tier1_auto_captcha(classification, bot_ref)
             if result["resolved"]:
                 return result
@@ -554,8 +565,9 @@ class PopupGuardian:
                 "needs_attention": False}
 
     def _tier1_auto_captcha(self, classification, bot_ref):
-        """Tier 1: auto-solve simple CAPTCHAs (tap-to-verify, drag slider)."""
+        """Tier 1: auto-solve CAPTCHAs (tap-to-verify, drag slider, puzzle, rotate)."""
         action = classification.get("action", "")
+        overlay_type = classification.get("type", "")
 
         if action == "tap_to_verify":
             coords = classification.get("dismiss_coords")
@@ -591,8 +603,100 @@ class PopupGuardian:
                     return {"resolved": True, "action_taken": "captcha_dragged",
                             "needs_attention": False}
 
+        elif action == "slide_puzzle" or overlay_type == "captcha_puzzle":
+            # Puzzle slide: ask Gemini where to drag the piece
+            result = self._solve_captcha_puzzle()
+            if result:
+                return result
+
+        elif action == "rotate_image" or overlay_type == "captcha_rotate":
+            # Rotate: ask Gemini for rotation angle
+            result = self._solve_captcha_rotate()
+            if result:
+                return result
+
         return {"resolved": False, "action_taken": "captcha_auto_failed",
                 "needs_attention": False}
+
+    def _solve_captcha_puzzle(self):
+        """Solve puzzle-slide CAPTCHA: Gemini identifies target X position."""
+        sw, sh = self.adb.screen_w, self.adb.screen_h
+        for attempt in range(2):
+            shot = self.adb.screenshot_bytes()
+            if not shot:
+                break
+            # Ask Gemini where the puzzle piece should go
+            result = gemini._call_vision(
+                shot,
+                "This is a puzzle slide CAPTCHA. A puzzle piece needs to be dragged "
+                "to fit into the correct position in the image. "
+                "What HORIZONTAL percentage (0-100) should the piece be at? "
+                "Reply with ONLY a number, e.g.: 65",
+                max_tokens=10, temperature=0.1
+            )
+            try:
+                target_pct = int(result.strip().split()[0])
+                target_pct = max(10, min(90, target_pct))
+            except (ValueError, IndexError):
+                log.warning("CAPTCHA_PUZZLE: couldn't parse target: %s", result)
+                continue
+
+            # Drag slider from left to target position
+            slider_y = int(sh * 0.75)  # slider usually at bottom quarter
+            start_x = int(sw * 0.10)
+            end_x = int(sw * target_pct / 100)
+            duration = random.randint(800, 1500)  # human-like speed
+            log.info("CAPTCHA_PUZZLE: attempt %d — dragging to %d%% (%d->%d)",
+                     attempt + 1, target_pct, start_x, end_x)
+            self.adb.swipe(start_x, slider_y, end_x, slider_y, duration)
+            time.sleep(2.0)
+
+            # Check if solved
+            if self._verify_fyp_restored(self._bot_ref):
+                self.stats["popups_dismissed"] += 1
+                log.info("CAPTCHA_PUZZLE: solved on attempt %d!", attempt + 1)
+                return {"resolved": True, "action_taken": "captcha_puzzle_solved",
+                        "needs_attention": False}
+        return None
+
+    def _solve_captcha_rotate(self):
+        """Solve rotation CAPTCHA: Gemini identifies rotation angle."""
+        sw, sh = self.adb.screen_w, self.adb.screen_h
+        for attempt in range(2):
+            shot = self.adb.screenshot_bytes()
+            if not shot:
+                break
+            # Ask Gemini for rotation angle
+            result = gemini._call_vision(
+                shot,
+                "This is a rotation CAPTCHA. The image needs to be rotated to the "
+                "correct upright orientation. How many degrees CLOCKWISE (0-360) "
+                "should it be rotated? Reply with ONLY a number, e.g.: 120",
+                max_tokens=10, temperature=0.1
+            )
+            try:
+                degrees = int(result.strip().split()[0])
+                degrees = max(0, min(360, degrees))
+            except (ValueError, IndexError):
+                log.warning("CAPTCHA_ROTATE: couldn't parse degrees: %s", result)
+                continue
+
+            # Convert degrees to slider position (0=left, 360=right)
+            slider_y = int(sh * 0.75)
+            start_x = int(sw * 0.10)
+            end_x = int(sw * 0.10 + (sw * 0.80) * degrees / 360)
+            duration = random.randint(800, 1500)
+            log.info("CAPTCHA_ROTATE: attempt %d — rotating %d deg (%d->%d)",
+                     attempt + 1, degrees, start_x, end_x)
+            self.adb.swipe(start_x, slider_y, end_x, slider_y, duration)
+            time.sleep(2.0)
+
+            if self._verify_fyp_restored(self._bot_ref):
+                self.stats["popups_dismissed"] += 1
+                log.info("CAPTCHA_ROTATE: solved on attempt %d!", attempt + 1)
+                return {"resolved": True, "action_taken": "captcha_rotate_solved",
+                        "needs_attention": False}
+        return None
 
     def _tier2_human_intervention(self, screenshot_bytes, classification,
                                    telegram_alerts, bot_ref):
@@ -726,6 +830,11 @@ class TikTokBot:
         self._retry_tolerance = adb.phone.get("retry_tolerance", 3)
         # Session ID for monitor events (set by executor before browse_session)
         self._session_id = "unknown"
+        # Rate limiter (set by executor before browse_session, optional)
+        self.rate_limiter = None  # type: SessionRateLimiter | None
+        # Dynamic tab cache (scanned once per session)
+        self._cached_bottom_tabs = None  # list of detected bottom tab names
+        self._cached_top_tabs = None     # list of detected top tab names
         # Set screen-specific params for page_state (dynamic _NAV_Y based on density)
         from ..core import page_state
         page_state.set_screen_params(adb.screen_h, adb._density)
@@ -877,7 +986,9 @@ class TikTokBot:
     # --- Navigation --------------------------------------------------------
 
     def open_app(self):
-        """Open TikTok and wait for it to load."""
+        """Open TikTok and wait for it to load.
+        Includes startup popup sweep — handles permissions, cookie consent,
+        'Choose your interests', update popups, etc. that appear at launch."""
         log.info("Opening TikTok...")
         self.adb.open_tiktok()
         time.sleep(self.human.timing("t_app_load"))
@@ -887,6 +998,21 @@ class TikTokBot:
                 log.info("TikTok is open")
                 # Check for startup popups (TikTok Shop, policy, etc.)
                 self._verify_page("fyp")
+                # Startup popup sweep: check 2 more times with short delays
+                # Popups often load 1-3s after app opens (contacts, interests, cookies)
+                for sweep in range(2):
+                    time.sleep(self.human.timing("t_screen_setup"))
+                    shot = self.adb.screenshot_bytes()
+                    if not shot:
+                        continue
+                    # Quick pixel check: is this actually FYP? If not, might be a popup
+                    page_result = page_state.detect_page(shot, self.adb.screen_w, self.adb.screen_h)
+                    detected = page_result.get("page", "unknown") if page_result else "unknown"
+                    if detected == "fyp":
+                        break  # confirmed on FYP, no popup
+                    # Not FYP — likely a popup blocking the screen, try to dismiss
+                    log.info("STARTUP: not on FYP (detected=%s) on sweep %d, handling as popup", detected, sweep + 1)
+                    self.guardian.handle_overlay(shot, bot_ref=self)
                 return True
             time.sleep(self.human.timing("t_poll_check"))
 
@@ -932,6 +1058,103 @@ class TikTokBot:
         time.sleep(self.human.timing("t_home_settle"))
         log.info("NUCLEAR_ESCAPE: waited extra, assuming FYP")
         return True
+
+    # --- Dynamic Tab Detection (Split 02) ------------------------------------
+
+    def scan_available_tabs(self):
+        """Scan bottom nav + top tabs once per session via Gemini Vision.
+        Caches results — call after first FYP load."""
+        if self._cached_bottom_tabs is not None:
+            return  # already scanned
+        shot = self.adb.screenshot_bytes()
+        if not shot:
+            self._cached_bottom_tabs = ["home", "create", "inbox", "profile"]
+            self._cached_top_tabs = ["foryou", "following"]
+            return
+
+        # Bottom nav scan
+        try:
+            bottom = gemini._call_vision(
+                shot,
+                "Look at the BOTTOM navigation bar icons (5 icons). "
+                "List them left to right. The second icon may be: friends (people), "
+                "shop (bag), or discover (compass). Reply ONLY as comma-separated list: "
+                "home,friends,create,inbox,profile  OR  home,shop,create,inbox,profile  "
+                "OR  home,discover,create,inbox,profile",
+                max_tokens=60
+            )
+            if bottom:
+                tabs = [t.strip().lower() for t in bottom.split(",")]
+                if len(tabs) >= 3:
+                    self._cached_bottom_tabs = tabs
+                    log.info("NAV_SCAN: bottom tabs = %s", tabs)
+        except Exception as e:
+            log.debug("NAV_SCAN: bottom tab scan failed: %s", e)
+
+        if self._cached_bottom_tabs is None:
+            self._cached_bottom_tabs = ["home", "create", "inbox", "profile"]
+
+        # Top tab scan — ask about specific known tabs (tabs may be scrollable/partial)
+        try:
+            top = gemini._call_vision(
+                shot,
+                "Look at the TOP horizontal tab bar. For each tab, reply YES or NO:\n"
+                "ForYou: yes/no\nFollowing: yes/no\nExplore: yes/no\nShop: yes/no\n"
+                "Reply ONLY the names of tabs you see as comma-separated list, e.g.: foryou,following,explore\n"
+                "Ignore any city/location names (like Padua, Rome, etc). Only list standard TikTok tabs.",
+                max_tokens=60
+            )
+            if top:
+                raw_tabs = [t.strip().lower().replace(" ", "") for t in top.split(",")]
+                self._cached_top_tabs = raw_tabs
+                log.info("NAV_SCAN: top tabs = %s", raw_tabs)
+        except Exception as e:
+            log.debug("NAV_SCAN: top tab scan failed: %s", e)
+
+        if self._cached_top_tabs is None:
+            self._cached_top_tabs = ["foryou", "following"]
+
+    def has_tab(self, tab_name: str) -> bool:
+        """Check if a tab was detected during scan. Works for both bottom and top tabs.
+        tab_name should be lowercase, no spaces: 'shop', 'explore', 'following', 'friends'."""
+        if self._cached_bottom_tabs and tab_name in self._cached_bottom_tabs:
+            return True
+        if self._cached_top_tabs and tab_name in self._cached_top_tabs:
+            return True
+        return False
+
+    def visit_own_profile(self):
+        """Brief own-profile visit like a real user checking stats."""
+        log.info("NAV: visiting own profile (brief stats check)")
+        self.go_to_profile()
+        time.sleep(self.human.timing("t_profile_glance"))
+        # Maybe scroll once to see recent videos (40% chance)
+        if random.random() < 0.4:
+            sw = self.human.humanize_swipe(
+                self.adb.screen_w // 2, int(self.adb.screen_h * 0.7),
+                self.adb.screen_w // 2, int(self.adb.screen_h * 0.3))
+            self.adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
+            time.sleep(self.human.timing("t_video_glance"))
+        self._return_to_foryou()
+        log.info("NAV: own profile visit complete")
+
+    def _check_following_empty(self) -> bool:
+        """Detect if Following tab shows empty state ('Follow accounts to see videos').
+        Uses Gemini Vision since the empty state text varies by language/version."""
+        shot = self.adb.screenshot_bytes()
+        if not shot:
+            return False
+        result = gemini._call_vision(
+            shot,
+            "Is this an empty Following page that says something like "
+            "'Follow accounts to see videos here' or similar empty message? "
+            "Reply with ONE word: empty or has_content",
+            max_tokens=10
+        )
+        is_empty = result and "empty" in result.lower()
+        if is_empty:
+            log.info("NAV: Following tab is EMPTY — no content to scroll")
+        return is_empty
 
     def _exit_live(self) -> bool:
         """Exit a TikTok LIVE stream. press_back does NOT work in LIVE -- must tap X.
@@ -1473,6 +1696,25 @@ class TikTokBot:
             self.adb.press_back()
             time.sleep(self.human.timing("t_recovery_settle"))
 
+    def _check_and_dismiss_page_popup(self):
+        """Check for popup/modal after navigating to a new page (Inbox, Profile, etc.).
+        TikTok shows modals like 'Save login', 'Streak Pet', contact sync on page entry.
+        Uses Gemini to classify and dismiss. Called after every major page navigation."""
+        shot = self.adb.screenshot_bytes()
+        if not shot:
+            return
+        # Ask Gemini if there's a modal/popup blocking the page
+        result = gemini._call_vision(
+            shot,
+            "Is there a popup/modal dialog blocking the screen? "
+            "(e.g. 'Save login', 'Find friends', 'Enable notifications', promo popup, etc.) "
+            "Reply: yes or no",
+            max_tokens=5, temperature=0.1
+        )
+        if result and "yes" in result.lower():
+            log.info("PAGE_POPUP: detected popup after page navigation, handling")
+            self.guardian.handle_overlay(shot, bot_ref=self)
+
     # --- Core Actions ------------------------------------------------------
 
     def _verify_fyp_responsive(self) -> bool:
@@ -1569,6 +1811,9 @@ class TikTokBot:
 
     def like_video(self):
         """Like the current video. Uses double-tap or heart icon based on personality."""
+        if self.rate_limiter and not self.rate_limiter.can_like():
+            log.info("[Like] rate limit reached, skipping")
+            return
         if random.random() < self.human.personality.double_tap_habit:
             # Double-tap center (more human)
             cx, cy = self.adb.get_coord("tiktok", "video_center")
@@ -1594,6 +1839,103 @@ class TikTokBot:
         time.sleep(self.human.action_delay())
         self.adb.save_screenshot_if_recording("after_like")
         self._log_action("like")
+        if self.rate_limiter:
+            self.rate_limiter.on_like()
+
+    def bookmark_video(self):
+        """Save/bookmark the current video. Tap bookmark icon in sidebar."""
+        positions = self._get_sidebar_positions()
+        if not positions or "bookmark" not in positions:
+            log.info("[Bookmark] no sidebar/bookmark icon, skipping")
+            return
+        bx, by = positions["bookmark"]
+        x, y = self.human.jitter_tap(bx, by)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_bookmark_tap"))
+        log.info("[Bookmark] saved video at (%d,%d)", x, y)
+        self._log_action("bookmark")
+
+    def mark_not_interested(self):
+        """Long-press video → tap 'Not interested' from context menu.
+        Used on non-niche content to train TikTok algorithm."""
+        cx = self.adb.screen_w // 2
+        cy = int(self.adb.screen_h * 0.5)
+        self.adb.long_press(cx, cy, duration_ms=random.randint(800, 1500))
+        time.sleep(self.human.timing("t_context_menu"))
+
+        # Find "Not interested" via Gemini bbox
+        shot = self.adb.screenshot_bytes()
+        if shot:
+            result = gemini.find_element_by_vision(
+                shot, "the 'Not interested' option in the context menu",
+                self.adb.screen_w, self.adb.screen_h)
+            if result:
+                tx, ty = result[0], result[1]
+                self.adb.tap(tx, ty)
+                time.sleep(self.human.timing("t_tap_gap"))
+                log.info("[NotInterested] tapped at (%d,%d)", tx, ty)
+                self._log_action("not_interested")
+                return
+        # Fallback: dismiss menu by tapping elsewhere
+        self.adb.tap(cx, int(self.adb.screen_h * 0.2))
+        log.info("[NotInterested] couldn't find option, dismissed menu")
+
+    async def browse_comments_readonly(self):
+        """Open comments, scroll/read, close WITHOUT writing. Real users do this 10:1 vs writing."""
+        if not self.open_comments():
+            return
+        await self.browse_comments(check_commenter_profile=False)
+        self._dismiss_comments()
+        log.info("[Comments] read-only browse complete")
+
+    def _detect_photo_carousel(self) -> bool:
+        """Detect if current post is a photo carousel (not a video).
+        Photo carousels have: dot indicator at bottom, no play controls, sidebar still present."""
+        positions = self._get_sidebar_positions()
+        if positions is None:
+            return False  # no sidebar = LIVE or ad, not carousel
+        # Quick Gemini check — is there a dot indicator?
+        shot = self.adb.screenshot_bytes()
+        if not shot:
+            return False
+        result = gemini._call_vision(
+            shot,
+            "Is this a photo carousel/slideshow post (with dot indicators showing multiple photos) "
+            "or a normal video? Reply with ONE word: carousel or video",
+            max_tokens=10
+        )
+        is_carousel = result and "carousel" in result.lower()
+        if is_carousel:
+            log.info("[Carousel] detected photo carousel post")
+        return is_carousel
+
+    def browse_carousel(self):
+        """Browse a photo carousel by swiping left through photos."""
+        num_photos = random.randint(1, 3)
+        for _ in range(num_photos):
+            time.sleep(self.human.timing("t_carousel_photo"))
+            # Swipe left for next photo
+            sx = int(self.adb.screen_w * 0.75)
+            ex = int(self.adb.screen_w * 0.25)
+            sy = ey = int(self.adb.screen_h * 0.5)
+            self.adb.swipe(sx, sy, ex, ey, random.randint(250, 450))
+        log.info("[Carousel] browsed %d photos", num_photos)
+
+    def _browse_messages_glance(self):
+        """Brief DM/Messages glance — open, look, close. NEVER interact with conversations."""
+        log.info("[DM] opening messages for brief glance")
+        if self._inbox_enter_subpage("Messages", "Messages"):
+            time.sleep(self.human.timing("t_message_glance"))
+            # Maybe scroll once (40% chance)
+            if random.random() < 0.4:
+                sw = self.human.humanize_swipe(
+                    self.adb.screen_w // 2, int(self.adb.screen_h * 0.6),
+                    self.adb.screen_w // 2, int(self.adb.screen_h * 0.35))
+                self.adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
+                time.sleep(self.human.timing("t_message_glance"))
+            self.adb.press_back()
+            time.sleep(self.human.timing("t_back_verify"))
+            log.info("[DM] messages glance complete")
 
     # Whether comments can be scrolled (set by open_comments)
     _comments_scrollable = True
@@ -1852,6 +2194,8 @@ JSON only, no markdown."""
         time.sleep(self.human.timing("t_tap_gap"))
         log.debug("Posted comment and dismissed: %s", text[:30])
         self._log_action("comment")
+        if self.rate_limiter:
+            self.rate_limiter.on_comment()
 
     async def comment_with_ai(self):
         """Generate a contextual comment using multi-frame video understanding.
@@ -1862,6 +2206,9 @@ JSON only, no markdown."""
         3. Send all frames to Gemini for context-aware comment generation
         4. Type and post the comment
         """
+        if self.rate_limiter and not self.rate_limiter.can_comment():
+            log.info("[Comment] rate limit reached, skipping")
+            return
         # --- Step 1: Capture 3 video frames ---
         video_frames = []
 
@@ -1977,11 +2324,16 @@ JSON only, no markdown."""
     def follow_creator(self):
         """Follow the creator of the current video by tapping the red + below avatar.
         Uses bbox to find the exact position (engagement panel varies per video)."""
+        if self.rate_limiter and not self.rate_limiter.can_follow():
+            log.info("[Follow] rate limit reached, skipping")
+            return
         log.info("FOLLOW: tap avatar + icon (direct from video)")
         self._find_and_tap(
             "the small red plus (+) follow button below the circular avatar on the right side",
             fallback_coord="avatar")
         self.human.on_follow()
+        if self.rate_limiter:
+            self.rate_limiter.on_follow()
         time.sleep(self.human.action_delay())
 
     def _is_follow_button_red(self) -> bool:
@@ -2766,12 +3118,25 @@ JSON only, no markdown."""
         Called when pick_action() returns 'browse_following'."""
         log.info("SESSION: browse_following started")
 
+        # Check if Following tab exists (new accounts may not have it as top tab)
+        if not self.has_tab("following"):
+            log.info("FOLLOWING: tab not available on this account, skipping")
+            return
+
         if not self._tap_top_tab("Following"):
             log.warning("Following tab not found, returning to FYP")
             return
 
         time.sleep(self.human.timing("t_tab_switch"))
         time.sleep(self.human.timing("t_tab_load_settle"))
+
+        # Popup check after navigating to Following
+        self._check_and_dismiss_page_popup()
+
+        # Check for empty state (account follows nobody)
+        if self._check_following_empty():
+            self._return_to_foryou()
+            return
 
         # Double verify: confirm we're actually on Following after page fully loaded
         # (catches lag where verify passed but page hadn't loaded yet)
@@ -2864,6 +3229,21 @@ JSON only, no markdown."""
                         self.follow_from_profile()
                         self.adb.press_back()
                         time.sleep(self.human.timing("t_back_verify"))
+            elif action == "bookmark":
+                _sidebar = self._get_sidebar_positions()
+                if _sidebar and "bookmark" in _sidebar:
+                    self.bookmark_video()
+            elif action == "not_interested":
+                _ni_now = time.time()
+                if not hasattr(self, '_last_not_interested') or _ni_now - self._last_not_interested > 180:
+                    self.mark_not_interested()
+                    self._last_not_interested = _ni_now
+            elif action == "own_profile":
+                # Exit Following → visit profile → return to Following
+                self.visit_own_profile()
+                # Re-navigate to Following after profile visit
+                self._tap_top_tab("Following")
+                time.sleep(self.human.timing("t_tab_switch"))
             else:
                 watch = self.human.watch_duration()
                 time.sleep(watch)
@@ -3476,6 +3856,8 @@ JSON only, no markdown."""
 
     async def browse_explore_session(self, niche_keywords=None):
         """Browse the Explore tab. Reuses search_explore_session logic."""
+        if not self.has_tab("explore"):
+            log.info("EXPLORE: tab not available on this account, using search instead")
         log.info("SESSION: browse_explore started")
         self.human._explore_done_this_session = True
         await self.search_explore_session(niche_keywords=niche_keywords, entry="explore_tab")
@@ -3693,9 +4075,17 @@ JSON only, no markdown."""
         # Reset badge flag
         self.human._inbox_badge_detected = False
 
+        # Popup check: TikTok shows modals when entering Inbox
+        # (Save login, Streak Pet, contact sync, etc.)
+        # Check twice: immediately + after glance (popups can load with 1-3s delay)
+        self._check_and_dismiss_page_popup()
+
         # No scroll_to_top needed: TikTok opens Inbox at the top after nav tap,
         # and _find_and_tap() locates sub-sections visually regardless of position
         time.sleep(self.human.timing("t_inbox_glance"))
+
+        # Second popup check (catches late-loading modals like "Save login")
+        self._check_and_dismiss_page_popup()
 
         # --- Read behavioral state ---
         social = self.human.mood.social if self.human.mood else 1.0
@@ -3714,6 +4104,8 @@ JSON only, no markdown."""
         do_activity = random.random() < (curiosity * 0.45 + social * 0.25 - fatigue * 0.1)
         # Just scroll main inbox: rare, 2-6% driven by fatigue/boredom
         do_scroll_main = random.random() < (fatigue * 0.06 + boredom * 0.04)
+        # Messages glance: ~15% for social personalities
+        do_messages = random.random() < (social * 0.15 - fatigue * 0.05)
 
         # Build action list, shuffle order, cap at 3
         action_queue = []
@@ -3723,6 +4115,8 @@ JSON only, no markdown."""
             action_queue.append("new_followers")
         if do_activity:
             action_queue.append("activity")
+        if do_messages:
+            action_queue.append("messages")
         if do_scroll_main:
             action_queue.append("scroll_main")
 
@@ -3790,6 +4184,11 @@ JSON only, no markdown."""
                     dur = random.randint(350, 550)
                     self.adb.swipe(sx, start_y, sx + random.randint(-8, 8), end_y, dur)
                     time.sleep(self.human.timing("t_inbox_glance") * random.uniform(0.6, 1.0))
+                actions_done += 1
+
+            elif action == "messages":
+                log.info("INBOX: checking messages (brief glance)")
+                self._browse_messages_glance()
                 actions_done += 1
 
             elif action == "glance_only":
@@ -4240,6 +4639,9 @@ JSON only, no markdown."""
     async def browse_shop_session(self):
         """Browse the Shop section briefly.
         SAFETY: never tap purchase/payment buttons."""
+        if not self.has_tab("shop"):
+            log.info("SHOP: tab not available on this account, skipping")
+            return
         log.info("SESSION: browse_shop started")
         self.human._shop_done_this_session = True
 
@@ -4342,6 +4744,9 @@ JSON only, no markdown."""
             log.error("FYP not responsive — aborting session")
             self.close_app()
             return
+
+        # Scan available tabs once per session (dynamic UI detection)
+        self.scan_available_tabs()
 
         # Behavior #10: Variable load reaction time
         time.sleep(self.human.load_reaction_time())
@@ -4519,6 +4924,12 @@ JSON only, no markdown."""
                         self.guardian.check_background(_post_shot)
 
                 self._scrolls_since_last_like += 1
+
+                # Photo carousel detection: ~10% of videos, check if current post
+                # is a photo carousel and optionally swipe through photos
+                if random.random() < 0.10 and self._detect_photo_carousel():
+                    self.browse_carousel()
+
                 await asyncio.sleep(self.human.action_delay())
 
             elif action in ("like", "comment", "follow", "profile_visit"):
@@ -4598,8 +5009,25 @@ JSON only, no markdown."""
                 if not self._check_niche_before_engage(niche_keywords):
                     log.debug("Niche gate blocked follow -- not in niche")
                 elif self.human.should_follow_from_profile():
-                    self.follow_from_profile()
-                    self.human.on_engage()
+                    # Enter profile first, then niche-evaluate the PROFILE
+                    # (video niche != creator niche — a love quote video can be from a dance creator)
+                    if self.visit_creator_profile():
+                        shot = self.adb.screenshot_bytes()
+                        if shot:
+                            profile_eval = gemini._call_vision(
+                                shot,
+                                f"Is this TikTok profile about: {config.NICHE_DESCRIPTION}? "
+                                "Look at bio, username, and visible video thumbnails. "
+                                "Reply: yes or no",
+                                max_tokens=5, temperature=0.3
+                            )
+                            if profile_eval and "no" in profile_eval.lower():
+                                log.info("FOLLOW: profile NOT in niche, skipping follow")
+                                self.adb.press_back()
+                                time.sleep(self.human.timing("t_back_verify"))
+                                continue
+                        self.follow_from_profile()
+                        self.human.on_engage()
                     # Reliably return to FYP after profile visit
                     self._return_to_fyp()
                 else:
@@ -4639,6 +5067,22 @@ JSON only, no markdown."""
                 await self.rabbit_hole()
                 self._ensure_on_app()
                 self._return_to_fyp()
+
+            elif action == "bookmark":
+                # Bookmark/save current video (1-3% of niche content)
+                if self._check_niche_before_engage(niche_keywords):
+                    self.bookmark_video()
+
+            elif action == "not_interested":
+                # Long-press → "Not interested" — cooldown: max once per 3 min
+                _ni_now = time.time()
+                if not hasattr(self, '_last_not_interested') or _ni_now - self._last_not_interested > 180:
+                    self.mark_not_interested()
+                    self._last_not_interested = _ni_now
+
+            elif action == "own_profile":
+                # Brief own-profile stats check
+                self.visit_own_profile()
 
             await asyncio.sleep(self.human.action_delay())
 

@@ -19,6 +19,7 @@ from .. import config  # NOTE: config.py adds delivery module to sys.path
 from ..core.adb import ADBController, DeviceLostError
 from ..core.human import HumanEngine
 from ..core.proxy import ProxyQueue
+from ..core.rate_limiter import SessionRateLimiter
 from ..core.monitor import init_monitor, log_event as monitor_log, BotEvent, get_logger as get_monitor, get_action_trace
 from ..core.telegram_alerts import init_alerts, send_alert as tg_alert
 from ..actions.tiktok import TikTokBot
@@ -100,6 +101,18 @@ class SessionExecutor:
         if account_name not in self.human_engines:
             self.human_engines[account_name] = HumanEngine(account_name=account_name)
         return self.human_engines[account_name]
+
+    def _create_bot(self, platform: str, adb: ADBController, human: HumanEngine,
+                    account_name: str = "") -> "TikTokBot | InstagramBot":
+        """Create bot instance with rate limiter and session_id wired."""
+        if platform == "tiktok":
+            bot = TikTokBot(adb, human)
+        else:
+            bot = InstagramBot(adb, human)
+        bot._session_id = getattr(self, '_current_session_id', 'unknown')
+        if account_name:
+            bot.rate_limiter = SessionRateLimiter(account_name)
+        return bot
 
     # --- Profile Content Lookup --------------------------------------------
 
@@ -233,6 +246,7 @@ class SessionExecutor:
         }
         """
         account = session["account_name"]
+        self._current_account = account  # for _create_bot() rate limiter
         phone_id = session["phone_id"]
         platform = session["platform"]
         session_type = session.get("session_type", "normal")
@@ -285,6 +299,32 @@ class SessionExecutor:
         self._monitor_event(phone_id, account, session_id, "uhid_start",
                             metadata={"success": uhid_ok})
 
+        # --- Session Environment Setup ---
+        original_screen_timeout = None
+        try:
+            # Ensure WiFi is on and connected (SIM disabled, WiFi = only network)
+            if not config.TEST_MODE:
+                if not adb.get_wifi_state():
+                    adb.wifi_on()
+                    await asyncio.sleep(human.timing("t_wifi_reconnect"))
+                if not adb.check_wifi():
+                    log.warning("No internet after WiFi enable — waiting 5s and retrying")
+                    await asyncio.sleep(5)
+                    if not adb.check_wifi():
+                        log.error("No internet on Phone %d — skipping session", phone_id)
+                        return "no_wifi"
+
+            # Keep screen on during session (restore in finally)
+            original_screen_timeout = adb.get_screen_timeout()
+            adb.set_screen_timeout(1800000)  # 30 min
+
+            # Set volume to random realistic level (40-70% of max)
+            _, max_vol = adb.get_media_volume()
+            target_vol = random.randint(int(max_vol * 0.4), int(max_vol * 0.7))
+            adb.set_media_volume(target_vol)
+        except Exception as e:
+            log.debug("Session env setup partial failure (non-critical): %s", e)
+
         # Hard session timeout: duration * 1.5 + 5 min grace
         timeout_seconds = total_duration * 60 * 1.5 + 300
 
@@ -321,6 +361,13 @@ class SessionExecutor:
             return "device_lost"
 
         finally:
+            # --- Restore screen timeout ---
+            if original_screen_timeout is not None:
+                try:
+                    adb.set_screen_timeout(original_screen_timeout)
+                except Exception:
+                    pass
+
             # --- UHID Touch Server Stop (always runs if started) ---
             if uhid_started:
                 try:
@@ -328,6 +375,13 @@ class SessionExecutor:
                     self._monitor_event(phone_id, account, session_id, "uhid_stop")
                 except Exception as e:
                     log.debug("Touch server stop failed (expected if device lost): %s", e)
+
+            # --- WiFi off between sessions (prevents background IP leakage) ---
+            if not config.TEST_MODE:
+                try:
+                    adb.wifi_off()
+                except Exception:
+                    pass
 
         self._monitor_event(phone_id, account, session_id, "session_end",
                             human=human, metadata={"result": "ok"})
@@ -363,11 +417,7 @@ class SessionExecutor:
         """Aborted session: open app, scroll 3-6 times passively, close (30-90s)."""
         log.info("Aborted session — opening, scrolling briefly, closing")
 
-        if platform == "tiktok":
-            bot = TikTokBot(adb, human)
-        else:
-            bot = InstagramBot(adb, human)
-        bot._session_id = getattr(self, '_current_session_id', 'unknown')
+        bot = self._create_bot(platform, adb, human)
 
         bot.open_app()
         await asyncio.sleep(human.timing("t_app_load"))
@@ -397,11 +447,7 @@ class SessionExecutor:
             k=random.randint(6, min(10, len(config.NICHE_KEYWORDS_POOL))),
         )
 
-        if platform == "tiktok":
-            bot = TikTokBot(adb, human)
-        else:
-            bot = InstagramBot(adb, human)
-        bot._session_id = getattr(self, '_current_session_id', 'unknown')
+        bot = self._create_bot(platform, adb, human)
         await bot.browse_session(duration_minutes=duration_min, should_post=False,
                                  niche_keywords=session_keywords)
 
@@ -456,11 +502,8 @@ class SessionExecutor:
             k=random.randint(6, min(10, len(config.NICHE_KEYWORDS_POOL))),
         )
 
-        if platform == "tiktok":
-            bot = TikTokBot(adb, human)
-        else:
-            bot = InstagramBot(adb, human)
-        bot._session_id = getattr(self, '_current_session_id', 'unknown')
+        account = getattr(self, '_current_account', '')
+        bot = self._create_bot(platform, adb, human, account_name=account)
         await bot.browse_session(
             duration_minutes=duration_min,
             should_post=should_post,
@@ -514,12 +557,11 @@ class SessionExecutor:
         """Execute a TikTok warmup session.
         Pre-loop tasks are shuffled per session. Scroll loop has full
         micro-behaviors (zona morta, peek scroll, post-like pause, etc.)."""
-        bot = TikTokBot(adb, human)
-        bot._session_id = getattr(self, '_current_session_id', 'unknown')
+        account_name = session["account_name"]
+        bot = self._create_bot("tiktok", adb, human, account_name=account_name)
         actions = session["actions"]
         duration = session["duration_minutes"]
         niche_keywords = session.get("niche_keywords", [])
-        account_name = session["account_name"]
         warmup_state = self.warmup_states.get(account_name)
         n_searches = actions.get("search_niche", 0)
 

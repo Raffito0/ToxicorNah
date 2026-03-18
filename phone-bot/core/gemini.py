@@ -767,25 +767,35 @@ def classify_overlay(screenshot_bytes: bytes, screen_w: int, screen_h: int) -> d
     prompt = f"""Screenshot is {screen_w}x{screen_h}. There is an overlay/popup blocking the screen.
 Classify it into EXACTLY ONE of these types:
 
-- "dismissible_safe": promo popup, cookie banner, notification permission, age verification,
-  "Unwrap deal", any popup with a clear X/Close/Not now/Skip/Cancel button
+- "dismissible_safe": promo popup, cookie banner, GDPR consent, notification permission,
+  age verification, "Unwrap deal", "What's New" update popup, wind-down/break reminder,
+  "Choose your interests" category selection, any popup with a clear X/Close/Not now/Skip/
+  Cancel/Got it/Accept/OK button
 - "captcha_simple": tap-to-verify ("I am not a robot"), drag slider to verify
-- "captcha_complex": image puzzle (select matching images, rotate image)
-- "permission": system permission dialog (camera, microphone, location)
-- "account_warning": community guidelines warning, account restriction notice
+- "captcha_puzzle": puzzle piece to slide into correct position (jigsaw-like)
+- "captcha_rotate": image to rotate to correct orientation
+- "captcha_complex": select matching images from grid, 3D shape matching
+- "permission": system permission dialog (camera, microphone, location, contacts)
+- "anr": Android system "App not responding" dialog with Wait/Close buttons
+- "content_warning": "This post is age protected" or content warning overlay on a video
+- "account_warning": community guidelines warning, account restriction, phone/email verify
 - "login_expired": login/signup screen, session expired, re-authentication needed
 - "unknown": cannot classify
 
 For each type, determine the ACTION:
-- dismissible_safe/permission -> "tap_dismiss" (find the dismiss/cancel button coords)
-- captcha_simple with tap button -> "tap_to_verify"
+- dismissible_safe/permission -> "tap_dismiss" (find the dismiss/cancel/OK button coords)
+- captcha_simple with tap -> "tap_to_verify"
 - captcha_simple with slider -> "drag_slider"
+- captcha_puzzle -> "slide_puzzle" (find target position)
+- captcha_rotate -> "rotate_image"
+- anr -> "tap_wait" (find the Wait button coords)
+- content_warning -> "swipe_skip" (swipe up to skip the video)
 - captcha_complex/account_warning/login_expired/unknown -> "escalate"
 
-Find the PIXEL coordinates of the dismiss/verify button center if applicable.
+Find the PIXEL coordinates of the dismiss/verify/wait button center if applicable.
 
 Return ONLY JSON:
-{{"type": "dismissible_safe", "subtype": "promo", "dismiss_coords": [540, 1200], "action": "tap_dismiss", "description": "what the overlay shows"}}
+{{"type": "dismissible_safe", "subtype": "cookie_consent", "dismiss_coords": [540, 1200], "action": "tap_dismiss", "description": "what the overlay shows"}}
 JSON only, no markdown."""
 
     try:
@@ -796,8 +806,9 @@ JSON only, no markdown."""
         data = json.loads(result)
 
         overlay_type = data.get("type", "unknown")
-        valid_types = {"dismissible_safe", "captcha_simple", "captcha_complex",
-                       "permission", "account_warning", "login_expired", "unknown"}
+        valid_types = {"dismissible_safe", "captcha_simple", "captcha_puzzle",
+                       "captcha_rotate", "captcha_complex", "permission", "anr",
+                       "content_warning", "account_warning", "login_expired", "unknown"}
         if overlay_type not in valid_types:
             overlay_type = "unknown"
 
@@ -931,6 +942,13 @@ couples content, heartbreak, love advice, relationship drama, boyfriend/girlfrie
 
 Content NOT in niche: cooking, fitness, sports, gaming, pets, travel, random comedy
 (unless comedy is specifically about relationships/dating).
+
+IMPORTANT: Look at the FULL picture — not just the text/caption, but also:
+- The creator's username and hashtags (visible at bottom)
+- The visual content of the video itself
+- If the video has relationship TEXT but the creator/hashtags suggest a different niche
+  (e.g. dance, lifestyle, beauty), mark in_niche as FALSE.
+A generic lifestyle creator posting a love quote is NOT in niche.
 
 Return ONLY a JSON object:
 {{"category": "one word", "description": "brief 5-word description", "in_niche": true/false, "confidence": 0.0-1.0, "engagement_worthy": true/false, "mood": "upbeat/chill/emotional/funny/boring", "reason": "brief 5-word reason for niche decision"}}

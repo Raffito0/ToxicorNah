@@ -143,10 +143,11 @@ class ADBController:
         self._last_area: int = 45
         self._last_hold_ms: int = 80
 
-    # --- Low-level ADB execution -------------------------------------------
+        # Flag set when device disconnects — stops ALL further commands
+        # MUST be instance variable (not class variable) for multi-phone mode
+        self._device_lost: bool = False
 
-    # Flag set when device disconnects — stops ALL further commands
-    _device_lost = False
+    # --- Low-level ADB execution -------------------------------------------
 
     def _run(self, args: list[str], timeout: int = 15) -> str:
         """Execute an ADB command and return stdout. Kills child on timeout."""
@@ -887,3 +888,35 @@ class ADBController:
         output = self.shell("wpa_cli -i wlan0 status | grep ^ssid=")
         match = re.search(r"ssid=(.+)", output)
         return match.group(1).strip() if match else ""
+
+    # --- Session environment setup -----------------------------------------
+
+    def get_screen_timeout(self) -> int:
+        """Get current screen-off timeout in ms."""
+        result = self.shell("settings get system screen_off_timeout")
+        try:
+            return int(result.strip())
+        except (ValueError, AttributeError):
+            return 30000
+
+    def set_screen_timeout(self, ms: int):
+        """Set screen-off timeout in ms. Use 1800000 (30 min) during sessions."""
+        self.shell(f"settings put system screen_off_timeout {ms}")
+        log.info("SCREEN: timeout set to %d ms", ms)
+
+    def get_media_volume(self) -> tuple[int, int]:
+        """Get (current, max) media volume. Returns (0, 15) on failure."""
+        output = self.shell("media volume --stream 3 --get")
+        cur, mx = 0, 15
+        cur_match = re.search(r"volume is (\d+)", output, re.IGNORECASE)
+        max_match = re.search(r"range.*?(\d+)\]", output)
+        if cur_match:
+            cur = int(cur_match.group(1))
+        if max_match:
+            mx = int(max_match.group(1))
+        return cur, mx
+
+    def set_media_volume(self, level: int):
+        """Set media volume (stream 3 = music/media)."""
+        self.shell(f"media volume --stream 3 --set {level}")
+        log.info("VOLUME: media set to %d", level)

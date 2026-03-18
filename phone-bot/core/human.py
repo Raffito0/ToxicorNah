@@ -1569,6 +1569,41 @@ class HumanEngine:
                 energy = self.mood.energy if self.mood else 1.0
                 mix["browse_shop"] *= (0.5 + energy * 0.5)
 
+        # --- New engagement actions (Split 04) ---
+        # State variables for action weight calculations
+        explore_cur = self.personality.explore_curiosity if self.personality else 0.1
+        fatigue_lvl = self.fatigue.fatigue_level if self.fatigue else 0.0
+        energy = self.mood.energy if self.mood else 1.0
+        boredom_lvl = self.boredom.level if self.boredom else 0.0
+
+        # Bookmark: curiosity + energy driven. Curious, energetic users save more.
+        # Fatigued users don't bother saving anything.
+        mix["bookmark"] = (
+            0.005                                   # tiny base
+            + explore_cur * 0.08                    # curious = saves more (up to +1.6%)
+            + energy * 0.01                         # energetic = more engaged
+            - fatigue_lvl * 0.015                   # fatigued = stops saving
+        ) * self._engagement_mult
+        mix["bookmark"] = max(0.0, mix["bookmark"])
+
+        # Not interested: driven by boredom + impatience. Bored/impatient users
+        # mark more videos. Patient/curious users almost never do it.
+        patience = self.mood.patience if self.mood else 0.5
+        mix["not_interested"] = (
+            0.01                                    # tiny base (almost never when happy)
+            + boredom_lvl * 0.04                    # bored = more likely (up to +4%)
+            + (1 - patience) * 0.015                # impatient = more likely
+            - explore_cur * 0.03                    # curious people tolerate diverse content
+        ) * self._engagement_mult
+        mix["not_interested"] = max(0.0, min(0.06, mix["not_interested"]))  # hard cap 6%
+
+        # Own profile visit: ~1% during peak/fatigue only
+        phase_name = self.phase.current_phase if self.phase else "warmup"
+        if phase_name in ("peak", "fatigue"):
+            mix["own_profile"] = 0.01 * self._engagement_mult
+        else:
+            mix["own_profile"] = 0.0
+
         actions = list(mix.keys())
         weights = list(mix.values())
         chosen = random.choices(actions, weights=weights, k=1)[0]

@@ -289,6 +289,21 @@ HUMAN = {
     "touch_hold_drift_px":  (2, 1, 0, 5),
     "touch_area_base":      30,
     "touch_area_pressure_scale": 40,
+
+    # --- Session Environment ---
+    "t_feed_refresh":       (3.0, 0.4, 1.5, 8.0),     # wait for feed to load after refresh
+    "t_screen_setup":       (0.5, 0.2, 0.2, 1.5),     # wait after screen settings change
+    "t_wifi_reconnect":     (3.0, 0.4, 1.5, 8.0),     # wait for WiFi to reconnect
+
+    # --- Dynamic Nav + Engagement (Splits 02-04) ---
+    "t_profile_glance":     (4.0, 0.5, 2.0, 10.0),    # brief own-profile check
+    "t_video_glance":       (2.0, 0.3, 1.0, 5.0),     # glancing at video in profile grid
+    "t_following_empty":    (1.5, 0.3, 0.5, 3.0),     # verify following has content
+    "t_bookmark_tap":       (0.3, 0.2, 0.1, 0.8),     # after bookmark tap
+    "t_context_menu":       (0.8, 0.3, 0.4, 2.0),     # after long-press (context menu appear)
+    "t_carousel_photo":     (2.5, 0.4, 1.0, 6.0),     # per photo in carousel browse
+    "t_message_glance":     (3.0, 0.5, 1.5, 7.0),     # DM list glance
+    "t_post_celebration":   (5.0, 0.5, 2.0, 12.0),    # pause after posting video
 }
 
 # Max recovery attempts before forcing go_to_fyp()
@@ -332,6 +347,14 @@ NICHE_DESCRIPTION = (
 
 # --- Niche Follow Threshold (base score 0-100, modified by personality) ---
 NICHE_FOLLOW_THRESHOLD = 55
+
+# --- Rate Limits (conservative, below TikTok's actual thresholds) ----------
+RATE_LIMITS = {
+    "max_follows_day": 150,     # TikTok limit ~200
+    "max_follows_hour": 25,     # TikTok safe range ~15-30
+    "max_likes_day": 400,       # TikTok limit ~500
+    "max_comments_day": 50,     # conservative
+}
 
 # --- Session Flow Phases (replaces flat ENGAGEMENT_MIX) -----------------------
 # Each phase has a duration range (minutes) and engagement weights.
