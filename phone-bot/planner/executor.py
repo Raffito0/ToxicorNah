@@ -11,10 +11,11 @@ import logging
 import os
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 
 from .. import config  # NOTE: config.py adds delivery module to sys.path
-from ..core.adb import ADBController
+from ..core.adb import ADBController, DeviceLostError
 from ..core.human import HumanEngine
 from ..core.proxy import ProxyQueue
 from ..actions.tiktok import TikTokBot
@@ -28,6 +29,8 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 WARMUP_STATE_FILE = os.path.join(config.DATA_DIR, "warmup_state.json")
+VIDEO_DOWNLOAD_TIMEOUT = 30  # seconds
+_download_pool = ThreadPoolExecutor(max_workers=1)
 
 
 class SessionExecutor:
@@ -54,10 +57,12 @@ class SessionExecutor:
             log.info("Loaded warmup state for %d accounts", len(self.warmup_states))
 
     def _save_warmup_state(self):
-        """Save warmup state to disk."""
+        """Save warmup state to disk (atomic: write .tmp then os.replace)."""
         data = {name: state.to_dict() for name, state in self.warmup_states.items()}
-        with open(WARMUP_STATE_FILE, "w") as f:
+        tmp_path = WARMUP_STATE_FILE + ".tmp"
+        with open(tmp_path, "w") as f:
             json.dump(data, f, indent=2)
+        os.replace(tmp_path, WARMUP_STATE_FILE)
 
     def init_warmup(self, account_name: str, platform: str, phone_id: int,
                     niche_keywords: list[str] = None):
@@ -204,8 +209,13 @@ class SessionExecutor:
         if not config.TEST_MODE:
             if session.get("proxy_rotation_before", False) or self.proxy.active_phone_id != phone_id:
                 if not self.proxy.switch_to_phone(phone_id):
-                    log.error("Failed to connect Phone %d to proxy, skipping session", phone_id)
-                    return
+                    # Retry once after delay
+                    human = self._get_human(account)
+                    log.warning("Proxy switch failed, retrying in ~5s...")
+                    await asyncio.sleep(human.timing("t_proxy_retry"))
+                    if not self.proxy.switch_to_phone(phone_id):
+                        log.error("Proxy switch failed twice for Phone %d, skipping session", phone_id)
+                        return "proxy_failed"
 
         adb = self.controllers[phone_id]
         human = self._get_human(account)
@@ -215,15 +225,46 @@ class SessionExecutor:
         human.start_session(hour=now.hour, weekday=now.weekday(),
                             duration_minutes=total_duration)
 
-        # --- Handle session types ---
+        # Hard session timeout: duration * 1.5 + 5 min grace
+        timeout_seconds = total_duration * 60 * 1.5 + 300
 
+        try:
+            await asyncio.wait_for(
+                self._dispatch_session(adb, human, platform, session_type, session, total_duration, phone_id),
+                timeout=timeout_seconds,
+            )
+
+        except asyncio.TimeoutError:
+            log.critical("SESSION TIMEOUT: %s exceeded %.0fs limit — forcing cleanup",
+                         account, timeout_seconds)
+            try:
+                adb.press_home()
+            except Exception:
+                pass
+            human.end_session()
+            return "timeout"
+
+        except DeviceLostError as e:
+            log.error("DEVICE LOST during session %s (Phone %d): %s — skipping remaining sessions for this phone",
+                      account, phone_id, e)
+            human.end_session()
+            return "device_lost"
+
+        human.end_session()
+        log.info("=== Session complete: %s ===", account)
+        return "ok"
+
+    async def _dispatch_session(self, adb, human, platform, session_type, session, total_duration, phone_id):
+        """Dispatch to the correct session handler (wrapped by timeout in execute_session)."""
         if session_type == "aborted":
             await self._execute_aborted(adb, human, platform, total_duration)
 
         elif session_type == "rest_only":
             await self._execute_rest_only(adb, human, platform, total_duration)
 
-        elif session_type == "extended":
+        else:  # normal or extended
+            if session_type not in ("normal", "extended"):
+                log.warning("Unknown session_type '%s', treating as normal", session_type)
             should_post = session.get("post_scheduled", False)
             await self._execute_normal(
                 adb, human, platform, total_duration,
@@ -233,36 +274,34 @@ class SessionExecutor:
                 post_minutes=session.get("post_activity_minutes", 9),
                 phone_id=phone_id,
             )
-
-        else:  # normal
-            should_post = session.get("post_scheduled", False)
-            await self._execute_normal(
-                adb, human, platform, total_duration,
-                should_post=should_post,
-                post_outcome=session.get("post_outcome", "posted"),
-                pre_minutes=session.get("pre_activity_minutes", 8),
-                post_minutes=session.get("post_activity_minutes", 9),
-                phone_id=phone_id,
-            )
-
-        human.end_session()
-        log.info("=== Session complete: %s ===", account)
 
     async def _execute_aborted(self, adb: ADBController, human: HumanEngine,
                                 platform: str, duration_min: float):
-        """Aborted session: open app, look around <2 min, close."""
-        log.info("Aborted session — opening and closing quickly")
+        """Aborted session: open app, scroll 3-6 times passively, close (30-90s)."""
+        log.info("Aborted session — opening, scrolling briefly, closing")
 
         if platform == "tiktok":
             bot = TikTokBot(adb, human)
-            bot.open_app()
-            await asyncio.sleep(duration_min * 60)
-            bot.close_app()
         else:
             bot = InstagramBot(adb, human)
-            bot.open_app()
-            await asyncio.sleep(duration_min * 60)
-            bot.close_app()
+
+        bot.open_app()
+        await asyncio.sleep(human.timing("t_app_load"))
+
+        # Scroll 3-6 times with no engagement, capped at 90s total
+        n_scrolls = random.randint(3, 6)
+        start = time.time()
+        for _ in range(n_scrolls):
+            if time.time() - start > 90:
+                break
+            watch_time = human.watch_duration()
+            await asyncio.sleep(watch_time)
+            if platform == "tiktok":
+                bot.scroll_fyp()
+            else:
+                bot.scroll_reels()
+
+        bot.close_app()
 
     async def _execute_rest_only(self, adb: ADBController, human: HumanEngine,
                                   platform: str, duration_min: float):
@@ -297,7 +336,13 @@ class SessionExecutor:
             # Fetch video from Content Library via delivery module
             video_info = get_next_video(phone_id, platform)
             if video_info:
-                local_path = download_video(video_info["video_url"])
+                # Download with timeout to prevent session stall
+                try:
+                    future = _download_pool.submit(download_video, video_info["video_url"])
+                    local_path = future.result(timeout=VIDEO_DOWNLOAD_TIMEOUT)
+                except Exception as e:
+                    log.warning("Video download failed/timed out: %s — will skip post", e)
+                    local_path = None
                 if local_path:
                     video_path = local_path
                     caption = video_info.get("caption", "")
@@ -526,6 +571,8 @@ class SessionExecutor:
                     adb.screen_w // 2, adb.screen_h * 3 // 4,
                     adb.screen_w // 2, adb.screen_h // 2,
                 )
+                if sw.get("hand_switched"):
+                    await asyncio.sleep(sw["hand_switch_pause"])
                 adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
                 await asyncio.sleep(human.timing("t_micro_scroll"))
             elif human.should_peek_scroll():
@@ -537,6 +584,8 @@ class SessionExecutor:
                     adb.screen_w // 2, adb.screen_h // 4,
                     adb.screen_w // 2, adb.screen_h * 3 // 4,
                 )
+                if sw.get("hand_switched"):
+                    await asyncio.sleep(sw["hand_switch_pause"])
                 adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
                 await asyncio.sleep(human.watch_duration())
             else:
@@ -706,6 +755,8 @@ class SessionExecutor:
                     adb.screen_w // 2, adb.screen_h * 3 // 4,
                     adb.screen_w // 2, adb.screen_h // 2,
                 )
+                if sw.get("hand_switched"):
+                    await asyncio.sleep(sw["hand_switch_pause"])
                 adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
                 await asyncio.sleep(human.timing("t_micro_scroll"))
             elif human.should_peek_scroll():
@@ -715,6 +766,8 @@ class SessionExecutor:
                     adb.screen_w // 2, adb.screen_h * 3 // 4,
                     adb.screen_w // 2, mid_y,
                 )
+                if sw.get("hand_switched"):
+                    await asyncio.sleep(sw["hand_switch_pause"])
                 adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
                 await asyncio.sleep(human.timing("t_micro_scroll"))
                 adb.swipe(sw["x2"], sw["y2"], sw["x1"], sw["y1"], sw["duration"])
@@ -725,6 +778,8 @@ class SessionExecutor:
                     adb.screen_w // 2, adb.screen_h // 4,
                     adb.screen_w // 2, adb.screen_h * 3 // 4,
                 )
+                if sw.get("hand_switched"):
+                    await asyncio.sleep(sw["hand_switch_pause"])
                 adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
                 await asyncio.sleep(human.watch_duration())
             else:
@@ -804,21 +859,21 @@ class SessionExecutor:
         # Step 4: Go to edit (Next/Done button -- use Vision for this dynamic element)
         coords = adb.wait_for_screen("Next or Done button", timeout=5)
         if coords:
-            x, y = human.jitter_tap(*coords)
+            x, y = human.jitter_tap(coords[0], coords[1])
             adb.tap(x, y)
             await asyncio.sleep(human.timing("t_nav_settle"))
 
         # Step 5: Find and tap Overlay/Effects (use Vision -- position varies)
         coords = adb.find_on_screen("Overlay or Effects button")
         if coords:
-            x, y = human.jitter_tap(*coords)
+            x, y = human.jitter_tap(coords[0], coords[1])
             adb.tap(x, y)
             await asyncio.sleep(human.timing("t_nav_settle"))
 
             # "Add overlay" button (use Vision)
             coords = adb.find_on_screen("Add overlay or Add button")
             if coords:
-                x, y = human.jitter_tap(*coords)
+                x, y = human.jitter_tap(coords[0], coords[1])
                 adb.tap(x, y)
                 await asyncio.sleep(human.timing("t_nav_settle"))
 
@@ -831,7 +886,7 @@ class SessionExecutor:
         # Step 6: Tap Next to go to caption screen
         coords = adb.wait_for_screen("Next button", timeout=5)
         if coords:
-            x, y = human.jitter_tap(*coords)
+            x, y = human.jitter_tap(coords[0], coords[1])
             adb.tap(x, y)
             await asyncio.sleep(human.timing("t_nav_settle"))
 
@@ -848,7 +903,7 @@ class SessionExecutor:
         # Step 8: Post (use Vision for Post button)
         coords = adb.wait_for_screen("Post button", timeout=5)
         if coords:
-            x, y = human.jitter_tap(*coords)
+            x, y = human.jitter_tap(coords[0], coords[1])
             adb.tap(x, y)
             log.info("Warmup: video posted with camera trick!")
             await asyncio.sleep(human.timing("t_post_upload"))
@@ -865,6 +920,9 @@ class SessionExecutor:
         """
         self._running = True
 
+        # Track phones that lost USB connection (shared across phases)
+        dead_phones = set()
+
         # --- Phase 1: Run warmup sessions for accounts still in warmup ---
         warmup_accounts = {name: state for name, state in self.warmup_states.items()
                           if not state.completed}
@@ -878,12 +936,21 @@ class SessionExecutor:
                 if not self._running:
                     break
 
+                phone_id = state.phone_id
+                if phone_id in dead_phones:
+                    log.warning("Skipping warmup for %s — Phone %d lost connection", name, phone_id)
+                    continue
+
                 sessions = generate_warmup_sessions(state)
                 for session in sessions:
                     if not self._running:
                         break
                     try:
                         await self.execute_warmup_session(session)
+                    except DeviceLostError as e:
+                        log.error("DEVICE LOST during warmup %s (Phone %d): %s", name, phone_id, e)
+                        dead_phones.add(phone_id)
+                        break
                     except Exception as e:
                         log.error("Warmup session %s crashed: %s",
                                   session.get("account_name", "?"), e, exc_info=True)
@@ -915,17 +982,31 @@ class SessionExecutor:
         else:
             log.info("Found %d regular sessions for today", len(sessions))
 
+            # dead_phones set is shared from Phase 1 (top of run_today)
+
             for session in sessions:
                 if not self._running:
                     log.info("Execution stopped by user")
                     break
+
+                phone_id = session.get("phone_id")
+                if phone_id in dead_phones:
+                    log.warning("Skipping session %s — Phone %d lost connection",
+                                session.get("account_name", "?"), phone_id)
+                    continue
 
                 start_time_str = session.get("start_time", "")
                 if start_time_str:
                     await self._wait_until(start_time_str)
 
                 try:
-                    await self.execute_session(session)
+                    result = await self.execute_session(session)
+                    if result == "device_lost":
+                        dead_phones.add(phone_id)
+                        log.warning("Phone %d marked as dead for this run", phone_id)
+                except DeviceLostError as e:
+                    log.error("DEVICE LOST (uncaught): Phone %d — %s", phone_id, e)
+                    dead_phones.add(phone_id)
                 except Exception as e:
                     log.error("Session %s crashed: %s",
                               session.get("account_name", "?"), e, exc_info=True)

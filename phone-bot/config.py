@@ -279,6 +279,7 @@ HUMAN = {
     "t_reopen_app":         (3.5, 0.3, 2.0, 6.0),     # after reopening app from launcher
     "t_frozen_retry":       (4.0, 0.4, 2.0, 8.0),     # FYP frozen, wait before retry
     "t_close_before_open":  (3.0, 0.3, 1.5, 6.0),     # after closing app, before reopening
+    "t_proxy_retry":        (5.0, 0.3, 3.0, 10.0),    # delay before proxy retry on first failure
 }
 
 # Max recovery attempts before forcing go_to_fyp()
