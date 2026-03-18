@@ -3648,32 +3648,21 @@ JSON only, no markdown."""
                     has_scrolled_grid = True
                     cached_thumbnails = []
 
-            # Pick which grid slot to tap
-            if not has_scrolled_grid and i < len(grid_keys):
-                # Initial view (no scroll yet) -- fixed coords are valid
-                slot_idx = grid_order[i]
-                gx, gy = self.adb.get_coord("tiktok", grid_keys[slot_idx])
-            else:
-                # After scrolling: use Gemini Vision to find actual thumbnails
+            # Pick which grid slot to tap — ALWAYS use Gemini Vision.
+            # Search grid layout varies: "Top" tab has 2 cols with captions,
+            # "Videos" tab has 3 cols without captions. Fixed coords don't work.
+            if not cached_thumbnails:
+                shot = self.adb.screenshot_bytes()
+                if shot:
+                    cached_thumbnails = gemini.find_search_grid_thumbnails(
+                        shot, self.adb.screen_w, self.adb.screen_h
+                    )
                 if not cached_thumbnails:
-                    # Take screenshot (screen is stopped) and find thumbnails
-                    shot = self.adb.screenshot_bytes()
-                    if shot:
-                        cached_thumbnails = gemini.find_search_grid_thumbnails(
-                            shot, self.adb.screen_w, self.adb.screen_h
-                        )
-                    if not cached_thumbnails:
-                        # Gemini failed -- fallback to fixed coords
-                        log.debug("Vision grid failed, using fixed coords")
-                        gx, gy = self.adb.get_coord(
-                            "tiktok", grid_keys[i % len(grid_keys)])
-                    else:
-                        # Pick a random thumbnail from found ones
-                        thumb = random.choice(cached_thumbnails)
-                        cached_thumbnails.remove(thumb)
-                        gx, gy = thumb["x"], thumb["y"]
+                    # Gemini failed — try fixed coords as last resort
+                    log.debug("Vision grid failed, using fixed coords")
+                    gx, gy = self.adb.get_coord(
+                        "tiktok", grid_keys[i % len(grid_keys)])
                 else:
-                    # Use cached thumbnails from previous Vision call
                     thumb = random.choice(cached_thumbnails)
                     cached_thumbnails.remove(thumb)
                     gx, gy = thumb["x"], thumb["y"]
