@@ -1,13 +1,11 @@
-"""Tests for production hardening: ADB subprocess cleanup (Section 01).
+"""Tests for production hardening (Sections 01-02).
 
-Tests _run() and _run_bytes() Popen rewrite:
-- Process kill on timeout
-- Return values on timeout
-- DeviceLostError on device disconnect
-- Consecutive timeout counter
-- ADB server restart after 5 consecutive timeouts
+Section 01: ADB subprocess cleanup (Popen + kill, timeout counter, server restart)
+Section 02: Gemini API hard timeout (ThreadPoolExecutor, circuit breaker)
 """
 import subprocess
+import time
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from unittest.mock import MagicMock, patch, call
 
 import pytest
@@ -317,3 +315,188 @@ class TestRunBytesCounterAndRestart:
 
         mock_restart.assert_called_once()
         assert adb._consecutive_timeouts == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Section 02: Gemini API Hard Timeout
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Import gemini module -- conftest registers it
+import importlib
+
+
+def _get_gemini_module():
+    """Import the gemini module through the test harness."""
+    import sys
+    # The conftest may not have registered gemini yet — do it now
+    import os
+    import types
+    phone_bot_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    core_dir = os.path.join(phone_bot_dir, "core")
+    gemini_path = os.path.join(core_dir, "gemini.py")
+
+    mod_name = "phone_bot.core.gemini"
+    if mod_name in sys.modules:
+        return sys.modules[mod_name]
+
+    spec = importlib.util.spec_from_file_location(mod_name, gemini_path)
+    mod = importlib.util.module_from_spec(spec)
+    mod.__package__ = "phone_bot.core"
+    sys.modules[mod_name] = mod
+    sys.modules["core.gemini"] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except ImportError as e:
+        import warnings
+        warnings.warn(f"gemini.py partial import: {e}")
+    return mod
+
+
+@pytest.fixture(autouse=True)
+def _reset_gemini_circuit():
+    """Reset Gemini circuit breaker state between tests."""
+    gemini = _get_gemini_module()
+    gemini._timeout_timestamps.clear()
+    gemini._circuit_open_until = 0.0
+    yield
+    gemini._timeout_timestamps.clear()
+    gemini._circuit_open_until = 0.0
+
+
+class TestGeminiExecutor:
+    """Test: shared executor has max_workers=3."""
+
+    def test_executor_exists_with_3_workers(self):
+        gemini = _get_gemini_module()
+        assert hasattr(gemini, "_executor"), "Module should have _executor"
+        assert gemini._executor._max_workers == 3
+
+
+class TestGeminiTimeoutFallback:
+    """Test: generate_content timeout returns fallback ('') after configured seconds."""
+
+    def test_call_vision_returns_empty_on_timeout(self):
+        gemini = _get_gemini_module()
+        mock_model = MagicMock()
+        mock_future = MagicMock()
+        mock_future.result.side_effect = FuturesTimeoutError()
+
+        with patch.object(gemini, "_executor") as mock_exec, \
+             patch("google.generativeai.GenerativeModel", return_value=mock_model), \
+             patch.object(gemini, "_initialized", True), \
+             patch.object(gemini, "_circuit_open_until", 0.0):
+            mock_exec.submit.return_value = mock_future
+            result = gemini._call_vision(b"fake_png", "test prompt", timeout=2.0)
+
+        assert result == ""
+
+    def test_call_text_returns_empty_on_timeout(self):
+        gemini = _get_gemini_module()
+        mock_model = MagicMock()
+        mock_future = MagicMock()
+        mock_future.result.side_effect = FuturesTimeoutError()
+
+        with patch.object(gemini, "_executor") as mock_exec, \
+             patch("google.generativeai.GenerativeModel", return_value=mock_model), \
+             patch.object(gemini, "_initialized", True), \
+             patch.object(gemini, "_circuit_open_until", 0.0):
+            mock_exec.submit.return_value = mock_future
+            result = gemini._call_text("test prompt")
+
+        assert result == ""
+
+
+class TestGeminiCircuitBreaker:
+    """Test: circuit breaker opens after 3 timeouts in 5 minutes, closes after 2-min cooldown."""
+
+    def test_circuit_opens_after_threshold(self):
+        gemini = _get_gemini_module()
+        # Reset state
+        gemini._timeout_timestamps.clear()
+        gemini._circuit_open_until = 0.0
+
+        # Record 3 timeouts within the window
+        for _ in range(gemini._CB_THRESHOLD):
+            gemini._record_timeout()
+
+        assert gemini._check_circuit() is True, "Circuit should be open"
+
+    def test_circuit_closes_after_cooldown(self):
+        gemini = _get_gemini_module()
+        gemini._timeout_timestamps.clear()
+        # Set circuit to have expired 1 second ago
+        gemini._circuit_open_until = time.monotonic() - 1.0
+
+        assert gemini._check_circuit() is False, "Circuit should be closed (cooldown expired)"
+
+    def test_circuit_skips_call_when_open(self):
+        gemini = _get_gemini_module()
+        # Force circuit open far in the future
+        gemini._circuit_open_until = time.monotonic() + 9999
+
+        with patch.object(gemini, "_initialized", True):
+            result = gemini._call_vision(b"fake_png", "test prompt")
+
+        assert result == ""
+        # Restore
+        gemini._circuit_open_until = 0.0
+
+    def test_success_resets_circuit(self):
+        gemini = _get_gemini_module()
+        gemini._timeout_timestamps.clear()
+        for _ in range(2):
+            gemini._record_timeout()
+        assert len(gemini._timeout_timestamps) == 2
+
+        gemini._record_success()
+        assert len(gemini._timeout_timestamps) == 0
+
+
+class TestGeminiMultiVisionTimeout:
+    """Test: _call_multi_vision also uses executor and circuit breaker."""
+
+    def test_call_multi_vision_returns_empty_on_timeout(self):
+        gemini = _get_gemini_module()
+        mock_model = MagicMock()
+        mock_future = MagicMock()
+        mock_future.result.side_effect = FuturesTimeoutError()
+
+        with patch.object(gemini, "_executor") as mock_exec, \
+             patch("google.generativeai.GenerativeModel", return_value=mock_model), \
+             patch.object(gemini, "_initialized", True):
+            mock_exec.submit.return_value = mock_future
+            result = gemini._call_multi_vision([b"img1", b"img2"], "test prompt", timeout=5.0)
+
+        assert result == ""
+
+
+class TestGeminiPerCallTypeTimeouts:
+    """Test: per-call-type timeout values match plan (bbox=8s, popup=6s, niche=8s, default=10s)."""
+
+    def test_call_vision_default_timeout(self):
+        gemini = _get_gemini_module()
+        import inspect
+        sig = inspect.signature(gemini._call_vision)
+        assert sig.parameters["timeout"].default == 10.0
+
+    def test_call_multi_vision_default_timeout(self):
+        gemini = _get_gemini_module()
+        import inspect
+        sig = inspect.signature(gemini._call_multi_vision)
+        assert sig.parameters["timeout"].default == 15.0
+
+    def test_call_text_default_timeout(self):
+        gemini = _get_gemini_module()
+        import inspect
+        sig = inspect.signature(gemini._call_text)
+        assert sig.parameters["timeout"].default == 10.0
+
+
+class TestGeminiNoLiteralSleep3:
+    """Test: time.sleep(3) replaced with _hw_delay."""
+
+    def test_no_sleep_3_in_source(self):
+        gemini = _get_gemini_module()
+        import inspect
+        source = inspect.getsource(gemini._call_text)
+        assert "time.sleep(3)" not in source, "_call_text should not have literal time.sleep(3)"
