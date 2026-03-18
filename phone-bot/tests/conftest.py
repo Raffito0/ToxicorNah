@@ -84,6 +84,23 @@ if _PKG not in sys.modules:
             import warnings
             warnings.warn(f"proxy.py partial import: {e}")
 
+    # Register core.monitor module
+    monitor_path = os.path.join(core_dir, "monitor.py")
+    if os.path.exists(monitor_path):
+        monitor_spec = importlib.util.spec_from_file_location(
+            f"{_PKG}.core.monitor", monitor_path,
+            submodule_search_locations=[]
+        )
+        monitor_mod = importlib.util.module_from_spec(monitor_spec)
+        monitor_mod.__package__ = f"{_PKG}.core"
+        sys.modules[f"{_PKG}.core.monitor"] = monitor_mod
+        sys.modules["core.monitor"] = monitor_mod
+        try:
+            monitor_spec.loader.exec_module(monitor_mod)
+        except ImportError as e:
+            import warnings
+            warnings.warn(f"monitor.py partial import: {e}")
+
     # Register main_discovery module (uses absolute imports, works via sys.path)
     discovery_path = os.path.join(phone_bot_dir, "main_discovery.py")
     if os.path.exists(discovery_path):

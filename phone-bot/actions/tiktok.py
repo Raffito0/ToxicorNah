@@ -22,6 +22,7 @@ from ..core.human import HumanEngine
 from ..core import gemini
 from ..core import page_state
 from ..core.verify import wait_and_verify
+from ..core.monitor import log_event as monitor_log, BotEvent
 
 log = logging.getLogger(__name__)
 
@@ -723,9 +724,42 @@ class TikTokBot:
         self.stats = {"gemini_calls": 0, "popups_dismissed": 0, "dismiss_retries": 0}
         # Per-device retry tolerance (consumed by wait_and_verify)
         self._retry_tolerance = adb.phone.get("retry_tolerance", 3)
+        # Session ID for monitor events (set by executor before browse_session)
+        self._session_id = "unknown"
         # Set screen-specific params for page_state (dynamic _NAV_Y based on density)
         from ..core import page_state
         page_state.set_screen_params(adb.screen_h, adb._density)
+
+    # --- Monitor integration -------------------------------------------------
+
+    def _get_behavioral_state(self) -> dict:
+        """Extract current behavioral state from HumanEngine for monitor events."""
+        return {
+            "energy": getattr(self.human, '_energy', 0.5),
+            "fatigue": getattr(getattr(self.human, 'fatigue', None), 'fatigue_level', 0.0) if hasattr(self.human, 'fatigue') else 0.0,
+            "boredom": getattr(getattr(self.human, 'boredom', None), 'level', 0.0) if hasattr(self.human, 'boredom') else 0.0,
+            "phase": getattr(getattr(self.human, 'phase_tracker', None), 'current_phase', 'unknown') if hasattr(self.human, 'phase_tracker') else 'unknown',
+        }
+
+    def _log_action(self, action_type: str, success: bool = True,
+                    duration_ms: int | None = None, metadata: dict | None = None):
+        """Log an action event to the structured monitor."""
+        phone_id = self.adb.phone.get("id", 0)
+        account = self.adb.phone.get("account", f"phone_{phone_id}")
+
+        event = BotEvent(
+            timestamp=datetime.utcnow().isoformat(),
+            phone_id=phone_id,
+            account=account,
+            session_id=self._session_id,
+            event_type="action",
+            action_type=action_type,
+            behavioral_state=self._get_behavioral_state(),
+            duration_ms=duration_ms,
+            success=success,
+            metadata=metadata or {},
+        )
+        monitor_log(event)
 
     # --- Sidebar pixel scan (zero AI, <50ms) --------------------------------
 
@@ -998,6 +1032,25 @@ class TikTokBot:
             answer = result.strip().lower()
             if answer.startswith("yes"):
                 log.critical("CAPTCHA/VERIFICATION DETECTED — aborting session")
+                # Log captcha via TikTokBot's _log_action if available,
+                # otherwise direct (PopupGuardian has _bot_ref)
+                bot_ref = getattr(self, '_bot_ref', None)
+                _phone_id = self.adb.phone.get("id", 0)
+                _account = self.adb.phone.get("account", "unknown")
+                _sid = getattr(bot_ref, '_session_id', 'unknown') if bot_ref else 'unknown'
+                _state = bot_ref._get_behavioral_state() if bot_ref else {}
+                monitor_log(BotEvent(
+                    timestamp=datetime.utcnow().isoformat(),
+                    phone_id=_phone_id,
+                    account=_account,
+                    session_id=_sid,
+                    event_type="captcha",
+                    action_type=None,
+                    behavioral_state=_state,
+                    duration_ms=None,
+                    success=False,
+                    metadata={"answer": answer},
+                ), screenshot_bytes=shot)
                 return True
         except Exception as e:
             log.warning("CAPTCHA detection failed: %s", e)
@@ -1535,6 +1588,7 @@ class TikTokBot:
 
         time.sleep(self.human.action_delay())
         self.adb.save_screenshot_if_recording("after_like")
+        self._log_action("like")
 
     # Whether comments can be scrolled (set by open_comments)
     _comments_scrollable = True
@@ -1792,6 +1846,7 @@ JSON only, no markdown."""
         self.adb.tap(vx2, vy2)
         time.sleep(self.human.timing("t_tap_gap"))
         log.debug("Posted comment and dismissed: %s", text[:30])
+        self._log_action("comment")
 
     async def comment_with_ai(self):
         """Generate a contextual comment using multi-frame video understanding.
@@ -2124,6 +2179,7 @@ JSON only, no markdown."""
             log.info("FOLLOW: instant tap at fixed coords (%d, %d)", fx, fy)
             time.sleep(self.human.timing("t_tap_gap"))
             self.adb.save_screenshot_if_recording("after_follow_tap")
+            self._log_action("follow")
             return True
 
         # Pixel check negative — could be: scrolled down, already following, or position shifted.
@@ -2138,6 +2194,7 @@ JSON only, no markdown."""
                 self.adb.tap(fx, fy)
                 self.human.on_follow()
                 log.info("FOLLOW: tapped via Gemini at (%d, %d)", fx, fy)
+                self._log_action("follow")
                 return True
 
             if result["status"] == "following":
@@ -2351,6 +2408,7 @@ JSON only, no markdown."""
             )
             if vr.success:
                 log.info("Profile opened OK (attempt %d)", attempt + 1)
+                self._log_action("profile_visit")
                 return True
 
             # Profile verify failed — check what we're on
@@ -2388,6 +2446,7 @@ JSON only, no markdown."""
                         )
                         if vr2.success:
                             log.info("Profile opened from Story header (attempt %d)", attempt + 1)
+                            self._log_action("profile_visit", metadata={"via": "story_header"})
                             return True
                         log.warning("Story header tap didn't reach profile")
                     else:

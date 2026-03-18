@@ -11,6 +11,7 @@ import logging
 import os
 import random
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 
@@ -18,6 +19,7 @@ from .. import config  # NOTE: config.py adds delivery module to sys.path
 from ..core.adb import ADBController, DeviceLostError
 from ..core.human import HumanEngine
 from ..core.proxy import ProxyQueue
+from ..core.monitor import init_monitor, log_event as monitor_log, BotEvent, get_logger as get_monitor
 from ..actions.tiktok import TikTokBot
 from ..actions.instagram import InstagramBot
 from .warmup import AccountWarmupState, generate_warmup_sessions, generate_warmup_plan
@@ -175,6 +177,39 @@ class SessionExecutor:
         log.warning("No sessions found for today (%s)", today)
         return []
 
+    # --- Monitor Helpers ---------------------------------------------------
+
+    @staticmethod
+    def _extract_behavioral_state(human) -> dict:
+        """Extract behavioral state dict from HumanEngine for monitor events."""
+        if not human:
+            return {}
+        return {
+            "energy": getattr(human, '_energy', 0.5),
+            "fatigue": getattr(getattr(human, 'fatigue', None), 'fatigue_level', 0.0) if hasattr(human, 'fatigue') else 0.0,
+            "boredom": getattr(getattr(human, 'boredom', None), 'level', 0.0) if hasattr(human, 'boredom') else 0.0,
+            "phase": getattr(getattr(human, 'phase_tracker', None), 'current_phase', 'unknown') if hasattr(human, 'phase_tracker') else 'unknown',
+        }
+
+    def _monitor_event(self, phone_id, account, session_id, event_type,
+                       action_type=None, human=None, success=True, metadata=None,
+                       duration_ms=None, screenshot_bytes=None):
+        """Build and log a BotEvent to the structured monitor."""
+        state = self._extract_behavioral_state(human)
+        event = BotEvent(
+            timestamp=datetime.utcnow().isoformat(),
+            phone_id=phone_id,
+            account=account,
+            session_id=session_id or "unknown",
+            event_type=event_type,
+            action_type=action_type,
+            behavioral_state=state,
+            duration_ms=duration_ms,
+            success=success,
+            metadata=metadata or {},
+        )
+        monitor_log(event, screenshot_bytes=screenshot_bytes)
+
     # --- Session Execution -------------------------------------------------
 
     async def execute_session(self, session: dict):
@@ -202,8 +237,15 @@ class SessionExecutor:
         session_type = session.get("session_type", "normal")
         total_duration = session.get("total_duration_minutes", 15)
 
+        session_id = f"{account}_{uuid.uuid4().hex[:8]}"
+
         log.info("=== Session: %s | Phone %d | %s | %s | %d min ===",
                  account, phone_id, platform, session_type, total_duration)
+
+        # Log session start
+        self._monitor_event(phone_id, account, session_id, "session_start",
+                            metadata={"platform": platform, "session_type": session_type,
+                                      "total_duration_minutes": total_duration})
 
         # Connect phone to proxy (skip in TEST_MODE — use local WiFi)
         if not config.TEST_MODE:
@@ -230,13 +272,16 @@ class SessionExecutor:
 
         try:
             await asyncio.wait_for(
-                self._dispatch_session(adb, human, platform, session_type, session, total_duration, phone_id),
+                self._dispatch_session(adb, human, platform, session_type, session, total_duration, phone_id, session_id),
                 timeout=timeout_seconds,
             )
 
         except asyncio.TimeoutError:
             log.critical("SESSION TIMEOUT: %s exceeded %.0fs limit — forcing cleanup",
                          account, timeout_seconds)
+            self._monitor_event(phone_id, account, session_id, "error",
+                                human=human, success=False,
+                                metadata={"error": "session_timeout", "limit_seconds": timeout_seconds})
             try:
                 adb.press_home()
             except Exception:
@@ -247,15 +292,22 @@ class SessionExecutor:
         except DeviceLostError as e:
             log.error("DEVICE LOST during session %s (Phone %d): %s — skipping remaining sessions for this phone",
                       account, phone_id, e)
+            self._monitor_event(phone_id, account, session_id, "device_lost",
+                                human=human, success=False,
+                                metadata={"error": str(e)})
             human.end_session()
             return "device_lost"
 
+        self._monitor_event(phone_id, account, session_id, "session_end",
+                            human=human, metadata={"result": "ok"})
         human.end_session()
         log.info("=== Session complete: %s ===", account)
         return "ok"
 
-    async def _dispatch_session(self, adb, human, platform, session_type, session, total_duration, phone_id):
+    async def _dispatch_session(self, adb, human, platform, session_type, session, total_duration, phone_id, session_id="unknown"):
         """Dispatch to the correct session handler (wrapped by timeout in execute_session)."""
+        # Store session_id so bots can access it for monitor events
+        self._current_session_id = session_id
         if session_type == "aborted":
             await self._execute_aborted(adb, human, platform, total_duration)
 
@@ -284,6 +336,7 @@ class SessionExecutor:
             bot = TikTokBot(adb, human)
         else:
             bot = InstagramBot(adb, human)
+        bot._session_id = getattr(self, '_current_session_id', 'unknown')
 
         bot.open_app()
         await asyncio.sleep(human.timing("t_app_load"))
@@ -315,12 +368,11 @@ class SessionExecutor:
 
         if platform == "tiktok":
             bot = TikTokBot(adb, human)
-            await bot.browse_session(duration_minutes=duration_min, should_post=False,
-                                     niche_keywords=session_keywords)
         else:
             bot = InstagramBot(adb, human)
-            await bot.browse_session(duration_minutes=duration_min, should_post=False,
-                                     niche_keywords=session_keywords)
+        bot._session_id = getattr(self, '_current_session_id', 'unknown')
+        await bot.browse_session(duration_minutes=duration_min, should_post=False,
+                                 niche_keywords=session_keywords)
 
     async def _execute_normal(self, adb: ADBController, human: HumanEngine,
                                platform: str, duration_min: float,
@@ -375,26 +427,18 @@ class SessionExecutor:
 
         if platform == "tiktok":
             bot = TikTokBot(adb, human)
-            await bot.browse_session(
-                duration_minutes=duration_min,
-                should_post=should_post,
-                video_path=video_path,
-                caption=caption,
-                pre_scroll_minutes=pre_minutes,
-                post_scroll_minutes=post_minutes,
-                niche_keywords=session_keywords,
-            )
         else:
             bot = InstagramBot(adb, human)
-            await bot.browse_session(
-                duration_minutes=duration_min,
-                should_post=should_post,
-                video_path=video_path,
-                caption=caption,
-                pre_scroll_minutes=pre_minutes,
-                post_scroll_minutes=post_minutes,
-                niche_keywords=session_keywords,
-            )
+        bot._session_id = getattr(self, '_current_session_id', 'unknown')
+        await bot.browse_session(
+            duration_minutes=duration_min,
+            should_post=should_post,
+            video_path=video_path,
+            caption=caption,
+            pre_scroll_minutes=pre_minutes,
+            post_scroll_minutes=post_minutes,
+            niche_keywords=session_keywords,
+        )
 
         # Mark video as posted in Airtable
         if should_post and video_path and self._pending_record:
@@ -440,6 +484,7 @@ class SessionExecutor:
         Pre-loop tasks are shuffled per session. Scroll loop has full
         micro-behaviors (zona morta, peek scroll, post-like pause, etc.)."""
         bot = TikTokBot(adb, human)
+        bot._session_id = getattr(self, '_current_session_id', 'unknown')
         actions = session["actions"]
         duration = session["duration_minutes"]
         niche_keywords = session.get("niche_keywords", [])
@@ -920,6 +965,11 @@ class SessionExecutor:
         """
         self._running = True
 
+        # Initialize structured event logger
+        events_dir = os.path.join(config.DATA_DIR, "events")
+        screenshots_dir = os.path.join(config.DATA_DIR, "screenshots")
+        init_monitor(events_dir=events_dir, screenshots_dir=screenshots_dir)
+
         # Track phones that lost USB connection (shared across phases)
         dead_phones = set()
 
@@ -1018,6 +1068,13 @@ class SessionExecutor:
 
         if not config.TEST_MODE:
             self.proxy.disconnect_all()
+
+        # Flush and close the event logger
+        monitor = get_monitor()
+        if monitor:
+            monitor.rotate_old_files()
+            monitor.close()
+
         log.info("All sessions for today completed!")
 
     async def _wait_until(self, time_str: str):
