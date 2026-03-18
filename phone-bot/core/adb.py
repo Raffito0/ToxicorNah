@@ -74,6 +74,7 @@ class ADBController:
     def __init__(self, serial: str, phone_config: dict):
         self.serial = serial
         self.phone = phone_config
+        self._consecutive_timeouts = 0
 
         # --- Screen size detection (ADB > config > abort) ---
         config_w = phone_config.get("screen_w")
@@ -136,45 +137,80 @@ class ADBController:
     _device_lost = False
 
     def _run(self, args: list[str], timeout: int = 15) -> str:
-        """Execute an ADB command and return stdout."""
+        """Execute an ADB command and return stdout. Kills child on timeout."""
         if self._device_lost:
             return ""
         cmd = [config.ADB_PATH, "-s", self.serial] + args
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout
-            )
-            if result.returncode != 0 and result.stderr.strip():
-                stderr = result.stderr.strip()
-                if "not found" in stderr or "offline" in stderr:
-                    log.error("DEVICE LOST: %s — stopping all commands", stderr)
+            stdout, stderr = proc.communicate(timeout=timeout)
+            if proc.returncode != 0 and stderr.strip():
+                stderr_s = stderr.strip()
+                if "not found" in stderr_s or "offline" in stderr_s:
+                    log.error("DEVICE LOST: %s -- stopping all commands", stderr_s)
                     self._device_lost = True
-                    raise DeviceLostError(f"Device {self.serial} disconnected: {stderr}")
-                log.warning("ADB stderr: %s", stderr)
-            return result.stdout
+                    raise DeviceLostError(f"Device {self.serial} disconnected: {stderr_s}")
+                log.warning("ADB stderr: %s", stderr_s)
+            self._consecutive_timeouts = 0
+            return stdout
         except subprocess.TimeoutExpired:
-            log.error("ADB command timed out: %s", " ".join(cmd))
+            proc.kill()
+            try:
+                proc.communicate(timeout=5)
+            except Exception:
+                pass  # OS will reap eventually
+            log.error("ADB timed out, killed PID %d: %s", proc.pid, " ".join(cmd))
+            self._consecutive_timeouts += 1
+            if self._consecutive_timeouts >= 5:
+                self._restart_adb_server()
+                self._consecutive_timeouts = 0
             return ""
 
     def _run_bytes(self, args: list[str], timeout: int = 15) -> bytes:
-        """Execute an ADB command and return raw bytes (for screenshots)."""
+        """Execute an ADB command and return raw bytes. Kills child on timeout."""
         if self._device_lost:
             return b""
         cmd = [config.ADB_PATH, "-s", self.serial] + args
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, timeout=timeout
-            )
-            if result.stderr:
-                stderr = result.stderr.decode("utf-8", errors="replace").strip()
+            stdout, stderr_raw = proc.communicate(timeout=timeout)
+            if stderr_raw:
+                stderr = stderr_raw.decode("utf-8", errors="replace").strip()
                 if "not found" in stderr or "offline" in stderr:
-                    log.error("DEVICE LOST: %s — stopping all commands", stderr)
+                    log.error("DEVICE LOST: %s -- stopping all commands", stderr)
                     self._device_lost = True
                     raise DeviceLostError(f"Device {self.serial} disconnected: {stderr}")
-            return result.stdout
+            self._consecutive_timeouts = 0
+            return stdout
         except subprocess.TimeoutExpired:
-            log.error("ADB command timed out: %s", " ".join(cmd))
+            proc.kill()
+            try:
+                proc.communicate(timeout=5)
+            except Exception:
+                pass  # OS will reap eventually
+            log.error("ADB timed out, killed PID %d: %s", proc.pid, " ".join(cmd))
+            self._consecutive_timeouts += 1
+            if self._consecutive_timeouts >= 5:
+                self._restart_adb_server()
+                self._consecutive_timeouts = 0
             return b""
+
+    def _restart_adb_server(self):
+        """Kill and restart ADB server after repeated timeouts."""
+        log.warning("ADB: restarting server after %d consecutive timeouts", 5)
+        try:
+            subprocess.run([config.ADB_PATH, "kill-server"],
+                           capture_output=True, timeout=10)
+            log.info("ADB: kill-server completed")
+        except Exception as e:
+            log.warning("ADB: kill-server failed: %s", e)
+        time.sleep(1)  # let port 5037 release
+        try:
+            subprocess.run([config.ADB_PATH, "start-server"],
+                           capture_output=True, timeout=10)
+            log.info("ADB: start-server completed")
+        except Exception as e:
+            log.warning("ADB: start-server failed: %s", e)
 
     def shell(self, command: str, timeout: int = 15) -> str:
         """Run a shell command on the device."""
