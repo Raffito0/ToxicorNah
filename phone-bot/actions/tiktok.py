@@ -721,6 +721,8 @@ class TikTokBot:
         self._scrolls_since_last_like = 0
         # Stats tracking for Gemini calls, dismisses, etc.
         self.stats = {"gemini_calls": 0, "popups_dismissed": 0, "dismiss_retries": 0}
+        # Per-device retry tolerance (consumed by wait_and_verify)
+        self._retry_tolerance = adb.phone.get("retry_tolerance", 3)
         # Set screen-specific params for page_state (dynamic _NAV_Y based on density)
         from ..core import page_state
         page_state.set_screen_params(adb.screen_h, adb._density)
@@ -1016,7 +1018,7 @@ class TikTokBot:
                 verify_fn=lambda shot: self._quick_verify_fyp_from_shot(shot),
                 action_name="return_to_fyp_back",
                 first_wait="t_back_verify",
-                max_attempts=2,
+                max_attempts=self._retry_tolerance,
             )
             if vr.success:
                 return True
@@ -1734,7 +1736,10 @@ JSON only, no markdown."""
 
             # Take screenshot at different depths for AI context
             # Capture after scroll 0 (first visible), and 1-2 more at random depths
-            if i == 0 or random.random() < 0.5:
+            # State-driven: sociality * 0.7 (social people screenshot more)
+            _social = getattr(getattr(self.human, 'mood', None), 'social', 0.5)
+            _comment_prob = max(0.0, min(1.0, _social * 0.7))
+            if i == 0 or random.random() < _comment_prob:
                 shot = self.adb.screenshot_bytes()
                 if shot:
                     screenshots.append(shot)
@@ -2067,7 +2072,10 @@ JSON only, no markdown."""
             time.sleep(watch)
 
             # Maybe watch a second video (scroll to next)
-            if random.random() < 0.35 and energy > 0.7:
+            # State-driven: curiosity * 0.4 + energy * 0.15 (curious + energetic = explore more)
+            _curiosity = getattr(getattr(self.human, 'mood', None), 'curiosity', 0.5)
+            _2nd_vid_prob = max(0.0, min(1.0, _curiosity * 0.4 + energy * 0.15))
+            if random.random() < _2nd_vid_prob:
                 self.scroll_fyp()  # swipe to next video in creator's feed
                 watch2 = self.human.watch_duration(15) * random.uniform(0.3, 0.6)
                 log.debug("FOLLOW_PROFILE: watching 2nd video for %.1fs", watch2)
@@ -2918,9 +2926,13 @@ JSON only, no markdown."""
             else:
                 duration = random.randint(280, 450)  # normal
 
-            # ~5% outlier: shorter/faster micro-swipe (realistic human fumble)
+            # State-driven outlier: fatigue * 0.08 + (1-energy) * 0.03
+            # More fumbles when tired/low energy
             is_risky_swipe = False
-            if random.random() < 0.05:
+            _fatigue = self.human.fatigue.fatigue_level if hasattr(self.human, 'fatigue') and self.human.fatigue else 0.0
+            _energy = getattr(getattr(self.human, 'mood', None), 'energy', 0.5)
+            _outlier_prob = max(0.0, min(1.0, _fatigue * 0.08 + (1 - _energy) * 0.03))
+            if random.random() < _outlier_prob:
                 dist = max(0.04, dist * random.uniform(0.3, 0.6))
                 duration = random.randint(150, 220)
                 is_risky_swipe = True
@@ -3703,7 +3715,10 @@ JSON only, no markdown."""
             elif action == "scroll_main":
                 log.info("INBOX: scrolling main inbox page (rare browse)")
                 # 1-2 gentle scrolls on the main inbox page (suggested accounts area)
-                n_scrolls = 1 if random.random() < 0.6 else 2
+                # State-driven: fatigued = 1 scroll, otherwise patience-driven
+                _fatigue_lvl = self.human.fatigue.fatigue_level if hasattr(self.human, 'fatigue') and self.human.fatigue else 0.0
+                _patience = getattr(getattr(self.human, 'mood', None), 'patience', 0.5)
+                n_scrolls = 1 if _fatigue_lvl > 0.5 else (1 if random.random() < _patience * 0.7 else 2)
                 for _ in range(n_scrolls):
                     sx = self.adb.screen_w // 2 + random.randint(-20, 20)
                     start_y = int(self.adb.screen_h * random.uniform(0.65, 0.75))
@@ -3829,7 +3844,11 @@ JSON only, no markdown."""
         if do_video_check:
             log.info("NICHE_FOLLOW: checking videos for deeper eval")
             # Maybe scroll grid first
-            if random.random() < 0.3:
+            # State-driven: curiosity * 0.4 + boredom * 0.2
+            _curiosity_g = getattr(getattr(self.human, 'mood', None), 'curiosity', 0.5)
+            _boredom_g = self.human.boredom.level if hasattr(self.human, 'boredom') and self.human.boredom else 0.3
+            _grid_prob = max(0.0, min(1.0, _curiosity_g * 0.4 + _boredom_g * 0.2))
+            if random.random() < _grid_prob:
                 self._human_browse_scroll("grid", max_override=1)
                 time.sleep(self.human.timing("t_browse_results") * random.uniform(0.2, 0.4))
 
@@ -4340,7 +4359,11 @@ JSON only, no markdown."""
 
                 if force_exit:
                     # Must exit — pick medium or long
-                    itype = "medium" if random.random() < 0.7 else "long"
+                    # State-driven: energy * 0.5 + (1-fatigue) * 0.3
+                    _e_int = getattr(getattr(self.human, 'mood', None), 'energy', 0.5)
+                    _f_int = self.human.fatigue.fatigue_level if hasattr(self.human, 'fatigue') and self.human.fatigue else 0.0
+                    _med_prob = max(0.0, min(1.0, _e_int * 0.5 + (1 - _f_int) * 0.3))
+                    itype = "medium" if random.random() < _med_prob else "long"
                     leaves_app = True
                 elif leaves_app and (not can_exit or too_late):
                     itype = "short"
@@ -4374,8 +4397,12 @@ JSON only, no markdown."""
                 # Reset niche cache for this new video
                 self._reset_niche_cache()
 
-                if random.random() < 0.40:
-                    # Merged call: categorize + niche in ONE Gemini call (~40% of videos)
+                # State-driven: energy * 0.3 + curiosity * 0.2 (energetic + curious = more niche checks)
+                _e_nc = getattr(getattr(self.human, 'mood', None), 'energy', 0.5)
+                _c_nc = getattr(getattr(self.human, 'mood', None), 'curiosity', 0.5)
+                _niche_prob = max(0.0, min(1.0, _e_nc * 0.3 + _c_nc * 0.2))
+                if random.random() < _niche_prob:
+                    # Merged call: categorize + niche in ONE Gemini call
                     # The API delay (~6s) naturally extends watch time, which looks like
                     # watching longer (natural behavior variation). Rate limiter auto-throttles.
                     self._precheck_niche_during_watch(niche_keywords)

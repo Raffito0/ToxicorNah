@@ -180,16 +180,24 @@ class Personality:
     boredom_rate: float = 0.12
     boredom_relief: float = 0.40
     switch_threshold: float = 0.70
+    comment_sociality: float = 0.40   # how much this account browses comments
+    dominant_hand: int = 1  # +1 = right-handed, -1 = left-handed (persistent)
+    comment_style: str = "reactor"    # categorical: reactor/questioner/quoter/hype (persistent)
     sessions_count: int = 0
 
     @classmethod
     def generate(cls) -> "Personality":
         """Create a new personality with random traits within configured ranges."""
         ranges = config.PERSONALITY_RANGES
-        return cls(**{
+        p = cls(**{
             trait: random.uniform(*bounds)
             for trait, bounds in ranges.items()
         })
+        # Dominant hand: 75% right-handed, 25% left-handed. Set once, never changes.
+        p.dominant_hand = random.choice([1, 1, 1, -1])
+        # Comment style: assigned once, never changes (like handedness)
+        p.comment_style = random.choice(config.COMMENT_STYLES)
+        return p
 
     def drift(self, session_stats: dict):
         """Evolve traits slightly based on what happened this session.
@@ -235,6 +243,9 @@ class Personality:
             "boredom_rate": self.boredom_rate,
             "boredom_relief": self.boredom_relief,
             "switch_threshold": self.switch_threshold,
+            "comment_sociality": self.comment_sociality,
+            "dominant_hand": self.dominant_hand,
+            "comment_style": self.comment_style,
             "sessions_count": self.sessions_count,
         }
 
@@ -244,6 +255,8 @@ class Personality:
         for trait in config.PERSONALITY_RANGES:
             if trait in d:
                 setattr(p, trait, d[trait])
+        p.dominant_hand = d.get("dominant_hand", random.choice([1, 1, 1, -1]))
+        p.comment_style = d.get("comment_style", random.choice(config.COMMENT_STYLES))
         p.sessions_count = d.get("sessions_count", 0)
         return p
 
@@ -308,9 +321,11 @@ class BoredomTracker:
 class FatigueTracker:
     session_start: float = 0.0
     fatigue_start_min: float = 10.0
+    _initial_fatigue: float = 0.0  # carried over from previous session
 
-    def start(self):
+    def start(self, initial_fatigue: float = 0.0):
         self.session_start = time.time()
+        self._initial_fatigue = max(0.0, min(0.8, initial_fatigue))
 
     @property
     def minutes_active(self) -> float:
@@ -320,12 +335,17 @@ class FatigueTracker:
 
     @property
     def fatigue_level(self) -> float:
-        """0.0 = fresh, 1.0 = very fatigued."""
+        """0.0 = fresh, 1.0 = very fatigued.
+
+        Combines session-accumulated fatigue with initial fatigue
+        carried from previous session (decayed by half-life 1hr).
+        """
         mins = self.minutes_active
         if mins < self.fatigue_start_min:
-            return 0.0
+            return min(1.0, self._initial_fatigue)
         x = (mins - self.fatigue_start_min) / 15.0
-        return min(1.0, x / (1 + x))
+        session_fatigue = x / (1 + x)
+        return min(1.0, session_fatigue + self._initial_fatigue * (1 - session_fatigue))
 
     def adjust_like_prob(self, base_prob: float) -> float:
         drop = H["fatigue_like_drop"]
@@ -385,16 +405,15 @@ class SessionPhaseTracker:
         return "exit"
 
     def get_mix(self) -> dict:
-        """Get engagement mix for current phase with slight randomization."""
+        """Get engagement mix for current phase with per-action jitter.
+        No normalization — weights are used as-is by random.choices().
+        Scroll dominates naturally because it has the highest base weight.
+        """
         phase = self.current_phase
         base = config.SESSION_PHASES[phase]["engagement"]
         mix = {}
         for action, weight in base.items():
-            mix[action] = weight * random.uniform(0.8, 1.2)
-        # Normalize
-        total = sum(mix.values())
-        if total > 0:
-            mix = {k: v / total for k, v in mix.items()}
+            mix[action] = weight * random.uniform(0.7, 1.3)
         return mix
 
 
@@ -487,25 +506,49 @@ class HumanEngine:
                       duration_minutes: float = 15.0):
         """Initialize all layers for a new session."""
         self.mood = DailyMood.generate(hour=hour, weekday=weekday)
+        # Load initial fatigue from previous session (decayed by half-life 1hr)
+        initial_fatigue = 0.0
+        if hasattr(self, 'memory') and self.memory:
+            saved_fat = getattr(self.memory, '_raw_data', {}).get("fatigue_value", 0.0)
+            saved_ts = getattr(self.memory, '_raw_data', {}).get("fatigue_timestamp", 0)
+            if saved_fat > 0 and saved_ts > 0:
+                hours_elapsed = (time.time() - saved_ts) / 3600
+                initial_fatigue = saved_fat * (0.5 ** hours_elapsed)
+                log.info("Fatigue carry-over: saved=%.2f, elapsed=%.1fh, initial=%.2f",
+                         saved_fat, hours_elapsed, initial_fatigue)
         self.fatigue = FatigueTracker()
-        self.fatigue.start()
+        self.fatigue.start(initial_fatigue=initial_fatigue)
         self.phase = SessionPhaseTracker(duration_minutes)
         self.burst = LikeBurstTracker()
         self.boredom = BoredomTracker(self.personality)
         self._session_active = True
         self._video_count = 0
         self._zona_morta_next = time.time() + _timing("zona_morta_interval")
+        self._scrolls_since_like = 999  # no cooldown at session start
+        self._like_cooldown = 0         # scrolls needed before next like
+        self._follow_timestamps = []    # rolling window for follow cap
+        self._inbox_badge_detected = False
+        self._explore_done_this_session = False
+        self._shop_done_this_session = False
+        # Session engagement multiplier: some sessions you're in the mood
+        # to interact (1.3-1.8x), others you just scroll (0.3-0.7x).
+        # Driven by energy + patience + random factor.
+        _eng_base = 0.6 + self.mood.energy * 0.4 + self.mood.patience * 0.2
+        self._engagement_mult = max(0.6, min(2.0,
+            _eng_base * random.uniform(0.6, 1.4)))
         self._session_stats = {
             "reels_likes": 0, "feed_likes": 0,
             "stories_watched": 0, "searches_done": 0,
         }
+        hand_name = "RIGHT" if self.personality.dominant_hand == 1 else "LEFT"
         log.info("Session started | mood=%s energy=%.2f social=%.2f | %.0f min | "
-                 "personality: reels=%.0f%% stories=%.0f%% dbl_tap=%.0f%% | phases=%s",
+                 "personality: reels=%.0f%% stories=%.0f%% dbl_tap=%.0f%% hand=%s | phases=%s",
                  self.mood.description, self.mood.energy, self.mood.social,
                  duration_minutes,
                  self.personality.reels_preference * 100,
                  self.personality.story_affinity * 100,
                  self.personality.double_tap_habit * 100,
+                 hand_name,
                  {p: f"{s:.1f}-{e:.1f}" for p, (s, e) in self.phase.boundaries.items()})
 
     def end_session(self):
@@ -525,6 +568,8 @@ class HumanEngine:
                 with open(path, "r") as f:
                     data = json.load(f)
                 self.memory = ContentMemory.from_dict(data)
+                # Store raw data for fatigue carry-over in start_session
+                self.memory._raw_data = data
                 if "personality" in data:
                     self.personality = Personality.from_dict(data["personality"])
                     log.debug("Loaded personality for %s (sessions=%d)",
@@ -536,74 +581,261 @@ class HumanEngine:
                 log.warning("Failed to load memory for %s: %s", self.account_name, e)
 
     def _save_memory(self):
+        """Save memory + personality + fatigue state atomically (tmp+replace)."""
         path = self._memory_path()
         try:
             data = self.memory.to_dict()
             data["personality"] = self.personality.to_dict()
-            with open(path, "w") as f:
+            # Persist fatigue for cross-session carry-over
+            if hasattr(self, 'fatigue') and self.fatigue:
+                data["fatigue_value"] = self.fatigue.fatigue_level
+                data["fatigue_timestamp"] = time.time()
+            # Atomic write: tmp file then os.replace
+            tmp_path = path + ".tmp"
+            with open(tmp_path, "w") as f:
                 json.dump(data, f)
+            os.replace(tmp_path, path)
         except OSError as e:
             log.warning("Failed to save memory for %s: %s", self.account_name, e)
 
     # --- Layer 1: Tap Jitter -----------------------------------------------
 
-    def jitter_tap(self, x: int, y: int) -> tuple[int, int]:
-        """Add Gaussian noise to tap coordinates like a real thumb."""
+    def jitter_tap(self, x: int, y: int, target_size: str = "small") -> tuple[int, int]:
+        """Add human-like noise to tap coordinates.
+
+        Never taps at exact center. Bias from handedness/grip:
+        - Right-handed: taps shifted slightly LEFT of center (thumb approaches from right)
+        - Left-handed: opposite
+        - Bottom of screen: more Y variance (thumb reach is less precise)
+
+        target_size: "small" (buttons/icons), "medium" (avatars), "large" (thumbnails)
+        Larger targets = more offset from center (humans are lazier with big targets).
+        """
         sigma_x = H["tap_sigma_x"]
         sigma_y = H["tap_sigma_y"]
+
+        # Scale jitter by target size (larger target = more offset)
+        size_mult = {"small": 1.0, "medium": 1.4, "large": 2.0}.get(target_size, 1.0)
+        sigma_x *= size_mult
+        sigma_y *= size_mult
 
         # Bottom of screen = more Y variance (thumb reach)
         if y > 1500:
             sigma_y *= 1.3
 
-        jx = int(random.gauss(x, sigma_x))
-        jy = int(random.gauss(y, sigma_y))
+        # Handedness bias: thumb approaches from dominant side,
+        # so taps land slightly OPPOSITE of dominant hand
+        hand = getattr(self.personality, 'dominant_hand', 1)
+        grip_bias_x = -hand * random.uniform(2, 6) * size_mult  # opposite of hand
+        # Taps tend to land slightly BELOW center (thumb covers bottom of target)
+        grip_bias_y = random.uniform(1, 4) * size_mult
+
+        jx = int(random.gauss(x + grip_bias_x, sigma_x))
+        jy = int(random.gauss(y + grip_bias_y, sigma_y))
         return jx, jy
 
     # --- Layer 1: Swipe Humanization ---------------------------------------
 
     def _init_swipe_habit(self):
-        """Generate per-session swipe identity (muscle memory baseline).
+        """Generate per-session swipe identity for BOTH hands.
 
         Thumb physics: you hold the phone in one hand. The thumb pivots from
         the base of your palm (bottom-right for right-handed). This means:
         - The thumb rests on the RIGHT side of the screen, not the center
-        - When swiping UP, the thumb curves INWARD (right → center)
+        - When swiping UP, the thumb curves INWARD (right -> center)
         - The grip offset is significant: 30-50px from center on a 720px screen
-        - All of this is consistent for the entire session
-        """
-        # Handedness: +1 = right-handed (75%), -1 = left-handed (25%)
-        self._handedness = random.choice([1, 1, 1, -1])
 
-        self._swipe_habit = {
-            # Where thumb naturally starts Y (% offset from caller base)
-            "start_y_bias": random.gauss(0, 0.04),
-            # Personal speed: 0.85 = slightly fast, 1.15 = slightly slow
-            "speed_mult": random.uniform(0.85, 1.20),
-            # How far from center the thumb rests (px). Right-handed = positive.
-            # On a 720px screen, 30-50px offset = thumb at ~55-57% of screen width
-            "grip_offset": self._handedness * random.uniform(25, 50),
-            # How much the thumb curves inward during upswipe (px)
-            # Bigger = more arc. Real thumbs curve 15-30px inward over a full swipe
-            "arc_inward": random.uniform(12, 28),
-            # Precision: tight=0.7, sloppy=1.3
-            "noise_level": random.uniform(0.7, 1.3),
-        }
+        Each hand has its own characteristics (different grip, arc, speed).
+        The dominant hand comes from personality (persistent per-account).
+        Hand switches happen during session driven by fatigue/state.
+        """
+        # Use personality's persistent dominant hand
+        self._handedness = self.personality.dominant_hand
+
+        # Generate characteristics for BOTH hands
+        self._hand_profiles = {}
+        for hand_sign in [1, -1]:
+            self._hand_profiles[hand_sign] = {
+                "start_y_bias": random.gauss(0, 0.04),
+                "speed_mult": random.uniform(0.85, 1.20),
+                "grip_offset": hand_sign * random.uniform(25, 50),
+                "arc_inward": random.uniform(12, 28),
+                "noise_level": random.uniform(0.7, 1.3),
+            }
+
+        # Non-dominant hand is slightly slower and sloppier
+        non_dom = -self._handedness
+        self._hand_profiles[non_dom]["speed_mult"] *= random.uniform(1.05, 1.15)
+        self._hand_profiles[non_dom]["noise_level"] *= random.uniform(1.1, 1.3)
+
+        # Start with dominant hand
+        self._current_hand = self._handedness
+        self._swipe_habit = self._hand_profiles[self._current_hand]
+
         # Grip X: where the thumb sits right now (varies slowly with grip shifts)
         self._grip_x_offset = int(
             self._swipe_habit["grip_offset"] + random.gauss(0, 5)
         )
         self._swipes_until_grip_shift = random.randint(12, 30)
         self._swipe_count = 0
-        # Previous swipe duration for smooth transitions
+        # Previous swipe duration and position for smooth transitions
         self._prev_duration = None
-        # Previous start Y for position continuity
         self._prev_start_y_offset = None
+
+        # Hand fatigue: accumulates while using current hand, drives switches
+        self._hand_fatigue = 0.0      # 0.0 = fresh, builds toward switch
+        self._swipes_this_hand = 0    # counter since last switch
+        self._hand_switches = 0       # total switches this session
+        self._hand_just_switched = False  # flag for caller to detect switch
+        self._last_switch_time = time.time()
+        # Event switch: random life event (drink, scratch, message) — max 1 per session
+        # Decided at session start: WHICH swipe triggers it (or never)
+        self._event_switch_done = False
+        self._event_trigger_swipe = self._pick_event_trigger_swipe()
+
+    def _pick_event_trigger_swipe(self) -> int:
+        """Decide at session start IF and WHEN a life event hand switch happens.
+
+        Uses state-driven probability: bored/tired/low-energy sessions are more
+        likely to have an event. Returns the swipe number that triggers it,
+        or -1 if no event this session.
+
+        Target: ~20-30% of 10-min sessions (50 swipes) depending on state.
+        """
+        # State influences whether an event happens at all
+        session_fatigue = self.fatigue.fatigue_level if self.fatigue else 0.0
+        boredom = self.boredom.level if self.boredom else 0.0
+        energy = self.mood.energy if self.mood else 1.0
+
+        # Base: ~25% chance. State shifts it 10-40%
+        event_drive = (
+            0.25
+            * (1 + boredom * 0.5)              # bored = restless, more events
+            * (1 + session_fatigue * 0.3)       # tired = shift position
+            * (1.3 - min(energy, 1.2) * 0.3)   # low energy = uncomfortable
+        )
+        # Add noise so it is not the same every session
+        event_drive += random.gauss(0, 0.06)
+
+        if random.random() > event_drive:
+            return -1  # no event this session
+
+        # WHEN: exponential distribution — can be early or late, unpredictable
+        # Median around swipe 30, but can be 12 or 48
+        trigger = 10 + int(random.expovariate(1.0 / 20))
+        return trigger
+
+    def _check_hand_switch(self):
+        """Decide whether to switch hands based on two independent mechanisms:
+
+        1. LIFE EVENT (any session): random imprevisto — drink, scratch, message,
+           cigarette, shift position. Decided at session start. Max 1 per session.
+
+        2. HAND FATIGUE (long sessions): accumulates over many swipes, triggers
+           in sessions 80+ swipes. Driven by session fatigue, boredom, energy.
+        """
+        if self._swipes_this_hand < 8:
+            return  # minimum swipes before considering a switch
+
+        # =================================================================
+        # Mechanism 1: LIFE EVENT
+        # Pre-decided at session start. Triggers at specific swipe count.
+        # =================================================================
+        if (not self._event_switch_done
+                and self._event_trigger_swipe > 0
+                and self._swipe_count >= self._event_trigger_swipe):
+            self._event_switch_done = True
+            log.info("[Hand switch] life event at swipe %d (drink, scratch, repositioned)",
+                     self._swipe_count)
+            self._do_hand_switch()
+            return
+
+        # =================================================================
+        # Mechanism 2: HAND FATIGUE (long sessions only)
+        # Slow accumulation, triggers around 80-100 swipes.
+        # =================================================================
+        session_fatigue = self.fatigue.fatigue_level if self.fatigue else 0.0
+        boredom = self.boredom.level if self.boredom else 0.0
+        energy = self.mood.energy if self.mood else 1.0
+
+        fatigue_rate = (
+            0.008                              # base accumulation per swipe
+            * (1 + session_fatigue * 1.2)      # tired = hand tires faster
+            * (1 + boredom * 0.6)              # bored = fidgety
+            * (1.5 - min(energy, 1.4) * 0.5)   # low energy = grip weakens
+        )
+        self._hand_fatigue += fatigue_rate
+
+        # Dominant hand = higher threshold (more natural to hold longer)
+        is_dominant = (self._current_hand == self._handedness)
+        base_threshold = 0.7 if is_dominant else 0.5
+
+        # Each previous switch raises threshold (no ping-pong)
+        switch_penalty = self._hand_switches * 0.15
+        threshold = base_threshold + switch_penalty
+
+        # Noise so it is not deterministic
+        threshold += random.gauss(0, 0.08)
+
+        if self._hand_fatigue > threshold:
+            self._do_hand_switch()
+
+    def _do_hand_switch(self):
+        """Switch to the other hand. Resets hand fatigue, updates swipe profile."""
+        old_hand = self._current_hand
+        self._current_hand = -self._current_hand
+        self._hand_just_switched = True
+        self._swipe_habit = self._hand_profiles[self._current_hand]
+        self._grip_x_offset = int(
+            self._swipe_habit["grip_offset"] + random.gauss(0, 5)
+        )
+        self._hand_fatigue = 0.0
+        self._swipes_this_hand = 0
+        self._hand_switches += 1
+        self._prev_duration = None  # reset smooth transition (new hand = new baseline)
+        self._last_switch_time = time.time()
+
+        hand_name = "RIGHT" if self._current_hand == 1 else "LEFT"
+        old_name = "RIGHT" if old_hand == 1 else "LEFT"
+        log.info("[Hand switch] %s -> %s (switch #%d)",
+                 old_name, hand_name, self._hand_switches)
+
+    def get_hand_switch_pause(self) -> float:
+        """Return pause duration for physically moving phone to other hand.
+
+        Three tiers driven by state:
+        - Quick (0.8-3s): just shift grip — most common
+        - Medium (5-15s): drink, scratch, look around — more when bored/tired
+        - Long (15-40s): reply to message, bathroom — rare, more when fatigued
+        """
+        session_fatigue = self.fatigue.fatigue_level if self.fatigue else 0.0
+        boredom = self.boredom.level if self.boredom else 0.0
+        energy = self.mood.energy if self.mood else 1.0
+
+        # Weights: state shifts the distribution toward longer pauses
+        w_quick = 1.0 + energy * 0.5 - boredom * 0.3 - session_fatigue * 0.2
+        w_medium = 0.15 + boredom * 0.3 + session_fatigue * 0.2
+        w_long = 0.03 + session_fatigue * 0.08 + boredom * 0.04 - energy * 0.02
+
+        w_quick = max(w_quick, 0.1)
+        w_medium = max(w_medium, 0.01)
+        w_long = max(w_long, 0.005)
+
+        total = w_quick + w_medium + w_long
+        roll = random.random() * total
+
+        if roll < w_quick:
+            return random.uniform(0.8, 3.0)
+        elif roll < w_quick + w_medium:
+            return random.uniform(5.0, 15.0)
+        else:
+            return random.uniform(15.0, 40.0)
 
     def _update_grip(self):
         """Shift grip position every N swipes (adjusting hand on phone).
-        Shift is small and stays on the same side — you don't switch hands."""
+        Also checks if it is time to switch hands based on accumulated state."""
         self._swipe_count += 1
+        self._swipes_this_hand += 1
         self._swipes_until_grip_shift -= 1
         if self._swipes_until_grip_shift <= 0:
             old = self._grip_x_offset
@@ -613,6 +845,9 @@ class HumanEngine:
                 + random.gauss(0, 6)
             )
             self._swipes_until_grip_shift = random.randint(12, 30)
+
+        # Check if hand fatigue accumulated enough to trigger a switch
+        self._check_hand_switch()
 
     def humanize_swipe(self, x1: int, y1: int, x2: int, y2: int) -> dict:
         """Generate a swipe indistinguishable from a real TikTok/IG user.
@@ -659,9 +894,13 @@ class HumanEngine:
         # The thumb is NOT a point — it's a pad. Where it touches the screen
         # varies: sometimes more with the tip (closer to center), sometimes
         # more with the side (closer to edge). ±10-15px variation per swipe.
+        # Capture grip and hand BEFORE _update_grip (which may trigger a switch).
+        # This swipe belongs to the current hand; the switch takes effect next swipe.
+        grip_x_now = self._grip_x_offset
+        hand_now = self._current_hand
         self._update_grip()
         thumb_contact = int(random.gauss(0, 11 * noise))
-        start_x = self._grip_x_offset + thumb_contact
+        start_x = grip_x_now + thumb_contact
 
         # Arc: thumb curves INWARD during upswipe (toward center),
         # but the AMOUNT varies a lot — sometimes almost straight,
@@ -671,10 +910,10 @@ class HumanEngine:
         swiping_up = dy < 0
         arc_amount = max(0, random.gauss(habit["arc_inward"], habit["arc_inward"] * 0.4))
         if swiping_up:
-            arc_direction = -self._handedness  # toward center
+            arc_direction = -hand_now  # toward center (depends on which hand holds phone)
         else:
-            arc_direction = self._handedness   # back toward hand
-        end_x = self._grip_x_offset + int(arc_direction * arc_amount)
+            arc_direction = hand_now   # back toward hand
+        end_x = grip_x_now + int(arc_direction * arc_amount)
 
         # --- Duration: personal baseline + subtle gaussian variation ---
         baseline = H["swipe_duration_median"] * habit["speed_mult"]
@@ -713,12 +952,21 @@ class HumanEngine:
         end_y_offset = int(end_y_base_noise) + distance_adjust
         end_y_offset += int(self.fatigue.fatigue_level * distance * 0.03)
 
+        # Check if a hand switch happened during this swipe's _update_grip
+        switched = getattr(self, '_hand_just_switched', False)
+        switch_pause = 0.0
+        if switched:
+            self._hand_just_switched = False
+            switch_pause = self.get_hand_switch_pause()
+
         return {
             "x1": x1 + start_x,
             "y1": y1 + start_y_offset,
             "x2": x2 + end_x,
             "y2": y2 + end_y_offset,
             "duration": duration,
+            "hand_switched": switched,
+            "hand_switch_pause": switch_pause,
         }
 
     # --- Layer 1: Timing (all log-normal) ----------------------------------
@@ -834,6 +1082,8 @@ class HumanEngine:
         if self.fatigue.minutes_active < H["speed_ramp_minutes"]:
             watch *= H["speed_ramp_slow_factor"]
 
+        log.debug("WATCH: %.1fs (video #%d, fatigue=%.2f)", watch, self._video_count,
+                  self.fatigue.fatigue_level if self.fatigue else 0)
         return watch
 
     def load_reaction_time(self) -> float:
@@ -847,8 +1097,11 @@ class HumanEngine:
         base_prob = 0.35 * self.mood.energy
         base_prob = self.fatigue.adjust_like_prob(base_prob)
         base_prob = self.memory.like_affinity(category, base_prob)
-        raw_decision = random.random() < base_prob
-        return self.burst.process(raw_decision)
+        roll = random.random()
+        raw_decision = roll < base_prob
+        result = self.burst.process(raw_decision)
+        log.debug("DECIDE like: roll=%.2f prob=%.2f raw=%s burst=%s", roll, base_prob, raw_decision, result)
+        return result
 
     def should_comment(self) -> bool:
         """Decide whether to comment. Boosted after liking (Behavior #13)."""
@@ -857,28 +1110,146 @@ class HumanEngine:
         if self.burst.just_liked:
             base_prob *= H["post_like_comment_boost"]
         base_prob *= max(0.1, 1.0 - self.fatigue.fatigue_level * 0.9)
-        return random.random() < base_prob
+        roll = random.random()
+        result = roll < base_prob
+        log.debug("DECIDE comment: roll=%.2f prob=%.2f post_like=%s -> %s", roll, base_prob, self.burst.just_liked, result)
+        return result
 
     def should_follow(self, creator: str = "") -> bool:
         """Decide whether to follow. Boosted after liking (Behavior #13)."""
         if creator in self.memory.recent_creators:
+            log.debug("DECIDE follow: SKIP (recent creator)")
             return False
         base_prob = 0.04 * self.mood.social
         if self.burst.just_liked:
             base_prob *= H["post_like_follow_boost"]
         base_prob *= max(0.2, 1.0 - self.fatigue.fatigue_level * 0.7)
-        return random.random() < base_prob
+        roll = random.random()
+        result = roll < base_prob
+        log.debug("DECIDE follow: roll=%.2f prob=%.2f post_like=%s -> %s", roll, base_prob, self.burst.just_liked, result)
+        return result
 
     def post_like_pause(self) -> float:
         """Behavior #3: Pause on same video after liking before scrolling."""
         return _timing("post_like_pause")
+
+    # --- Comment Browsing --------------------------------------------------
+
+    def browse_comments_plan(self) -> dict:
+        """Decide how to browse comments: number of scrolls, whether deep dive.
+
+        Returns dict with:
+            scroll_count: int (1-12)
+            is_deep_dive: bool
+            read_timing_key: str (which timing param for read pauses)
+        """
+        fatigue = self.fatigue.fatigue_level if self.fatigue else 0.0
+        boredom = self.boredom.level if self.boredom else 0.0
+        curiosity = self.personality.explore_curiosity if self.personality else 0.1
+        social = self.mood.social if self.mood else 1.0
+        sociality = self.personality.comment_sociality if self.personality else 0.4
+
+        # Deep dive probability: high curiosity + high social + low boredom = drama reader
+        deep_drive = (
+            0.02
+            * (1 + curiosity * 3)
+            * (1 + social * 0.5)
+            * (1 + sociality * 1.5)
+            * (1.2 - boredom * 0.6)
+            * (1.1 - fatigue * 0.4)
+        )
+        deep_drive = max(0.01, min(0.12, deep_drive))
+        is_deep = random.random() < deep_drive
+
+        if is_deep:
+            # Deep dive: 6-12 scrolls, reading everything
+            scroll_count = random.randint(6, 12)
+            return {
+                "scroll_count": scroll_count,
+                "is_deep_dive": True,
+                "read_timing_key": "t_comment_read_deep",
+            }
+
+        # Normal browse: 1-5 scrolls, weighted by state
+        # More sociality/curiosity = more scrolls, more fatigue/boredom = fewer
+        avg_scrolls = (
+            1.8
+            + sociality * 2.0
+            + curiosity * 3.0
+            - fatigue * 1.0
+            - boredom * 0.8
+        )
+        avg_scrolls = max(1.0, min(4.5, avg_scrolls))
+
+        # Use a simple weighted random around the average
+        scroll_count = max(1, min(5, int(random.gauss(avg_scrolls, 0.8))))
+
+        return {
+            "scroll_count": scroll_count,
+            "is_deep_dive": False,
+            "read_timing_key": "t_comment_read",
+        }
+
+    def comment_scroll_distance(self) -> float:
+        """How far to scroll in comments section (fraction of screen height).
+
+        Returns a value 0.20-0.65. State-driven: curious = scrolls more,
+        fatigued = lazy short scrolls.
+        """
+        fatigue = self.fatigue.fatigue_level if self.fatigue else 0.0
+        curiosity = self.personality.explore_curiosity if self.personality else 0.1
+        boredom = self.boredom.level if self.boredom else 0.0
+
+        # Base weights for short/medium/long scroll
+        w_short = 1.0 + fatigue * 1.5 + boredom * 0.5     # tired/bored = short lazy scrolls
+        w_medium = 1.0                                      # baseline
+        w_long = 0.15 + curiosity * 2.0 - fatigue * 0.3    # curious = longer scrolls
+
+        w_short = max(w_short, 0.1)
+        w_medium = max(w_medium, 0.1)
+        w_long = max(w_long, 0.02)
+
+        total = w_short + w_medium + w_long
+        roll = random.random() * total
+
+        if roll < w_short:
+            return random.uniform(0.20, 0.35)
+        elif roll < w_short + w_medium:
+            return random.uniform(0.35, 0.50)
+        else:
+            return random.uniform(0.50, 0.65)
+
+    def should_browse_comments(self) -> bool:
+        """Decide whether to open and browse comments WITHOUT writing one.
+        Separate from should_comment() -- this is just reading comments.
+        Driven by comment_sociality personality trait + state.
+        """
+        sociality = self.personality.comment_sociality if self.personality else 0.4
+        social = self.mood.social if self.mood else 1.0
+        fatigue = self.fatigue.fatigue_level if self.fatigue else 0.0
+        boredom = self.boredom.level if self.boredom else 0.0
+
+        prob = (
+            sociality * 0.3
+            * (0.5 + social * 0.5)
+            * (1.1 - fatigue * 0.5)
+            * (1.0 + boredom * 0.2)  # slightly bored = might check comments for entertainment
+        )
+        prob = max(0.02, min(0.35, prob))
+        roll = random.random()
+        result = roll < prob
+        log.debug("DECIDE browse_comments: roll=%.2f prob=%.2f -> %s", roll, prob, result)
+        return result
 
     # --- Layer 4: Rabbit Holes ---------------------------------------------
 
     def should_rabbit_hole(self) -> bool:
         prob = H["rabbit_hole_prob"] * self.mood.patience
         prob *= max(0.2, 1.0 - self.fatigue.fatigue_level * 0.6)
-        return random.random() < prob
+        roll = random.random()
+        result = roll < prob
+        log.debug("DECIDE rabbit_hole: roll=%.2f prob=%.2f -> %s", roll, prob, result)
+        return result
 
     def rabbit_hole_depth(self) -> int:
         return random.randint(*H["rabbit_hole_videos_range"])
@@ -886,50 +1257,173 @@ class HumanEngine:
     # --- Layer 5: Interruptions --------------------------------------------
 
     def should_interrupt(self) -> bool:
-        return random.random() < H["interruption_prob"]
+        roll = random.random()
+        result = roll < H["interruption_prob"]
+        if result:
+            log.debug("DECIDE interrupt: roll=%.2f prob=%.2f -> YES", roll, H["interruption_prob"])
+        return result
 
     def interruption_type(self) -> str:
+        """Pick interruption type and duration based on state.
+
+        Three tiers:
+        - short (3-8s): glance at notification, check time. Most common.
+        - medium (15-45s): reply to message, open another app briefly.
+        - long (60-180s): genuinely distracted, conversation, etc. Rare.
+
+        Tired/bored = more medium/long. Energetic/focused = mostly short.
+        """
+        fatigue = self.fatigue.fatigue_level if self.fatigue else 0.0
+        boredom = self.boredom.level if self.boredom else 0.0
+        energy = self.mood.energy if self.mood else 1.0
+
+        # Probability of each tier (state-driven + per-session jitter)
+        # Per-session jitter: each session has a slightly different "distractibility"
+        jitter = random.gauss(0, 0.12)
+
+        long_chance = 0.25 + fatigue * 0.15 + boredom * 0.10 - energy * 0.05 + jitter * 0.3
+        long_chance = max(0.10, min(0.45, long_chance))
+
+        medium_chance = 0.33 + fatigue * 0.10 + boredom * 0.08 - energy * 0.04 + jitter * 0.5
+        medium_chance = max(0.20, min(0.50, medium_chance))
+
+        short_chance = 1.0 - medium_chance - long_chance
+
         roll = random.random()
-        if roll < H["app_switch_prob"]:
-            return "app_switch"
-        elif roll < H["app_switch_prob"] + 0.15:
-            return "lock_screen"
+        if roll < short_chance:
+            itype = "short"
+        elif roll < short_chance + medium_chance:
+            itype = "medium"
         else:
-            return "pause"
+            itype = "long"
 
-    def interruption_duration(self) -> float:
-        return _timing("interruption_duration")
+        log.info("INTERRUPTION: %s (short=%.0f%% medium=%.0f%% long=%.0f%%)",
+                 itype, short_chance * 100, medium_chance * 100, long_chance * 100)
+        return itype
 
-    async def do_interruption(self, adb, current_app: str = ""):
+    def interruption_duration(self, itype: str = "short") -> float:
+        """Duration based on interruption type."""
+        if itype == "short":
+            return random.uniform(3, 8)
+        elif itype == "medium":
+            # Real exit: check WhatsApp, reply to message, scroll IG for a sec
+            return random.uniform(50, 150)
+        else:  # long
+            # Genuinely distracted: conversation, phone call, has to do something
+            return random.uniform(150, 300)
+
+    async def do_interruption(self, adb, current_app: str = "", itype: str = None):
         """Execute an interruption on the device.
         current_app: package name to reopen after app_switch (e.g. TIKTOK_PKG).
+        itype: if provided, use this type instead of picking one.
         """
-        itype = self.interruption_type()
-        duration = self.interruption_duration()
+        if itype is None:
+            itype = self.interruption_type()
+        duration = self.interruption_duration(itype)
         log.info("Interruption: %s for %.0fs", itype, duration)
 
-        if itype == "app_switch":
+        if itype == "short":
+            # Short = always stay in app (pause, thinking, rereading)
+            await asyncio.sleep(duration)
+        elif itype == "medium":
+            # App switch — go home, check something, come back
             adb.press_home()
             await asyncio.sleep(duration)
-            # Re-open the app (press_back from home screen does nothing)
             if current_app:
                 adb.open_app(current_app)
                 await asyncio.sleep(_timing("t_app_load"))
+                adb.save_screenshot_if_recording("after_interruption_return")
             else:
                 adb.press_back()
-        elif itype == "lock_screen":
-            adb.shell("input keyevent KEYCODE_POWER")
-            await asyncio.sleep(duration)
-            adb.unlock_screen()
-            # After unlock, last app returns to foreground automatically
         else:
+            # Long — genuinely distracted
+            adb.press_home()
             await asyncio.sleep(duration)
+            if current_app:
+                adb.open_app(current_app)
+                await asyncio.sleep(_timing("t_app_load"))
+                adb.save_screenshot_if_recording("after_interruption_return")
+            else:
+                adb.press_back()
 
     # --- Layer 2: Phase-Aware Action Selection -----------------------------
+
+    def _generate_like_cooldown(self) -> int:
+        """Generate scrolls-before-next-like cooldown (state-driven, not fixed).
+        More energy = shorter cooldown (active user). More fatigue = longer.
+        ~10% chance of very short cooldown (found 2 great videos in a row).
+        """
+        fatigue = self.fatigue.fatigue_level if self.fatigue else 0.0
+        energy = self.mood.energy
+
+        # Rare short cooldown: "found 2 bangers in a row" (~8-12%)
+        short_chance = 0.04 + energy * 0.05 - fatigue * 0.03
+        short_chance = max(0.04, min(0.12, short_chance))
+        if random.random() < short_chance:
+            return random.randint(2, 3)
+
+        # Normal cooldown: median ~6, adjusted by state
+        median = 6.0 - energy * 1.5 + fatigue * 2.0
+        median = max(4.0, min(9.0, median))
+        cd = _lognormal(median, 0.3, 3, 12)
+        return int(cd)
+
+    def on_like(self):
+        """Record a like action — sets cooldown before next like is allowed."""
+        self._scrolls_since_like = 0
+        self._like_cooldown = self._generate_like_cooldown()
+
+    def on_scroll_for_like(self):
+        """Record a scroll — counts toward like cooldown."""
+        self._scrolls_since_like += 1
+
+    # --- Follow Cap + Follow Path -----------------------------------------
+
+    def _follow_allowed(self) -> bool:
+        """Check rolling 30-min window: max FOLLOW_CAP_PER_30MIN follows."""
+        now = time.time()
+        window_start = now - 30 * 60
+        recent = [t for t in self._follow_timestamps if t > window_start]
+        self._follow_timestamps = recent  # prune old entries
+        return len(recent) < config.FOLLOW_CAP_PER_30MIN
+
+    def on_follow(self):
+        """Record a follow action with timestamp for cap tracking."""
+        self._follow_timestamps.append(time.time())
+
+    def should_follow_from_profile(self) -> bool:
+        """State-driven: enter profile first (higher niche certainty) vs follow from video.
+        More curious/patient = more likely to enter profile first.
+        Returns True = enter profile, False = follow from video directly.
+        """
+        curiosity = self.personality.explore_curiosity
+        patience = self.mood.patience
+        fatigue = self.fatigue.fatigue_level if self.fatigue else 0.0
+
+        profile_drive = 0.60 + curiosity * 0.15 + patience * 0.10 - fatigue * 0.08
+        profile_drive = max(0.55, min(0.90, profile_drive))
+        roll = random.random()
+        result = roll < profile_drive
+        log.debug("DECIDE follow_from_profile: roll=%.2f drive=%.2f -> %s", roll, profile_drive, result)
+        return result
+
+    def should_visit_commenter_profile(self) -> bool:
+        """State-driven: while reading comments, chance to tap on a commenter's avatar.
+        More social + curious + bored = more likely. More fatigued = less likely.
+        """
+        social = self.mood.social
+        curiosity = self.personality.explore_curiosity
+        boredom = self.boredom.level
+        fatigue = self.fatigue.fatigue_level if self.fatigue else 0.0
+
+        drive = social * 0.04 + curiosity * 0.03 + boredom * 0.02 - fatigue * 0.02
+        drive = max(0.02, min(0.12, drive))
+        return random.random() < drive
 
     def pick_action(self) -> str:
         """Pick next action based on session flow phase + boredom level.
         When bored, exploration and profile visits get boosted naturally.
+        Like cooldown prevents liking too many videos in quick succession.
         """
         if self.phase:
             mix = self.phase.get_mix()
@@ -939,21 +1433,80 @@ class HumanEngine:
                 "search_explore": 0.05, "follow": 0.03, "profile_visit": 0.02,
             }
 
-        # Apply mood modifiers
+        # Apply session engagement multiplier (scales all non-scroll actions)
+        for act in ("like", "comment", "follow", "search_explore", "profile_visit",
+                     "check_inbox", "browse_following", "browse_explore", "browse_shop"):
+            mix[act] = mix.get(act, 0) * self._engagement_mult
+
+        # Apply mood modifiers on top
         mix["comment"] = mix.get("comment", 0) * self.mood.social
         mix["follow"] = mix.get("follow", 0) * self.mood.social
         mix["like"] = mix.get("like", 0) * self.mood.energy
 
+        # Like cooldown: suppress like weight if not enough scrolls since last like
+        # Redistribute suppressed weight to non-scroll actions (not just scroll)
+        if self._scrolls_since_like < self._like_cooldown:
+            suppressed = mix["like"]
+            mix["like"] = 0.0
+            # Spread to comment, search, follow, profile (proportionally)
+            non_scroll = ["comment", "search_explore", "follow", "profile_visit"]
+            non_scroll_total = sum(mix.get(a, 0) for a in non_scroll)
+            if non_scroll_total > 0:
+                for a in non_scroll:
+                    mix[a] = mix.get(a, 0) + suppressed * (mix.get(a, 0) / non_scroll_total)
+            else:
+                mix["scroll_fyp"] = mix.get("scroll_fyp", 0) + suppressed
+
+        # Follow cap: suppress follow if at max for rolling 30min window
+        if not self._follow_allowed():
+            mix["follow"] = 0.0
+
         # Apply boredom: high boredom boosts exploration, reduces passive scrolling
         if self.boredom.level > 0.4:
             boredom_boost = 1 + (self.boredom.level - 0.4) * 3
-            mix["search_explore"] = mix.get("search_explore", 0) * boredom_boost
-            mix["profile_visit"] = mix.get("profile_visit", 0) * boredom_boost
+            mix["search_explore"] = mix.get("search_explore", 0) * min(boredom_boost, 1.5)
+            mix["profile_visit"] = mix.get("profile_visit", 0) * min(boredom_boost, 1.5)
             mix["scroll_fyp"] = mix.get("scroll_fyp", 0) / boredom_boost
+
+        # --- New section modifiers ---
+
+        # check_inbox: strong boost when badge visible
+        if mix.get("check_inbox", 0) > 0:
+            if hasattr(self, '_inbox_badge_detected') and self._inbox_badge_detected:
+                mix["check_inbox"] *= 4.0
+
+        # browse_following: boost from boredom + story_affinity
+        if mix.get("browse_following", 0) > 0:
+            boredom_level = self.boredom.level if self.boredom else 0
+            story_aff = self.personality.story_affinity if self.personality else 0.5
+            mix["browse_following"] *= (1.0 + boredom_level * 1.5 + story_aff * 0.5)
+
+        # browse_explore: suppress if search_explore was done recently
+        if mix.get("browse_explore", 0) > 0:
+            if hasattr(self, '_explore_done_this_session') and self._explore_done_this_session:
+                mix["browse_explore"] = 0.0
+        if mix.get("search_explore", 0) > 0:
+            if hasattr(self, '_explore_done_this_session') and self._explore_done_this_session:
+                mix["search_explore"] *= 0.1  # heavily suppress after explore
+
+        # browse_shop: max once per session, slight curiosity boost
+        if mix.get("browse_shop", 0) > 0:
+            if hasattr(self, '_shop_done_this_session') and self._shop_done_this_session:
+                mix["browse_shop"] = 0.0
+            else:
+                energy = self.mood.energy if self.mood else 1.0
+                mix["browse_shop"] *= (0.5 + energy * 0.5)
 
         actions = list(mix.keys())
         weights = list(mix.values())
-        return random.choices(actions, weights=weights, k=1)[0]
+        chosen = random.choices(actions, weights=weights, k=1)[0]
+        # Log the decision with weights so we can trace every action choice
+        weight_str = " ".join(f"{a}={w:.2f}" for a, w in zip(actions, weights))
+        log.info("ACTION: %s [weights: %s] phase=%s boredom=%.2f",
+                 chosen, weight_str,
+                 self.phase.current_phase if self.phase else "?",
+                 self.boredom.level if self.boredom else 0)
+        return chosen
 
     # --- Boredom-Driven Decisions ------------------------------------------
 
@@ -979,7 +1532,11 @@ class HumanEngine:
             return False
         # Schedule next check
         self._zona_morta_next = now + _timing("zona_morta_interval")
-        return random.random() < H["zona_morta_prob"]
+        roll = random.random()
+        result = roll < H["zona_morta_prob"]
+        if result:
+            log.info("ZONA_MORTA: triggered (roll=%.2f prob=%.2f)", roll, H["zona_morta_prob"])
+        return result
 
     def zona_morta_duration(self) -> float:
         """How long the zona morta lasts."""
