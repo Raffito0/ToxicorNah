@@ -11,6 +11,7 @@ import logging
 import math
 import random
 import re
+import socket
 import subprocess
 import time
 
@@ -130,6 +131,17 @@ class ADBController:
             self._density = config_density
         else:
             self._density = 280  # safe default
+
+        # --- UHID touch server state ---
+        self._touch_socket: socket.socket | None = None
+        self._touch_connected: bool = False
+        self._touch_port: int | None = None
+        self._touch_server_pid: int | None = None
+        self._touch_reconnect_attempted: bool = False
+        # Pressure params set by HumanEngine before each tap/swipe
+        self._last_pressure: float = 0.55
+        self._last_area: int = 45
+        self._last_hold_ms: int = 80
 
     # --- Low-level ADB execution -------------------------------------------
 
@@ -259,6 +271,164 @@ class ADBController:
         self.shell(f"input swipe {cx} {cy} {cx + drift} {self.screen_h // 4 + random.randint(-20, 20)} {dur}")
         time.sleep(_hw_delay(0.5, 0.3, 0.2, 1.5))
 
+    # --- UHID Touch Server -------------------------------------------------
+
+    def set_touch_params(self, pressure: float = 0.55, area: int = 45, hold_ms: int = 80):
+        """Set pressure/area/hold for the next UHID tap/swipe."""
+        self._last_pressure = pressure
+        self._last_area = area
+        self._last_hold_ms = hold_ms
+
+    def start_touch_server(self) -> bool:
+        """Launch UHID touch server on phone, establish socket connection.
+
+        Returns True on success, False on any failure (caller should use fallback).
+        """
+        jar_path = "/data/local/tmp/touchserver.jar"
+
+        # 1. Check JAR exists
+        check = self.shell(f"ls {jar_path}").strip()
+        if jar_path not in check:
+            log.warning("UHID: touchserver.jar not found on phone")
+            return False
+
+        # 2. Launch server via app_process
+        launch_cmd = (
+            f"CLASSPATH={jar_path} app_process / touchserver.TouchServer "
+            f"{self.screen_w} {self.screen_h}"
+        )
+        try:
+            proc = subprocess.Popen(
+                [config.ADB_PATH, "-s", self.serial, "shell", launch_cmd],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            self._touch_server_pid = proc.pid
+        except Exception as e:
+            log.error("UHID: failed to launch server: %s", e)
+            return False
+
+        # 3. Wait for server startup
+        time.sleep(1.5)
+
+        # 4. Forward port (tcp:0 = auto-assign, avoids multi-phone conflicts)
+        try:
+            output = self._run(["forward", "tcp:0", "localabstract:phonebot-touch"], timeout=5)
+            port_str = output.strip()
+            if not port_str.isdigit():
+                log.error("UHID: unexpected forward output: %r", port_str)
+                return False
+            self._touch_port = int(port_str)
+            log.info("UHID: forwarded to localhost:%d", self._touch_port)
+        except Exception as e:
+            log.error("UHID: port forward failed: %s", e)
+            return False
+
+        # 5. Connect TCP socket
+        try:
+            self._touch_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._touch_socket.connect(("127.0.0.1", self._touch_port))
+            self._touch_socket.settimeout(3.0)
+        except Exception as e:
+            log.error("UHID: socket connect failed: %s", e)
+            self._touch_socket = None
+            return False
+
+        # 6. Health check
+        try:
+            resp = self._touch_send("PING", timeout_s=2.0)
+            if resp.strip() != "PONG":
+                log.error("UHID: PING got unexpected response: %r", resp)
+                return False
+        except Exception as e:
+            log.error("UHID: health check failed: %s", e)
+            return False
+
+        self._touch_connected = True
+        self._touch_reconnect_attempted = False
+        log.info("UHID: touch server connected (port %d)", self._touch_port)
+        return True
+
+    def stop_touch_server(self):
+        """Clean shutdown: DESTROY, close socket, remove forward, kill process."""
+        if self._touch_socket:
+            try:
+                self._touch_send("DESTROY", timeout_s=2.0)
+            except Exception:
+                pass
+            try:
+                self._touch_socket.close()
+            except Exception:
+                pass
+            self._touch_socket = None
+
+        if self._touch_port:
+            try:
+                self._run(["forward", "--remove", f"tcp:{self._touch_port}"], timeout=5)
+            except Exception:
+                pass
+            self._touch_port = None
+
+        # Kill any lingering server process
+        self.shell("pkill -f TouchServer")
+        self._touch_connected = False
+        self._touch_server_pid = None
+        log.info("UHID: touch server stopped")
+
+    def _touch_send(self, command: str, timeout_s: float = 3.0) -> str:
+        """Send command to touch server, read response line.
+
+        Raises ConnectionError on socket failure or timeout.
+        """
+        if not self._touch_socket:
+            raise ConnectionError("UHID socket not connected")
+
+        try:
+            self._touch_socket.settimeout(timeout_s)
+            self._touch_socket.sendall((command + "\n").encode("ascii"))
+            # Read response line
+            data = b""
+            while b"\n" not in data:
+                chunk = self._touch_socket.recv(1024)
+                if not chunk:
+                    raise ConnectionError("UHID socket closed by server")
+                data += chunk
+            return data.decode("ascii").strip()
+        except socket.timeout:
+            raise ConnectionError(f"UHID timeout after {timeout_s}s for: {command}")
+        except OSError as e:
+            raise ConnectionError(f"UHID socket error: {e}")
+
+    def _touch_health_check(self) -> bool:
+        """Send PING, expect PONG within 1 second."""
+        try:
+            resp = self._touch_send("PING", timeout_s=1.0)
+            return resp == "PONG"
+        except ConnectionError:
+            return False
+
+    def _touch_reconnect(self) -> bool:
+        """Attempt to restart touch server (once per session)."""
+        log.warning("UHID: attempting reconnect...")
+        self.shell("pkill -f TouchServer")
+        time.sleep(0.5)
+        return self.start_touch_server()
+
+    def _handle_touch_failure(self):
+        """Called when a UHID touch command fails. Falls back to input commands."""
+        log.warning("UHID connection lost, falling back to input commands")
+        self._touch_connected = False
+        if not self._touch_reconnect_attempted:
+            self._touch_reconnect_attempted = True
+            if self._touch_reconnect():
+                log.info("UHID reconnected successfully")
+                return
+        # Send Telegram alert (non-critical, don't crash on import failure)
+        try:
+            from core.telegram_alerts import send_alert
+            send_alert("UHID failed, using input fallback", "uhid_failure", "")
+        except Exception:
+            pass
+
     # --- Input actions (tap, swipe, type) ----------------------------------
 
     def tap(self, x: int, y: int):
@@ -269,18 +439,46 @@ class ADBController:
         caller = traceback.extract_stack(limit=3)[0]
         log.info("TAP (%d, %d) [from %s:%d %s]", x, y,
                  caller.filename.split("/")[-1].split("\\")[-1], caller.lineno, caller.name)
+        if self._touch_connected:
+            try:
+                timeout = self._last_hold_ms / 1000.0 + 2.0
+                self._touch_send(
+                    f"TAP {x} {y} {self._last_pressure:.2f} {self._last_area} {self._last_hold_ms}",
+                    timeout_s=timeout)
+                return
+            except ConnectionError:
+                self._handle_touch_failure()
         self.shell(f"input tap {x} {y}")
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300):
-        """Single swipe with slight lateral drift for realism.
+        """Single swipe. All spatial drift handled by humanize_swipe() in Python.
         One command = one gesture = no double-skip on any screen size."""
+        log.info("SWIPE (%d,%d)->(%d,%d) %dms", x1, y1, x2, y2, duration_ms)
+        if self._touch_connected:
+            try:
+                timeout = duration_ms / 1000.0 + 2.0
+                self._touch_send(
+                    f"SWIPE {x1} {y1} {x2} {y2} {duration_ms} {self._last_pressure:.2f}",
+                    timeout_s=timeout)
+                return
+            except ConnectionError:
+                self._handle_touch_failure()
+        # Fallback: legacy input swipe (add small drift since humanize_swipe may not be in path)
         drift = random.randint(-10, 10)
-        log.info("SWIPE (%d,%d)->(%d,%d) %dms drift=%d", x1, y1, x2 + drift, y2, duration_ms, drift)
         self.shell(f"input swipe {x1} {y1} {x2 + drift} {y2} {duration_ms}")
 
     def long_press(self, x: int, y: int, duration_ms: int = 800):
         """Long press at coordinates."""
         log.info("LONG_PRESS (%d, %d) %dms", x, y, duration_ms)
+        if self._touch_connected:
+            try:
+                timeout = duration_ms / 1000.0 + 2.0
+                self._touch_send(
+                    f"TAP {x} {y} {self._last_pressure:.2f} {self._last_area} {duration_ms}",
+                    timeout_s=timeout)
+                return
+            except ConnectionError:
+                self._handle_touch_failure()
         self.shell(f"input swipe {x} {y} {x} {y} {duration_ms}")
 
     def type_text(self, text: str):
@@ -323,7 +521,6 @@ class ADBController:
         else:
             start_x = self.screen_w - random.randint(0, 8)
             end_x = int(self.screen_w * random.uniform(0.60, 0.75))
-        # Y near center with random offset, slight vertical drift
         center_y = self.screen_h // 2
         start_y = center_y + random.randint(-80, 80)
         y_drift = random.randint(-25, 25)
@@ -332,6 +529,15 @@ class ADBController:
         side = "left" if from_left else "right"
         log.info("BACK gesture (%s edge): (%d,%d)->(%d,%d) %dms",
                  side, start_x, start_y, end_x, end_y, duration)
+        if self._touch_connected:
+            try:
+                timeout = duration / 1000.0 + 2.0
+                self._touch_send(
+                    f"SWIPE {start_x} {start_y} {end_x} {end_y} {duration} {self._last_pressure:.2f}",
+                    timeout_s=timeout)
+                return
+            except ConnectionError:
+                self._handle_touch_failure()
         self.shell(f"input swipe {start_x} {start_y} {end_x} {end_y} {duration}")
 
     def _keyevent_back(self):
@@ -349,6 +555,15 @@ class ADBController:
         duration = random.randint(200, 350)
         log.info("HOME gesture: (%d,%d)->(%d,%d) %dms",
                  start_x, start_y, end_x, end_y, duration)
+        if self._touch_connected:
+            try:
+                timeout = duration / 1000.0 + 2.0
+                self._touch_send(
+                    f"SWIPE {start_x} {start_y} {end_x} {end_y} {duration} {self._last_pressure:.2f}",
+                    timeout_s=timeout)
+                return
+            except ConnectionError:
+                self._handle_touch_failure()
         self.shell(f"input swipe {start_x} {start_y} {end_x} {end_y} {duration}")
 
     def _keyevent_home(self):
