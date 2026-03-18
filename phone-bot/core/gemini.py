@@ -750,6 +750,88 @@ JSON only, no markdown."""
                 "dismiss_x": None, "dismiss_y": None, "dismiss_label": None}
 
 
+def classify_overlay(screenshot_bytes: bytes, screen_w: int, screen_h: int) -> dict:
+    """Classify an overlay/popup into actionable types for the 3-tier handler.
+
+    More detailed than check_popup(): identifies overlay TYPE and recommended ACTION
+    so the handler knows whether to auto-dismiss, escalate to human, or degrade.
+
+    Returns:
+        {"type": str, "subtype": str, "dismiss_coords": [x,y] or None,
+         "action": str, "description": str}
+
+    Types: dismissible_safe, captcha_simple, captcha_complex, permission,
+           account_warning, login_expired, unknown
+    Actions: tap_dismiss, tap_to_verify, drag_slider, escalate
+    """
+    prompt = f"""Screenshot is {screen_w}x{screen_h}. There is an overlay/popup blocking the screen.
+Classify it into EXACTLY ONE of these types:
+
+- "dismissible_safe": promo popup, cookie banner, notification permission, age verification,
+  "Unwrap deal", any popup with a clear X/Close/Not now/Skip/Cancel button
+- "captcha_simple": tap-to-verify ("I am not a robot"), drag slider to verify
+- "captcha_complex": image puzzle (select matching images, rotate image)
+- "permission": system permission dialog (camera, microphone, location)
+- "account_warning": community guidelines warning, account restriction notice
+- "login_expired": login/signup screen, session expired, re-authentication needed
+- "unknown": cannot classify
+
+For each type, determine the ACTION:
+- dismissible_safe/permission -> "tap_dismiss" (find the dismiss/cancel button coords)
+- captcha_simple with tap button -> "tap_to_verify"
+- captcha_simple with slider -> "drag_slider"
+- captcha_complex/account_warning/login_expired/unknown -> "escalate"
+
+Find the PIXEL coordinates of the dismiss/verify button center if applicable.
+
+Return ONLY JSON:
+{{"type": "dismissible_safe", "subtype": "promo", "dismiss_coords": [540, 1200], "action": "tap_dismiss", "description": "what the overlay shows"}}
+JSON only, no markdown."""
+
+    try:
+        result = _call_vision(screenshot_bytes, prompt, max_tokens=120,
+                              temperature=0.1, timeout=6.0, retry_backoff=0.5,
+                              compress=False)
+        result = result.replace("```json", "").replace("```", "").strip()
+        data = json.loads(result)
+
+        overlay_type = data.get("type", "unknown")
+        valid_types = {"dismissible_safe", "captcha_simple", "captcha_complex",
+                       "permission", "account_warning", "login_expired", "unknown"}
+        if overlay_type not in valid_types:
+            overlay_type = "unknown"
+
+        coords = data.get("dismiss_coords")
+        if coords and isinstance(coords, list) and len(coords) == 2:
+            cx, cy = int(coords[0]), int(coords[1])
+            if not (0 < cx < screen_w and 0 < cy < screen_h):
+                coords = None
+            else:
+                coords = [cx, cy]
+        else:
+            coords = None
+
+        log.info("CLASSIFY_OVERLAY: type=%s subtype=%s action=%s",
+                 overlay_type, data.get("subtype"), data.get("action"))
+
+        return {
+            "type": overlay_type,
+            "subtype": data.get("subtype", ""),
+            "dismiss_coords": coords,
+            "action": data.get("action", "escalate"),
+            "description": data.get("description", ""),
+        }
+    except Exception as e:
+        log.warning("CLASSIFY_OVERLAY: failed (%s), returning unknown", e)
+        return {
+            "type": "unknown",
+            "subtype": "",
+            "dismiss_coords": None,
+            "action": "escalate",
+            "description": str(e),
+        }
+
+
 def generate_caption(platform: str = "tiktok", niche: str = "general") -> str:
     """Generate a post caption with hashtags.
     Used as fallback if no caption comes from Content Library."""

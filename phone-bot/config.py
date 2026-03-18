@@ -247,6 +247,7 @@ HUMAN = {
     "t_popup_dismiss": (0.8, 0.3, 0.3, 2.0),              # pause after dismissing a popup
     "t_popup_read": (1.5, 0.4, 0.5, 4.0),                 # "reading" the popup before dismissing
     "t_recovery_settle": (1.2, 0.3, 0.5, 3.0),            # settling after page recovery
+    "t_captcha_drag": (1.2, 0.3, 0.6, 2.5),              # drag duration for slider CAPTCHAs
 
     # --- New Section Timings (2026-03-16) ---
     "t_tab_switch":        (1.0, 0.3, 0.5, 2.5),
@@ -290,6 +291,14 @@ PAGE_VERIFY_MAX_RETRIES = 3
 # New video: avg_diff typically 40-80+. Same video with popup: typically 3-12.
 # Set conservatively to avoid false positives from static video backgrounds.
 POPUP_STALL_THRESHOLD = 18
+
+# --- Popup Handler (3-tier overlay system) ---
+POPUP_DARK_OVERLAY_BRIGHTNESS_DROP = 0.40   # min brightness drop to flag dark overlay
+POPUP_DARK_OVERLAY_MAX_STDEV = 25           # max stdev for uniform overlay (not dark video)
+POPUP_BOTTOM_BUTTON_BRIGHTNESS = 180        # min avg brightness for bottom button band
+POPUP_HANDLER_RATE_LIMIT = 3                # max overlay handler invocations per 60s
+POPUP_TIER2_TIMEOUT_SEC = 300               # 5 min timeout for human intervention
+POPUP_COORD_MARGIN_PCT = 0.05              # safety margin for tap coord clamping
 
 # --- Niche Gate (like/follow only in-niche content) ---
 # Follow cap: max follows per rolling 30-minute window
