@@ -1468,10 +1468,13 @@ class TikTokBot:
         Returns True if search page opened."""
         for attempt in range(2):
             log.info("NAV: go_to_search (tap search_icon, attempt %d)", attempt + 1)
-            # Tap center first to reveal top bar if hidden in fullscreen video mode
-            cx, cy = self.adb.screen_w // 2, self.adb.screen_h // 2
-            self.adb.tap(cx, cy)
-            time.sleep(0.3)
+            # Tap top bar area to reveal it if hidden in fullscreen video mode.
+            # NEVER tap center (pauses video) or bottom (triggers LIVE/products).
+            # Top bar area (y=5%) is safe — doesn't interact with video content.
+            tx = self.adb.screen_w // 2 + random.randint(-50, 50)
+            ty = int(self.adb.screen_h * 0.05) + random.randint(-5, 10)
+            self.adb.tap(tx, ty)
+            time.sleep(random.uniform(0.3, 0.6))
             # Now tap search icon
             x, y = self.adb.get_coord("tiktok", "search_icon")
             x, y = self.human.jitter_tap(x, y)
@@ -1486,10 +1489,13 @@ class TikTokBot:
                 if page == "search":
                     log.info("Search page opened OK")
                     return True
-                log.warning("Search didn't open (Gemini sees: %s), going to FYP first", page)
-                # Go to FYP and retry
-                self.go_to_fyp()
-                self._verify_page("fyp")
+                log.warning("Search didn't open (Gemini sees: %s), recovering to FYP", page)
+                # If we accidentally entered a LIVE, nuclear escape is safest
+                if page in ("live", "other", "unknown"):
+                    self.nuclear_escape()
+                else:
+                    self.go_to_fyp()
+                    self._verify_page("fyp")
                 continue
 
         log.error("Search failed to open after 2 attempts")
