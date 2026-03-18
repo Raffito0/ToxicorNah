@@ -281,6 +281,14 @@ HUMAN = {
     "t_frozen_retry":       (4.0, 0.4, 2.0, 8.0),     # FYP frozen, wait before retry
     "t_close_before_open":  (3.0, 0.3, 1.5, 6.0),     # after closing app, before reopening
     "t_proxy_retry":        (5.0, 0.3, 3.0, 10.0),    # delay before proxy retry on first failure
+
+    # --- Touch Pressure Physics (UHID) ---
+    "touch_pressure_peak":  (0.55, 0.12, 0.25, 0.85),  # (center, sigma, min, max)
+    "touch_ramp_up_ms":     (30, 8, 15, 50),
+    "touch_ramp_down_ms":   (20, 6, 10, 40),
+    "touch_hold_drift_px":  (2, 1, 0, 5),
+    "touch_area_base":      30,
+    "touch_area_pressure_scale": 40,
 }
 
 # Max recovery attempts before forcing go_to_fyp()

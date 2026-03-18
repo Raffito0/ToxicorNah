@@ -959,6 +959,7 @@ class HumanEngine:
             self._hand_just_switched = False
             switch_pause = self.get_hand_switch_pause()
 
+        swipe_pressure = self.get_swipe_pressure()
         return {
             "x1": x1 + start_x,
             "y1": y1 + start_y_offset,
@@ -967,7 +968,78 @@ class HumanEngine:
             "duration": duration,
             "hand_switched": switched,
             "hand_switch_pause": switch_pause,
+            "pressure_peak": swipe_pressure["peak"],
+            "area": swipe_pressure["area"],
         }
+
+    # --- Touch Pressure Physics (UHID) ------------------------------------
+
+    def get_tap_pressure(self) -> dict:
+        """Generate pressure/area parameters for a single tap.
+
+        Returns dict with:
+            peak: float 0.0-1.0 -- peak pressure during tap
+            ramp_up_ms: int -- time to reach peak pressure
+            ramp_down_ms: int -- time to release
+            hold_drift_px: int -- micro-drift during hold (pixels)
+            area: int -- touch contact area (0-255 scale)
+            hold_ms: int -- hold duration
+        """
+        cfg = H.get("touch_pressure_peak", (0.55, 0.12, 0.25, 0.85))
+        peak = random.gauss(cfg[0], cfg[1])
+
+        # Fatigue: slightly heavier taps (less motor control)
+        peak *= (1 + self.fatigue.fatigue_level * 0.15)
+        # Energy: low energy = lighter taps
+        peak *= max(0.5, self.mood.energy)
+        peak = max(cfg[2], min(cfg[3], peak))
+
+        ramp_cfg = H.get("touch_ramp_up_ms", (30, 8, 15, 50))
+        ramp_up = random.gauss(ramp_cfg[0], ramp_cfg[1])
+        ramp_up *= (1 + self.fatigue.fatigue_level * 0.2)
+        ramp_up_ms = int(max(ramp_cfg[2], min(ramp_cfg[3], ramp_up)))
+
+        down_cfg = H.get("touch_ramp_down_ms", (20, 6, 10, 40))
+        ramp_down_ms = int(max(down_cfg[2], min(down_cfg[3], random.gauss(down_cfg[0], down_cfg[1]))))
+
+        drift_cfg = H.get("touch_hold_drift_px", (2, 1, 0, 5))
+        hold_drift = random.gauss(drift_cfg[0], drift_cfg[1])
+        hold_drift *= (1 + self.fatigue.fatigue_level * 0.3)
+        hold_drift_px = int(max(drift_cfg[2], min(drift_cfg[3], hold_drift)))
+
+        area_base = H.get("touch_area_base", 30)
+        area_scale = H.get("touch_area_pressure_scale", 40)
+        area = int(area_base + peak * area_scale)
+
+        hold_ms = ramp_up_ms + ramp_down_ms + random.randint(30, 60)
+
+        return {
+            "peak": peak,
+            "ramp_up_ms": ramp_up_ms,
+            "ramp_down_ms": ramp_down_ms,
+            "hold_drift_px": hold_drift_px,
+            "area": area,
+            "hold_ms": hold_ms,
+        }
+
+    def get_swipe_pressure(self) -> dict:
+        """Generate pressure parameters for a swipe.
+
+        Returns dict with:
+            peak: float 0.0-1.0 -- peak pressure during middle of swipe
+            area: int -- touch contact area at peak pressure
+        """
+        cfg = H.get("touch_pressure_peak", (0.55, 0.12, 0.25, 0.85))
+        peak = random.gauss(cfg[0], cfg[1])
+        peak *= (1 + self.fatigue.fatigue_level * 0.15)
+        peak *= max(0.5, self.mood.energy)
+        peak = max(cfg[2], min(cfg[3], peak))
+
+        area_base = H.get("touch_area_base", 30)
+        area_scale = H.get("touch_area_pressure_scale", 40)
+        area = int(area_base + peak * area_scale)
+
+        return {"peak": peak, "area": area}
 
     # --- Layer 1: Timing (all log-normal) ----------------------------------
 
