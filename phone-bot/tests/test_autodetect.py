@@ -464,6 +464,177 @@ class TestDiscoverDevicesErrorHandling:
         assert len(result) == 0
 
 
+# ---------------------------------------------------------------------------
+# Section 04 — Integration tests (full chain)
+# ---------------------------------------------------------------------------
+
+class TestPropagationChain:
+    """End-to-end: normalize -> ADB init -> page_state -> coords."""
+
+    @patch("core.adb.subprocess")
+    def test_adb_init_sets_screen_params(self, mock_subprocess):
+        """ADB auto-detects 1080x2340 -> adb.screen_w/h set correctly."""
+        from core.adb import ADBController
+        mock_run = _make_mock_run(
+            size_output="Physical size: 1080x2340",
+            density_output="Physical density: 420"
+        )
+        with patch.object(ADBController, '_run', mock_run):
+            ctrl = ADBController("TEST", _minimal_phone_config())
+        assert ctrl.screen_w == 1080
+        assert ctrl.screen_h == 2340
+        assert ctrl._density == 420
+
+    def test_set_screen_params_updates_nav_y(self):
+        """page_state.set_screen_params() recomputes _NAV_Y and syncs to coords."""
+        from core import page_state, coords
+
+        # Save original values
+        orig_nav_y = coords._nav_y
+
+        try:
+            page_state.set_screen_params(2340, 420)
+            # _NAV_Y should NOT be the default 0.943
+            assert coords._nav_y != 0.943
+            # Should be approximately (2340 - 50*420/160) / 2340
+            nav_px = 50 * 420 / 160
+            expected = (2340 - nav_px) / 2340
+            assert abs(coords._nav_y - expected) < 0.001
+        finally:
+            # Restore
+            coords.set_nav_y(orig_nav_y)
+
+    def test_coords_use_computed_nav_y(self):
+        """After set_screen_params, get_coords returns correct pixel Y for nav."""
+        import sys
+        # Use the same module objects that page_state uses internally
+        coords_mod = sys.modules.get("phone_bot.core.coords") or sys.modules.get("core.coords")
+        page_state_mod = sys.modules.get("phone_bot.core.page_state") or sys.modules.get("core.page_state")
+
+        if not coords_mod or not page_state_mod:
+            from core import page_state as page_state_mod, coords as coords_mod
+
+        orig_nav_y = coords_mod._nav_y
+
+        try:
+            page_state_mod.set_screen_params(2340, 420)
+            # Compute expected nav_y
+            nav_px = 50 * 420 / 160
+            expected_nav_y = (2340 - nav_px) / 2340
+            # Verify coords was updated
+            assert abs(coords_mod._nav_y - expected_nav_y) < 0.001
+            # Verify get_coords uses the updated value
+            x, y = coords_mod.get_coords("tiktok", "nav_home", 1080, 2340)
+            assert x == int(1080 * 0.10)
+            assert y == int(2340 * expected_nav_y)
+        finally:
+            coords_mod.set_nav_y(orig_nav_y)
+
+    @patch("core.adb.subprocess")
+    def test_full_chain_minimal_config(self, mock_subprocess):
+        """Minimal config -> normalize -> ADB init -> correct screen params."""
+        from config import normalize_phone_config
+        from core.adb import ADBController
+
+        raw = {"id": 99, "adb_serial": "TEST99"}
+        normalized = normalize_phone_config(raw)
+        assert normalized["screen_w"] is None
+        assert normalized["screen_h"] is None
+
+        mock_run = _make_mock_run(
+            size_output="Physical size: 720x1600",
+            density_output="Physical density: 280"
+        )
+        with patch.object(ADBController, '_run', mock_run):
+            ctrl = ADBController("TEST99", normalized)
+
+        assert ctrl.screen_w == 720
+        assert ctrl.screen_h == 1600
+        assert ctrl._density == 280
+
+    @patch("core.adb.subprocess")
+    def test_backward_compat_full_config(self, mock_subprocess):
+        """Existing full config + ADB confirms same values -> no change."""
+        from core.adb import ADBController
+
+        config = _full_phone_config(screen_w=1080, screen_h=2220, density=420)
+        mock_run = _make_mock_run(
+            size_output="Physical size: 1080x2220",
+            density_output="Physical density: 420"
+        )
+        with patch.object(ADBController, '_run', mock_run):
+            ctrl = ADBController("TEST", config)
+
+        assert ctrl.screen_w == 1080
+        assert ctrl.screen_h == 2220
+        assert ctrl._density == 420
+
+
+class TestMixedConfigs:
+    """Mixed minimal/full configs in same PHONES list."""
+
+    @patch("core.adb.subprocess")
+    def test_mixed_phones_all_discovered(self, mock_subprocess):
+        """3 phones: minimal + full + partial (screen_w only) all resolve."""
+        from core.adb import ADBController
+
+        phones = [
+            {"id": 1, "adb_serial": "S1", "screen_w": None, "screen_h": None, "density": None,
+             "name": "Phone 1", "model": "unknown"},
+            {"id": 2, "adb_serial": "S2", "screen_w": 1080, "screen_h": 2220, "density": 420,
+             "name": "Galaxy S9", "model": "SM-G965F"},
+            {"id": 3, "adb_serial": "S3", "screen_w": 1080, "screen_h": None, "density": None,
+             "name": "Partial", "model": "unknown"},
+        ]
+        mock_run = _make_mock_run(
+            size_output="Physical size: 720x1600",
+            density_output="Physical density: 280"
+        )
+
+        results = []
+        with patch.object(ADBController, '_run', mock_run):
+            for phone in phones:
+                ctrl = ADBController(phone["adb_serial"], phone)
+                results.append(ctrl)
+
+        # All 3 should get ADB-detected values (ADB always wins)
+        for ctrl in results:
+            assert ctrl.screen_w == 720
+            assert ctrl.screen_h == 1600
+
+    @patch("core.adb.subprocess")
+    def test_minimal_same_coords_as_full(self, mock_subprocess):
+        """Minimal and full configs with same ADB values produce same coords."""
+        from core.adb import ADBController
+        from core import coords, page_state
+        from core.coords import get_coords
+
+        mock_run = _make_mock_run(
+            size_output="Physical size: 1080x2340",
+            density_output="Physical density: 420"
+        )
+
+        orig_nav_y = coords._nav_y
+
+        try:
+            with patch.object(ADBController, '_run', mock_run):
+                ctrl_minimal = ADBController("S1", _minimal_phone_config())
+                ctrl_full = ADBController("S2", _full_phone_config(screen_w=1080, screen_h=2340, density=420))
+
+            # Both should have same screen params
+            assert ctrl_minimal.screen_w == ctrl_full.screen_w
+            assert ctrl_minimal.screen_h == ctrl_full.screen_h
+            assert ctrl_minimal._density == ctrl_full._density
+
+            # After set_screen_params, coords should be identical
+            page_state.set_screen_params(ctrl_minimal.screen_h, ctrl_minimal._density)
+            x1, y1 = get_coords("tiktok", "nav_home", ctrl_minimal.screen_w, ctrl_minimal.screen_h)
+            x2, y2 = get_coords("tiktok", "nav_home", ctrl_full.screen_w, ctrl_full.screen_h)
+            assert (x1, y1) == (x2, y2)
+        finally:
+            coords.set_nav_y(orig_nav_y)
+
+
 class TestPhonesNormalized:
     """Verify that the PHONES list is normalized at module level."""
 
