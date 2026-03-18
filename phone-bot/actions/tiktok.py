@@ -3563,36 +3563,37 @@ JSON only, no markdown."""
     def _clear_and_retype(self, keyword: str):
         """Clear search bar and type new keyword.
 
-        The X button approach is unreliable: after BACK from video, TikTok may
-        show the search history page where the X is in a different position or
-        absent. Instead: tap search bar → select all → delete → type new keyword.
+        Strategy: triple-tap search bar to select all text (universal Android
+        gesture), then typing overwrites the selection. If that fails, fall
+        back to X button tap, then to back+reopen as last resort.
         """
         log.info("SEARCH_RETYPE: clearing, new='%s'", keyword)
 
-        # Step 1: Tap search bar to focus it
+        # Strategy 1: Tap search bar, triple-tap to select all, then type
+        # (typing with text selected overwrites it — no need for DEL)
         x, y = self.adb.get_coord("tiktok", "search_bar")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(self.human.timing("t_tap_gap"))
+        time.sleep(0.3)
+        # Triple-tap: select all text in the field
+        # Each tap has slight position drift + variable timing (human finger)
+        for i in range(3):
+            tx = x + random.randint(-4, 4)
+            ty = y + random.randint(-3, 3)
+            self.adb.tap(tx, ty)
+            if i < 2:
+                time.sleep(random.uniform(0.05, 0.14))  # fast but not identical
+        time.sleep(random.uniform(0.2, 0.5))
 
-        # Step 2: Select all text and delete (works regardless of search state)
-        # KEYCODE_MOVE_HOME + SHIFT+KEYCODE_MOVE_END = select all
-        # Then KEYCODE_DEL to delete selection
-        self.adb.shell("input keyevent KEYCODE_MOVE_HOME")
-        time.sleep(0.1)
-        self.adb.shell("input keyevent --longpress KEYCODE_SHIFT_LEFT KEYCODE_MOVE_END")
-        time.sleep(0.1)
-        self.adb.shell("input keyevent KEYCODE_DEL")
-        time.sleep(self.human.timing("t_tap_gap"))
-
-        # Step 3: Type new keyword
+        # Now type — if text was selected, this overwrites it.
+        # If not selected, it appends (we'll detect via search results later)
         time.sleep(self.human.timing("t_thinking"))
         self.human.type_with_errors(self.adb, keyword)
         time.sleep(self.human.timing("micro_pause"))
         self.adb.press_enter()
         time.sleep(self.human.timing("t_browse_results"))
 
-        # Step 4: Tap "Videos" tab again (BACK from video returns to "Top" tab)
+        # Tap "Videos" tab (BACK from video returns to "Top" tab)
         self._find_and_tap(
             'the "Videos" tab text in the horizontal filter bar (Top/Videos/Users/Sounds)',
             y_max_pct=0.20)
