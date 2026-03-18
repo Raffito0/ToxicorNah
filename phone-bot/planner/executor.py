@@ -268,6 +268,23 @@ class SessionExecutor:
         human.start_session(hour=now.hour, weekday=now.weekday(),
                             duration_minutes=total_duration)
 
+        # --- UHID Touch Server Start ---
+        phone_name = config.PHONES.get(phone_id, {}).get("name", f"Phone {phone_id}")
+        uhid_started = False
+        try:
+            uhid_ok = adb.start_touch_server()
+        except Exception as e:
+            log.warning("UHID start crashed on %s: %s -- running in degraded mode", phone_name, e)
+            uhid_ok = False
+        if not uhid_ok:
+            log.warning("UHID failed on %s -- running in degraded mode (deviceId=-1)", phone_name)
+            tg_alert(phone_id, account, f"UHID failed on {phone_name}")
+        else:
+            uhid_started = True
+            log.info("UHID touch server started on %s", phone_name)
+        self._monitor_event(phone_id, account, session_id, "uhid_start",
+                            metadata={"success": uhid_ok})
+
         # Hard session timeout: duration * 1.5 + 5 min grace
         timeout_seconds = total_duration * 60 * 1.5 + 300
 
@@ -278,7 +295,7 @@ class SessionExecutor:
             )
 
         except asyncio.TimeoutError:
-            log.critical("SESSION TIMEOUT: %s exceeded %.0fs limit — forcing cleanup",
+            log.critical("SESSION TIMEOUT: %s exceeded %.0fs limit -- forcing cleanup",
                          account, timeout_seconds)
             self._monitor_event(phone_id, account, session_id, "error",
                                 human=human, success=False,
@@ -293,7 +310,7 @@ class SessionExecutor:
             return "timeout"
 
         except DeviceLostError as e:
-            log.error("DEVICE LOST during session %s (Phone %d): %s — skipping remaining sessions for this phone",
+            log.error("DEVICE LOST during session %s (Phone %d): %s -- skipping remaining sessions for this phone",
                       account, phone_id, e)
             self._monitor_event(phone_id, account, session_id, "device_lost",
                                 human=human, success=False,
@@ -302,6 +319,15 @@ class SessionExecutor:
                      action_trace=get_action_trace(session_id))
             human.end_session()
             return "device_lost"
+
+        finally:
+            # --- UHID Touch Server Stop (always runs if started) ---
+            if uhid_started:
+                try:
+                    adb.stop_touch_server()
+                    self._monitor_event(phone_id, account, session_id, "uhid_stop")
+                except Exception as e:
+                    log.debug("Touch server stop failed (expected if device lost): %s", e)
 
         self._monitor_event(phone_id, account, session_id, "session_end",
                             human=human, metadata={"result": "ok"})
@@ -977,6 +1003,17 @@ class SessionExecutor:
 
         # Initialize Telegram alerts (warns if env vars missing)
         init_alerts()
+
+        # --- UHID JAR deployment check (once per day, before any sessions) ---
+        for pid, adb in self.controllers.items():
+            phone_name = config.PHONES.get(pid, {}).get("name", f"Phone {pid}")
+            try:
+                jar_check = adb.shell("ls /data/local/tmp/touchserver.jar").strip()
+                if "/data/local/tmp/touchserver.jar" not in jar_check:
+                    log.warning("touchserver.jar missing on %s -- push it first", phone_name)
+                    tg_alert(pid, phone_name, f"touchserver.jar missing on {phone_name}")
+            except Exception as e:
+                log.debug("JAR check failed for %s: %s", phone_name, e)
 
         # Track phones that lost USB connection (shared across phases)
         dead_phones = set()

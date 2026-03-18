@@ -1293,6 +1293,11 @@ class TikTokBot:
             self.go_to_fyp()
             return False
 
+        # UHID touch server health check
+        if hasattr(self.adb, '_touch_health_check'):
+            if not self.adb._touch_health_check():
+                log.warning("UHID health check failed")
+
         # Pixel overlay check (free, <5ms)
         screenshot, fp = self.guardian.take_fingerprint()
         if fp and self.guardian._last_clean_fp:
