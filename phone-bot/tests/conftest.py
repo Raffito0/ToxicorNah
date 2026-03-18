@@ -66,3 +66,15 @@ if _PKG not in sys.modules:
         # before the failing import, so they're available on adb_mod.
         import warnings
         warnings.warn(f"adb.py partial import (some deps missing): {e}")
+
+    # Register main_discovery module (uses absolute imports, works via sys.path)
+    discovery_path = os.path.join(phone_bot_dir, "main_discovery.py")
+    if os.path.exists(discovery_path):
+        disc_spec = importlib.util.spec_from_file_location("main_discovery", discovery_path)
+        disc_mod = importlib.util.module_from_spec(disc_spec)
+        sys.modules["main_discovery"] = disc_mod
+        try:
+            disc_spec.loader.exec_module(disc_mod)
+        except ImportError as e:
+            import warnings
+            warnings.warn(f"main_discovery.py partial import: {e}")

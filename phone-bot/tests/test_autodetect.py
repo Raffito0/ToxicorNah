@@ -302,6 +302,168 @@ class TestADBFallbackChain:
                 ADBController("TEST", _minimal_phone_config())
 
 
+# ---------------------------------------------------------------------------
+# Section 03 — Serial-based device discovery
+# ---------------------------------------------------------------------------
+
+def _fake_adb_devices_output(*serials):
+    """Build fake `adb devices -l` stdout with given serials."""
+    lines = ["List of devices attached"]
+    for s in serials:
+        lines.append(f"{s}             device usb:1-1 product:model transport_id:1")
+    return "\n".join(lines) + "\n"
+
+
+def _fake_getprop(model="SM-G965F"):
+    """Build fake `adb shell getprop ro.product.model` stdout."""
+    return model + "\n"
+
+
+class TestDiscoverDevicesPathA:
+    """Path A: phone with pre-set adb_serial."""
+
+    @patch("core.adb.subprocess")
+    def test_preset_serial_connected(self, mock_adb_subprocess):
+        """Phone with adb_serial set + serial connected -> ADBController created."""
+        from main_discovery import discover_devices
+        from core.adb import ADBController
+
+        phones = [_full_phone_config(id=1, adb_serial="ABC123", model="SM-G965F")]
+        mock_run = _make_mock_run()
+
+        with patch("main_discovery.subprocess") as mock_sp, \
+             patch("main_discovery.PHONES", phones), \
+             patch.object(ADBController, '_run', mock_run):
+            # adb devices returns ABC123
+            mock_sp.run.return_value = MagicMock(
+                stdout=_fake_adb_devices_output("ABC123"),
+                returncode=0
+            )
+            result = discover_devices()
+
+        assert 1 in result
+        assert result[1].serial == "ABC123"
+
+    @patch("core.adb.subprocess")
+    def test_preset_serial_not_connected(self, mock_adb_subprocess):
+        """Phone with adb_serial set + serial NOT connected -> skipped."""
+        from main_discovery import discover_devices
+
+        phones = [_full_phone_config(id=1, adb_serial="ABC123")]
+
+        with patch("main_discovery.subprocess") as mock_sp, \
+             patch("main_discovery.PHONES", phones):
+            mock_sp.run.return_value = MagicMock(
+                stdout=_fake_adb_devices_output("OTHER999"),
+                returncode=0
+            )
+            result = discover_devices()
+
+        assert 1 not in result
+
+
+class TestDiscoverDevicesPathB:
+    """Path B: phone with adb_serial=None, model matching."""
+
+    @patch("core.adb.subprocess")
+    def test_model_matching(self, mock_adb_subprocess):
+        """Phone with adb_serial=None + model set -> matched via getprop."""
+        from main_discovery import discover_devices
+        from core.adb import ADBController
+
+        phones = [_full_phone_config(id=1, adb_serial=None, model="SM-G965F")]
+        mock_run = _make_mock_run()
+
+        with patch("main_discovery.subprocess") as mock_sp, \
+             patch("main_discovery.PHONES", phones), \
+             patch.object(ADBController, '_run', mock_run):
+            def fake_subprocess_run(cmd, **kwargs):
+                cmd_str = " ".join(cmd)
+                if "devices" in cmd_str:
+                    return MagicMock(stdout=_fake_adb_devices_output("SER001"), returncode=0)
+                if "getprop" in cmd_str:
+                    return MagicMock(stdout=_fake_getprop("SM-G965F"), returncode=0)
+                return MagicMock(stdout="", returncode=0)
+            mock_sp.run.side_effect = fake_subprocess_run
+            result = discover_devices()
+
+        assert 1 in result
+
+
+class TestDiscoverDevicesPathC:
+    """Path C: phone with adb_serial=None + model unknown."""
+
+    @patch("core.adb.subprocess")
+    def test_no_serial_no_model_skipped(self, mock_adb_subprocess):
+        """Phone with no serial and unknown model -> skipped."""
+        from main_discovery import discover_devices
+
+        phones = [_minimal_phone_config(id=5, adb_serial=None, model="unknown")]
+
+        with patch("main_discovery.subprocess") as mock_sp, \
+             patch("main_discovery.PHONES", phones):
+            mock_sp.run.return_value = MagicMock(
+                stdout=_fake_adb_devices_output("SER001"),
+                returncode=0
+            )
+            result = discover_devices()
+
+        assert 5 not in result
+
+
+class TestDiscoverDevicesErrorHandling:
+    """DeviceConfigError handling in discover_devices."""
+
+    @patch("core.adb.subprocess")
+    def test_device_config_error_skips_phone(self, mock_adb_subprocess):
+        """ADBController raises DeviceConfigError -> phone skipped, others succeed."""
+        from main_discovery import discover_devices
+        from core.adb import ADBController, DeviceConfigError
+
+        phones = [
+            _full_phone_config(id=1, adb_serial="SER1"),
+            _full_phone_config(id=2, adb_serial="SER2"),
+        ]
+        call_count = [0]
+        def mock_init(self, serial, phone_config):
+            call_count[0] += 1
+            self.serial = serial
+            self.phone = phone_config
+            if serial == "SER1":
+                raise DeviceConfigError("Cannot determine screen size")
+            # Normal init for SER2
+            self.screen_w = phone_config["screen_w"]
+            self.screen_h = phone_config["screen_h"]
+            self._density = phone_config.get("density", 280)
+
+        with patch("main_discovery.subprocess") as mock_sp, \
+             patch("main_discovery.PHONES", phones), \
+             patch.object(ADBController, '__init__', mock_init):
+            mock_sp.run.return_value = MagicMock(
+                stdout=_fake_adb_devices_output("SER1", "SER2"),
+                returncode=0
+            )
+            result = discover_devices()
+
+        assert 1 not in result  # failed
+        assert 2 in result      # succeeded
+
+    @patch("core.adb.subprocess")
+    def test_empty_adb_devices(self, mock_adb_subprocess):
+        """No devices connected -> empty result."""
+        from main_discovery import discover_devices
+
+        with patch("main_discovery.subprocess") as mock_sp, \
+             patch("main_discovery.PHONES", [_full_phone_config(id=1, adb_serial="SER1")]):
+            mock_sp.run.return_value = MagicMock(
+                stdout="List of devices attached\n\n",
+                returncode=0
+            )
+            result = discover_devices()
+
+        assert len(result) == 0
+
+
 class TestPhonesNormalized:
     """Verify that the PHONES list is normalized at module level."""
 
