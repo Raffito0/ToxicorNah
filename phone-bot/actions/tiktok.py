@@ -934,19 +934,21 @@ class TikTokBot:
         sidebar = find_sidebar_icons(screenshot, self.adb.screen_w, self.adb.screen_h)
         return sidebar, screenshot
 
-    def _is_pymk_post(self, screenshot: bytes | None = None) -> bool:
-        """Return True if the current FYP item is a 'People You May Know' carousel.
+    def _should_skip_content(self, screenshot: bytes | None = None) -> bool:
+        """Generic AI check: should the bot scroll past this content?
 
-        Call ONLY when find_sidebar_icons() returned None AND the LIVE ring pixel
-        check was also negative.  Takes its own screenshot if none is provided.
-        Conservative: ambiguous or empty Gemini responses -> True (scroll past).
+        Handles ANY non-standard FYP content: PYMK, LIVE previews, ads,
+        shopping posts, suggestion cards, and future unknown types.
+        One Gemini call instead of N type-specific checks.
+
+        Returns True = SKIP (scroll past), False = WATCH (safe to engage).
         """
         if screenshot is None:
             screenshot = self.adb.screenshot_bytes()
         if not screenshot:
-            return False
+            return True  # no screenshot = skip (safe default)
         from ..core import gemini as _gem
-        return _gem.is_pymk_post(screenshot)
+        return _gem.should_skip_content(screenshot)
 
     # --- Health check during non-FYP tab scroll ----------------------------
 
@@ -3710,6 +3712,52 @@ JSON only, no markdown."""
             y_max_pct=0.20)
         time.sleep(self.human.timing("t_tab_switch"))
 
+    def _ensure_search_tab(self, target_tab: str) -> bool:
+        """Verify the specified search results tab is active (underlined/bold).
+        If not, tap the tab label via Gemini bbox and verify.
+        Called after BACK from video — TikTok resets tab to 'Top'.
+
+        Returns True if target tab confirmed active, False if not.
+        """
+        shot = self.adb.screenshot_bytes()
+        if not shot:
+            log.warning("_ensure_search_tab: screenshot failed")
+            return False
+
+        prompt = (
+            "In this TikTok search results page, which tab is currently "
+            "active (underlined or bold)? Choose from: Top, Videos, Users, "
+            "Live, or None. Reply with exactly one word."
+        )
+        result = gemini._call_vision(shot, prompt, max_tokens=10,
+                                     temperature=0.1, timeout=6.0)
+        active = (result or "").strip().lower().split()[0] if result else ""
+        log.info("_ensure_search_tab: active tab is '%s', need '%s'",
+                 active, target_tab.lower())
+
+        if active == target_tab.lower():
+            return True
+
+        # Tab mismatch — tap the target tab
+        log.info("_ensure_search_tab: tapping '%s' tab", target_tab)
+        self._find_and_tap(
+            'the "%s" tab text in the horizontal search filter bar '
+            '(Top/Videos/Users/Live)' % target_tab,
+            y_max_pct=0.20)
+        time.sleep(self.human.timing("t_tab_switch"))
+
+        # Verify
+        shot2 = self.adb.screenshot_bytes()
+        if shot2:
+            result2 = gemini._call_vision(shot2, prompt, max_tokens=10,
+                                          temperature=0.1, timeout=6.0)
+            active2 = (result2 or "").strip().lower().split()[0] if result2 else ""
+            if active2 == target_tab.lower():
+                log.info("_ensure_search_tab: '%s' confirmed after tap", target_tab)
+                return True
+        log.warning("_ensure_search_tab: '%s' not confirmed after tap", target_tab)
+        return False
+
     async def search_explore_session(self, niche_keywords: list = None, entry: str = "search_icon"):
         """Human-like search mini-session. Every decision driven by
         personality + boredom + mood -- zero fixed probabilities.
@@ -3926,6 +3974,8 @@ JSON only, no markdown."""
                 # Back from video to results grid
                 self.adb.press_back()
                 await asyncio.sleep(self.human.timing("t_search_scroll_pause"))
+                self._ensure_search_tab("Videos")
+                cached_thumbnails = []  # invalidate — layout may have changed
 
             # Slight boredom relief from active browsing
             self.human.boredom.on_scroll(True if found_interesting else None)
@@ -3983,6 +4033,8 @@ JSON only, no markdown."""
                     self.adb.press_back()
                     await asyncio.sleep(
                         self.human.timing("t_search_scroll_pause"))
+                    self._ensure_search_tab("Videos")
+                    cached2 = []  # invalidate — layout may have changed
                     videos_watched += 1
 
         self.human._session_stats["searches_done"] = \
@@ -5070,17 +5122,13 @@ JSON only, no markdown."""
             elif action in ("like", "comment", "follow", "profile_visit"):
                 # Before any engagement, check if this is a normal FYP video
                 # Live previews have no sidebar — skip all engagement, just scroll.
-                # Capture screenshot once and reuse it for the PYMK vision check.
+                # Capture screenshot once and reuse for content check.
                 _sidebar, _engagement_shot = self._get_sidebar_with_shot()
                 if _sidebar is None:
-                    # Not a normal video (live preview, ad, PYMK carousel, etc.)
-                    # Step 1 (section-06): insert LIVE ring pixel check here — MUST run
-                    # BEFORE the PYMK check so LIVE posts aren't passed to Gemini.
-                    #
-                    # Step 2: PYMK carousel check — must scroll past immediately,
-                    # never tap anything (Follow button is exposed on PYMK posts).
-                    if self._is_pymk_post(_engagement_shot):
-                        log.info("FYP: PYMK post detected, scrolling past")
+                    # No sidebar = non-standard content. Generic AI decides: WATCH or SKIP.
+                    # Handles PYMK, LIVE previews, ads, shopping, and any future unknowns.
+                    if self._should_skip_content(_engagement_shot):
+                        log.info("FYP: non-standard content detected, scrolling past")
                         time.sleep(self.human.timing("t_live_skip_pause"))
                         self.scroll_fyp()
                         continue

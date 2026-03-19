@@ -640,32 +640,36 @@ Answer ONLY "yes" or "no". Nothing else."""
     return is_prof
 
 
-def is_pymk_post(screenshot_bytes: bytes) -> bool:
-    """Check if the current FYP item is a 'People You May Know' suggestion carousel.
+def should_skip_content(screenshot_bytes: bytes) -> bool:
+    """Generic AI check: should the bot scroll past this content?
 
-    Called when find_sidebar_icons() returns None and the LIVE ring pixel check
-    is also negative. Uses a single yes/no Gemini call (temp=0.1, max_tokens=5).
+    Called when sidebar scan returns None (non-standard FYP content) OR
+    periodically as a safety check. Uses ONE Gemini call to handle ANY
+    content type — PYMK, ads, LIVE previews, shopping, or future unknowns.
 
-    Conservative default: ambiguous or empty responses return True (scroll past).
-    Never returns True for LIVE streams, ads, or regular videos.
+    Returns True = SKIP (scroll past), False = WATCH (safe to engage).
+    Conservative: ambiguous/empty = SKIP (safe default).
     """
     prompt = (
-        "Is this a 'People you may know' post -- a photo carousel showing multiple "
-        "profile cards with a Follow button for each person? "
-        "Answer ONLY 'yes' or 'no'. "
-        "Do NOT answer yes for: TikTok LIVE streams, video ads, regular videos, "
-        "or any other content type."
+        "Look at this TikTok screen. Is this a normal video I should watch "
+        "and engage with? Or is this non-video content I should scroll past?\n\n"
+        "WATCH: normal video playing, photo slideshow, music clip, any standard post\n"
+        "SKIP: 'People you may know' suggestions, live stream preview with "
+        "'Tap to watch LIVE', shopping/product ads, Follow suggestion cards, "
+        "promotions, any overlay with exposed Follow/Buy buttons, or anything "
+        "that is NOT a normal TikTok post\n\n"
+        "Answer EXACTLY one word: WATCH or SKIP"
     )
     result = _call_vision(
         screenshot_bytes, prompt,
         max_tokens=5, temperature=0.1, timeout=6.0,
     )
-    answer = (result or "").strip().lower().replace('"', '').replace("'", "")
-    if answer.startswith("n"):
-        log.info("IS_PYMK: False (raw: %s)", answer)
-        return False
-    # "yes", ambiguous, empty, or parse failure -> scroll past (conservative)
-    log.info("IS_PYMK: True (raw: %s)", answer)
+    answer = (result or "").strip().lower()
+    if answer.startswith("watch"):
+        log.info("CONTENT_CHECK: WATCH (raw: %s)", answer)
+        return False  # don't skip — safe to engage
+    # "skip", ambiguous, empty, or parse failure -> skip (conservative safe default)
+    log.info("CONTENT_CHECK: SKIP (raw: %s)", answer)
     return True
 
 

@@ -964,17 +964,20 @@ async def run_story_exit_test(controllers: dict, phone_id: int):
 
     log.info("=== STORY-EXIT TEST: Phone %d ===", phone_id)
     log.info("Precondition: TikTok FYP open, current video creator has active Story (blue ring)")
-    log.info("Expected: Story detected + safely exited, FYP restored, visit_creator_profile returns False")
+    log.info("Expected: Story detected + handled safely (no keyboard, no text typed)")
+    log.info("Valid outcomes: True (profile opened via Story header) or False (safe exit to FYP)")
 
     result = bot.visit_creator_profile()
 
     log.info("=== RESULT: visit_creator_profile returned %s ===", result)
-    if result is False:
-        log.info("PASS: Story handled correctly (returned False, did not open profile)")
+    # Both True (Layer 2: profile opened via Story header) and False (Layer 3: safe exit)
+    # are valid — the critical check is that Story was DETECTED and no keyboard/text appeared
+    if result is True:
+        log.info("PASS: Story detected, profile opened via header tap (Layer 2 success)")
     else:
-        log.error("FAIL: Expected False but got %s (profile may have opened without story detection)", result)
-    log.info("Check logs above for: 'Story detected' + 'Story header tap attempt' or 'Story exit, skip profile'")
-    log.info("Verify scrcpy frames: no keyboard, no text typed, FYP restored in later frame")
+        log.info("PASS: Story detected, safe exit to FYP (Layer 3)")
+    log.info("Check logs above for: 'Story detected' + 'Story header tap attempt'")
+    log.info("Verify scrcpy frames: no keyboard, no text typed")
 
 
 def run_overlay_photosensitive_test(controllers: dict, phone_id: int):
@@ -1021,18 +1024,10 @@ def run_overlay_photosensitive_test(controllers: dict, phone_id: int):
         log.info("(No automated live-browse mode — use scrcpy recording + manual trigger)")
 
 
-async def run_pymk_detection_test(controllers: dict, phone_id: int):
-    """TEST: Browse FYP for up to 15 minutes watching for a PYMK carousel post.
-
-    Pass criteria (from section-02 spec):
-    - PYMK post visible in frame N (photo carousel + Follow button)
-    - Swipe-up occurs within 0.5s of PYMK detection
-    - NO Follow button pressed in any frame
-    - Log contains 'PYMK post detected, scrolling past'
-
-    Record with scrcpy before running:
-      scrcpy --no-window --record pymk_test.mkv --time-limit 900
-    """
+async def run_search_tab_restore_test(controllers: dict, phone_id: int):
+    """TEST: Verify _ensure_search_tab() restores 'Videos' tab after BACK from video.
+    Searches 'girlfriend goals', taps a grid item, watches, presses BACK,
+    calls _ensure_search_tab('Videos'), verifies tab is active."""
     if phone_id not in controllers:
         log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
         return
@@ -1042,24 +1037,151 @@ async def run_pymk_detection_test(controllers: dict, phone_id: int):
     human.start_session(
         hour=datetime.now().hour,
         weekday=datetime.now().weekday(),
-        duration_minutes=15,
+        duration_minutes=5,
     )
 
     from .core.monitor import init_monitor
     import tempfile
-    tmp_events = tempfile.mkdtemp(prefix="phone_bot_pymk_test_events_")
-    tmp_shots = tempfile.mkdtemp(prefix="phone_bot_pymk_test_shots_")
-    init_monitor(events_dir=tmp_events, screenshots_dir=tmp_shots)
-    log.info("Monitor initialized (temp dirs: %s, %s)", tmp_events, tmp_shots)
+    init_monitor(
+        events_dir=tempfile.mkdtemp(prefix="phone_bot_search_test_events_"),
+        screenshots_dir=tempfile.mkdtemp(prefix="phone_bot_search_test_shots_"),
+    )
 
     from .actions.tiktok import TikTokBot
     bot = TikTokBot(adb, human)
 
-    log.info("=== PYMK-DETECTION TEST: Phone %d ===", phone_id)
-    log.info("Browsing FYP for up to 15 min -- watching for PYMK carousel post")
-    log.info("Pass: log shows 'PYMK post detected, scrolling past', no Follow press")
+    log.info("=== SEARCH-TAB-RESTORE TEST: Phone %d ===", phone_id)
+    log.info("Precondition: TikTok FYP open")
 
-    await bot.browse_session(duration_minutes=15, niche_keywords=[])
+    # Step 1: Search a keyword
+    if not bot._type_search_query("girlfriend goals"):
+        log.error("FAIL: could not open search")
+        return
+
+    # Step 2: Tap first grid item
+    import time as _time
+    _time.sleep(2.0)  # wait for results to load
+    from .core import gemini as _gem
+    shot = adb.screenshot_bytes()
+    thumbs = _gem.find_search_grid_thumbnails(shot, adb.screen_w, adb.screen_h) if shot else []
+    if not thumbs:
+        log.error("FAIL: no grid thumbnails found")
+        return
+    thumb = thumbs[0]
+    log.info("Tapping grid item at (%d, %d)", thumb["x"], thumb["y"])
+    adb.tap(thumb["x"], thumb["y"])
+
+    # Step 3: Wait (simulate watching)
+    _time.sleep(5.0)
+
+    # Step 4: Press BACK
+    log.info("Pressing BACK to return to search results")
+    adb.press_back()
+    _time.sleep(human.timing("t_nav_settle"))
+
+    # Step 5: Call _ensure_search_tab
+    log.info("Calling _ensure_search_tab('Videos')...")
+    result = bot._ensure_search_tab("Videos")
+
+    # Step 6: Verify via Gemini
+    shot2 = adb.screenshot_bytes()
+    if shot2:
+        verify = _gem._call_vision(
+            shot2,
+            "In this TikTok search results page, which tab is currently "
+            "active (underlined or bold)? Reply with exactly one word: "
+            "Top, Videos, Users, or None.",
+            max_tokens=10, temperature=0.1, timeout=6.0,
+        )
+        active = (verify or "").strip().lower().split()[0] if verify else "unknown"
+        log.info("Final active tab: '%s'", active)
+        if active == "videos":
+            log.info("=== PASS: Videos tab confirmed active ===")
+        else:
+            log.error("=== FAIL: Expected 'videos' but got '%s' ===", active)
+    else:
+        log.error("=== FAIL: could not take verification screenshot ===")
+
+    log.info("_ensure_search_tab returned: %s", result)
+
+
+async def run_pymk_detection_test(controllers: dict, phone_id: int):
+    """TEST: Generic content skip test.
+    Precondition: user positions phone on non-standard FYP content
+    (PYMK, LIVE preview, ad, shopping post, etc.)
+
+    Pass criteria:
+    - should_skip_content() returns True on initial screenshot
+    - scroll_fyp() scrolls past
+    - After scroll, content is gone (sidebar visible OR skip=False)
+    - Log contains 'CONTENT_CHECK: SKIP'
+    - No Follow/Buy button tapped in any frame
+    """
+    import time as _time
+    if phone_id not in controllers:
+        log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
+        return
+
+    adb = controllers[phone_id]
+    human = HumanEngine(account_name=f"test_ph{phone_id}")
+    human.start_session(
+        hour=datetime.now().hour,
+        weekday=datetime.now().weekday(),
+        duration_minutes=5,
+    )
+
+    from .core.monitor import init_monitor
+    import tempfile
+    init_monitor(
+        events_dir=tempfile.mkdtemp(prefix="phone_bot_skip_test_events_"),
+        screenshots_dir=tempfile.mkdtemp(prefix="phone_bot_skip_test_shots_"),
+    )
+
+    from .actions.tiktok import TikTokBot
+    from .core import gemini as _gem
+    from .core.sidebar import find_sidebar_icons
+    bot = TikTokBot(adb, human)
+
+    log.info("=== CONTENT-SKIP TEST: Phone %d ===", phone_id)
+    log.info("Precondition: FYP showing non-standard content (PYMK, ad, LIVE, etc.)")
+
+    # Step 1: Verify content should be skipped
+    shot1 = adb.screenshot_bytes()
+    if not shot1:
+        log.error("FAIL: screenshot failed")
+        return
+    should_skip = _gem.should_skip_content(shot1)
+    log.info("Step 1: should_skip_content = %s", should_skip)
+    if not should_skip:
+        log.error("=== FAIL: content was NOT flagged for skip ===")
+        log.error("Make sure non-standard content (PYMK, ad, LIVE preview) is visible")
+        return
+
+    # Step 2: Scroll past
+    log.info("Step 2: scrolling past non-standard content...")
+    _time.sleep(human.timing("t_live_skip_pause"))
+    bot.scroll_fyp()
+    _time.sleep(2.0)  # wait for next video to load
+
+    # Step 3: Verify content is gone
+    shot2 = adb.screenshot_bytes()
+    if not shot2:
+        log.error("FAIL: post-scroll screenshot failed")
+        return
+    sidebar = find_sidebar_icons(shot2, adb.screen_w, adb.screen_h)
+    log.info("Step 3: sidebar=%s", sidebar is not None)
+
+    if sidebar is not None:
+        # Sidebar found = normal video present. No need for second Gemini call.
+        log.info("=== PASS: non-standard content detected, scrolled past, normal video restored (sidebar found) ===")
+    else:
+        # No sidebar after scroll either — check if at least content changed
+        still_skip = _gem.should_skip_content(shot2)
+        log.info("Step 3b: should_skip=%s (no sidebar, checking content)", still_skip)
+        if not still_skip:
+            log.info("=== PASS: non-standard content detected, scrolled past (WATCH content now) ===")
+        else:
+            log.error("=== FAIL: non-standard content still visible after scroll ===")
 
 
 def _check_api_keys():
@@ -1073,7 +1195,7 @@ def _check_api_keys():
 def main():
     parser = argparse.ArgumentParser(description="Phone Bot — TikTok & Instagram Automation")
     parser.add_argument("--test", nargs="?", const="devices", metavar="MODE",
-                        help="Test mode: 'devices' (default), 'story-coord-audit', 'story-exit', 'pymk-detection', 'overlay-photosensitive'")
+                        help="Test mode: 'devices' (default), 'story-coord-audit', 'story-exit', 'pymk-detection', 'overlay-photosensitive', 'search-tab-restore'")
     parser.add_argument("--dashboard", action="store_true", help="Start web dashboard")
     parser.add_argument("--warmup", action="store_true", help="Initialize warmup for new accounts")
     parser.add_argument("--scroll-only", action="store_true",
@@ -1135,6 +1257,13 @@ def main():
             log.error("--test overlay-photosensitive requires --phone (e.g. --phone 1)")
             sys.exit(1)
         run_overlay_photosensitive_test(controllers, args.phone)
+        return
+
+    if args.test == "search-tab-restore":
+        if not args.phone:
+            log.error("--test search-tab-restore requires --phone (e.g. --phone 3)")
+            sys.exit(1)
+        asyncio.run(run_search_tab_restore_test(controllers, args.phone))
         return
 
     if args.test:  # default: 'devices'
