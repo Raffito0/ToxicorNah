@@ -893,6 +893,87 @@ def init_warmup(controllers: dict[int, ADBController], phone_filter: int = None)
     log.info("Warmup initialized! Run 'python main.py' daily for 7 days.")
 
 
+def run_story_coord_audit():
+    """TEST: Static audit of story_* coords — no phone needed.
+    Verifies that all story coords stay below y=80% on all target phone screen heights."""
+    from .core.coords import get_coords as _get_coords
+
+    screen_specs = [
+        ("Samsung S9",  1080, 2220),
+        ("Samsung S22", 1080, 2340),
+        ("Motorola",    720,  1600),
+    ]
+    story_coord_names = ["story_avatar", "story_tap_next", "story_tap_prev", "story_close"]
+    max_y_pct = 0.80
+    failures = []
+
+    log.info("=== STORY COORD AUDIT ===")
+    for name in story_coord_names:
+        parts = []
+        failed = False
+        for phone_name, w, h in screen_specs:
+            try:
+                _, y = _get_coords("tiktok", name, screen_w=w, screen_h=h)
+            except Exception as e:
+                log.error("  %s: MISSING coord '%s': %s", phone_name, name, e)
+                failed = True
+                continue
+            y_pct = y / h
+            ok = y_pct <= max_y_pct
+            parts.append(f"{phone_name}={y_pct:.2%}({'OK' if ok else 'FAIL'})")
+            if not ok:
+                failed = True
+                failures.append(
+                    f"FAIL: {name} y={y_pct:.1%} on {phone_name} (h={h}) exceeds {max_y_pct:.0%} limit"
+                )
+        status = "PASS" if not failed else "FAIL"
+        log.info("  [%s] %s: %s", status, name, "  ".join(parts))
+
+    log.info("=== AUDIT RESULT: %d failure(s) ===", len(failures))
+    for f in failures:
+        log.error("  %s", f)
+    if not failures:
+        log.info("  All story coords pass y < 80%% invariant on all phones.")
+
+
+async def run_story_exit_test(controllers: dict, phone_id: int):
+    """TEST: Call visit_creator_profile() once on a phone where the current FYP
+    contains a creator with an active Story (blue ring on avatar).
+    Verifies: Story detected, safe exit, FYP restored, no keyboard opened."""
+    if phone_id not in controllers:
+        log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
+        return
+
+    adb = controllers[phone_id]
+    human = HumanEngine(account_name=f"test_ph{phone_id}")
+    human.start_session(
+        hour=datetime.now().hour,
+        weekday=datetime.now().weekday(),
+        duration_minutes=5,
+    )
+
+    from .core.monitor import init_monitor
+    import tempfile
+    tmp_events = tempfile.mkdtemp(prefix="phone_bot_story_test_events_")
+    tmp_shots = tempfile.mkdtemp(prefix="phone_bot_story_test_shots_")
+    init_monitor(events_dir=tmp_events, screenshots_dir=tmp_shots)
+    log.info("Monitor initialized (temp dirs: %s, %s)", tmp_events, tmp_shots)
+
+    from .actions.tiktok import TikTokBot
+    bot = TikTokBot(adb, human)
+
+    log.info("=== STORY-EXIT TEST: Phone %d ===", phone_id)
+    log.info("Precondition: TikTok FYP must be open, current video creator must have active Story (blue ring)")
+    log.info("Expected: Story detected + safely exited, FYP restored, visit_creator_profile returns False")
+
+    result = bot.visit_creator_profile()
+
+    log.info("=== RESULT: visit_creator_profile returned %s ===", result)
+    log.info("Expected: False (Story handled, profile not opened)")
+    log.info("Check logs above for: 'Story detected' + 'Story header tap attempt' or 'Story exit, skip profile'")
+    log.info("Verify scrcpy frames: no keyboard, no text typed, FYP restored in later frame")
+
+
 def _check_api_keys():
     """Warn at startup if critical API keys are missing."""
     if not GEMINI.get("api_key"):
@@ -903,7 +984,8 @@ def _check_api_keys():
 
 def main():
     parser = argparse.ArgumentParser(description="Phone Bot — TikTok & Instagram Automation")
-    parser.add_argument("--test", action="store_true", help="Test device connections")
+    parser.add_argument("--test", nargs="?", const="devices", metavar="MODE",
+                        help="Test mode: 'devices' (default), 'story-coord-audit', 'story-exit'")
     parser.add_argument("--dashboard", action="store_true", help="Start web dashboard")
     parser.add_argument("--warmup", action="store_true", help="Initialize warmup for new accounts")
     parser.add_argument("--scroll-only", action="store_true",
@@ -924,9 +1006,14 @@ def main():
     args = parser.parse_args()
 
     # Verbose logging in TEST_MODE
-    if TEST_MODE or args.scroll_only or args.browse_test or args.action_test:
+    if TEST_MODE or args.scroll_only or args.browse_test or args.action_test or args.test:
         logging.getLogger().setLevel(logging.DEBUG)
         log.info("TEST MODE active — proxy disabled, verbose logging, timezone Europe/Rome")
+
+    # story-coord-audit is static — runs BEFORE device discovery (no phone needed)
+    if args.test == "story-coord-audit":
+        run_story_coord_audit()
+        return
 
     _check_api_keys()
     log.info("Discovering connected devices...")
@@ -941,7 +1028,14 @@ def main():
     # WiFi off on inactive phones is the primary defense against background IP leakage.
     # No background restriction needed — WiFi off = zero network = zero risk.
 
-    if args.test:
+    if args.test == "story-exit":
+        if not args.phone:
+            log.error("--test story-exit requires --phone (e.g. --phone 1)")
+            sys.exit(1)
+        asyncio.run(run_story_exit_test(controllers, args.phone))
+        return
+
+    if args.test:  # default: 'devices'
         test_devices(controllers)
         return
 

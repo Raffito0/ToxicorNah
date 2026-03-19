@@ -2717,18 +2717,47 @@ JSON only, no markdown."""
         time.sleep(self.human.timing("t_nav_settle"))
         self._ensure_on_app()
 
+    def _exit_story_safely(self) -> None:
+        """Exit Story view after failed Story header navigation.
+
+        Presses BACK and verifies FYP is restored.
+        Called ONLY from visit_creator_profile() when Story navigation fails.
+        Does NOT replace Story handling in _return_to_fyp() (which uses story_close X tap).
+        INVARIANT: Does not tap any position while in Story view — uses BACK keyevent only.
+        Escalates to _return_to_fyp() if BACK alone does not restore FYP.
+        """
+        log.info("_exit_story_safely: pressing BACK to exit Story")
+        self.adb.press_back()
+        vr = wait_and_verify(
+            adb=self.adb, human=self.human,
+            verify_fn=lambda shot: self._quick_verify_fyp_from_shot(shot),
+            action_name="story_safe_exit",
+            first_wait="t_back_verify",
+            is_slow_verify=False,
+            max_attempts=2,
+        )
+        if vr.success:
+            log.info("_exit_story_safely: FYP restored")
+        else:
+            log.warning("_exit_story_safely: FYP not confirmed after BACK, escalating")
+            self._return_to_fyp()
+
     def visit_creator_profile(self) -> bool:
         """Tap on creator's avatar to visit their profile.
         Uses Gemini bounding box to find the EXACT avatar position first (varies per video).
-        Handles Story circle: if avatar has a blue Story ring, tapping opens the Story
-        instead of the profile. Detects this and taps creator avatar in Story header
-        to enter profile directly from Story.
-        Returns False if navigation failed (caller should abort)."""
+
+        Story handling (3-layer fix):
+        - Layer 1: After profile verify fails, classify screen for Story even if fingerprint unchanged
+        - Layer 2: If Story confirmed, tap story_avatar header once (+-5px jitter, y < 80% guard)
+        - Layer 3: If header tap also fails, call _exit_story_safely(), return False immediately
+
+        INVARIANT: Never tap y > 0.80 * screen_h while in Story view.
+        Returns False if navigation failed (caller should abort).
+        """
         for attempt in range(2):
             log.info("NAV: visit_creator_profile (bbox + tap, attempt %d)", attempt + 1)
 
             # Fingerprint BEFORE tap (to detect if screen changed)
-            from ..core import page_state
             pre_shot = self.adb.screenshot_bytes()
             pre_fp = page_state.screen_fingerprint(pre_shot) if pre_shot else None
 
@@ -2779,29 +2808,33 @@ JSON only, no markdown."""
                 self._log_action("profile_visit")
                 return True
 
-            # Profile verify failed — check what we're on
+            # Profile verify failed — Layer 1: always classify for Story regardless of fingerprint diff.
+            # Stories have similar brightness to FYP videos, so fingerprint comparison is unreliable.
             screenshot = vr.screenshot
             if screenshot:
-                # Step 2: detect if screen changed (fingerprint comparison)
-                # Gemini can't reliably classify Stories — they look like FYP to it.
-                # But fingerprint tells us if SOMETHING opened.
                 post_fp = page_state.screen_fingerprint(screenshot)
-                screen_changed = False
                 if pre_fp and post_fp:
                     diff = sum(abs(a - b) for a, b in zip(pre_fp, post_fp)) / len(pre_fp)
-                    screen_changed = diff > 18
-                    log.debug("visit_creator_profile: fingerprint diff=%.1f, screen_changed=%s", diff, screen_changed)
+                    log.debug("visit_creator_profile: fingerprint diff=%.1f", diff)
 
-                # Step 3: screen changed but not profile — classify what opened
-                if screen_changed:
-                    classification = gemini.classify_screen_with_reference(screenshot)
-                    if classification == "story":
-                        # Story confirmed — tap Story header avatar at fixed coords
-                        log.warning("Story confirmed — tapping Story header avatar")
-                        sx, sy = self.adb.get_coord("tiktok", "story_avatar")
+                # Always classify — do not gate on screen_changed
+                classification = gemini.classify_screen_with_reference(screenshot)
+                log.info("visit_creator_profile: screen classified as '%s'", classification)
+
+                if classification == "story":
+                    # Layer 2: Story confirmed — tap Story header avatar once with invariant guard
+                    log.warning("visit_creator_profile: Story detected, attempting header tap")
+                    sx, sy = self.adb.get_coord("tiktok", "story_avatar")
+                    # Invariant guard: story_avatar must be above 80% of screen
+                    if sy >= int(self.adb.screen_h * 0.80):
+                        log.critical(
+                            "visit_creator_profile: story_avatar y=%d exceeds 0.80*screen_h=%d — SKIP TAP",
+                            sy, int(self.adb.screen_h * 0.80))
+                    else:
                         # Minimal jitter — Story avatar is tiny (~30px), standard jitter misses it
                         sx += random.randint(-5, 5)
                         sy += random.randint(-5, 5)
+                        log.info("visit_creator_profile: Story header tap attempt at (%d, %d)", sx, sy)
                         self.adb.tap(sx, sy)
                         vr2 = wait_and_verify(
                             adb=self.adb, human=self.human,
@@ -2817,23 +2850,28 @@ JSON only, no markdown."""
                             self._log_action("profile_visit", metadata={"via": "story_header"})
                             return True
                         log.warning("Story header tap didn't reach profile")
-                    else:
-                        log.warning("Screen changed to %s (not Story) — pressing BACK", classification)
-                    # Recovery — BACK to FYP
-                    self.adb.press_back()
-                    time.sleep(self.human.timing("t_nav_settle"))
-                    if not self._verify_page("fyp"):
-                        self._return_to_fyp()
-                    if attempt == 0:
-                        time.sleep(self.human.timing("t_tap_gap"))
-                        continue
-                    break
 
-                # Step 4: screen didn't change — tap didn't work, retry
-                log.warning("Avatar tap did nothing (screen unchanged), retrying")
+                    # Layer 3: Story confirmed but couldn't reach profile — safe exit, no outer retry
+                    log.info("visit_creator_profile: Story exit, skip profile")
+                    self._exit_story_safely()
+                    return False
+
+                # Non-story classification — press BACK and optionally retry
+                log.warning("visit_creator_profile: screen changed to '%s' — pressing BACK", classification)
+                self.adb.press_back()
+                time.sleep(self.human.timing("t_nav_settle"))
+                if not self._verify_page("fyp"):
+                    self._return_to_fyp()
                 if attempt == 0:
                     time.sleep(self.human.timing("t_tap_gap"))
                     continue
+                break
+
+            # No screenshot from verify — tap probably did nothing, retry once
+            log.warning("Avatar tap produced no screenshot (screen unchanged?), retrying")
+            if attempt == 0:
+                time.sleep(self.human.timing("t_tap_gap"))
+                continue
 
         log.warning("visit_creator_profile: failed after 2 attempts")
         return False
