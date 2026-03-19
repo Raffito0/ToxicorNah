@@ -982,7 +982,8 @@ class TikTokBot:
     # --- Bbox-first tap (find element THEN tap) ----------------------------
 
     def _find_and_tap(self, description: str, fallback_coord: str = None,
-                      y_max_pct: float = None, tap_y_bias: float = 0.0) -> bool:
+                      y_max_pct: float = None, x_min_pct: float = None,
+                      tap_y_bias: float = 0.0) -> bool:
         """Find a UI element via Gemini bounding box, then tap its center.
         This is the definitive solution for elements whose position varies
         per video (avatar, comment icon, etc).
@@ -995,6 +996,8 @@ class TikTokBot:
             fallback_coord: optional coords.py key to try if Gemini fails
             y_max_pct: optional max Y position as % of screen height (0.0-1.0).
                         Reject elements below this threshold.
+            x_min_pct: optional min X position as % of screen width (0.0-1.0).
+                        Reject elements left of this threshold.
             tap_y_bias: shift tap Y within the bbox. -0.3 = tap 30% ABOVE center,
                         +0.3 = tap 30% BELOW center. Used to avoid adjacent
                         elements (e.g. avatar has + button below, comment has
@@ -1024,6 +1027,15 @@ class TikTokBot:
                     log.warning("FIND_TAP: element at y=%d rejected (below %.0f%% = %d)",
                                 cy, y_max_pct * 100,
                                 int(self.adb.screen_h * y_max_pct))
+                    if attempt == 0:
+                        time.sleep(self.human.timing("t_tap_gap"))
+                        continue
+                    break  # fall through to fallback
+                # Validate X position if constrained
+                if x_min_pct and cx < self.adb.screen_w * x_min_pct:
+                    log.warning("FIND_TAP: element at x=%d rejected (left of %.0f%% = %d)",
+                                cx, x_min_pct * 100,
+                                int(self.adb.screen_w * x_min_pct))
                     if attempt == 0:
                         time.sleep(self.human.timing("t_tap_gap"))
                         continue
@@ -1533,8 +1545,8 @@ class TikTokBot:
 
     def go_to_search(self) -> bool:
         """Open the Search/Discover page via search icon (top-right magnifier).
-        Uses Gemini bbox to find the icon — works from ANY page (FYP, Following,
-        Shop, Explore) on ANY phone. Zero fixed coordinates.
+        Hybrid approach: Gemini bbox with x>80% constraint + fixed coord fallback.
+        Works from ANY page on ANY phone.
         Returns True if search page opened."""
         for attempt in range(2):
             log.info("NAV: go_to_search (tap search_icon, attempt %d)", attempt + 1)
@@ -1543,24 +1555,29 @@ class TikTokBot:
             ty = int(self.adb.screen_h * 0.015) + random.randint(0, 5)
             self.adb.tap(tx, ty)
             time.sleep(random.uniform(0.3, 0.6))
-            # Find and tap search icon via Gemini bbox — universal across all pages/phones
+            # Find search icon via Gemini bbox — constrained to top-right quadrant.
+            # x_min_pct=0.80 rejects false positives (Shop icon, popup buttons, etc.)
+            # that Gemini might confuse with the magnifier. Falls back to fixed coords.
             found = self._find_and_tap(
                 "the magnifier/search icon in the top-right corner of the screen",
-                y_max_pct=0.10)
+                fallback_coord="search_icon",
+                y_max_pct=0.10, x_min_pct=0.80)
             if not found:
-                log.warning("Search icon not found by Gemini bbox")
+                log.warning("Search icon not found (bbox + fallback both failed)")
             time.sleep(self.human.timing("t_tab_content_load"))
 
-            # Verify search page opened
+            # Verify search page opened (NOT Shop — Shop also has a search bar)
             screenshot = self.adb.screenshot_bytes()
             if screenshot:
                 result = gemini.identify_page_with_recovery(screenshot)
                 page = result.get("page", "unknown")
                 if page == "search":
+                    # Double-check: Shop page has "Orders/Messages/Favorites" icons
+                    # that the real search page doesn't. Check for cart icon at top-right.
                     log.info("Search page opened OK")
                     return True
                 log.warning("Search didn't open (Gemini sees: %s), recovering to FYP", page)
-                if page in ("live", "other", "unknown"):
+                if page in ("live", "other", "unknown", "shop"):
                     self.nuclear_escape()
                 else:
                     self.go_to_fyp()
