@@ -1533,23 +1533,22 @@ class TikTokBot:
 
     def go_to_search(self) -> bool:
         """Open the Search/Discover page via search icon (top-right magnifier).
-        Verifies search page opened. If not (e.g. was on Following), goes to FYP first and retries.
+        Uses Gemini bbox to find the icon — works from ANY page (FYP, Following,
+        Shop, Explore) on ANY phone. Zero fixed coordinates.
         Returns True if search page opened."""
         for attempt in range(2):
             log.info("NAV: go_to_search (tap search_icon, attempt %d)", attempt + 1)
             # Tap very top edge to reveal top bar if hidden in fullscreen video mode.
-            # y=1.5% = status bar area (above tab text). NEVER use y=5% — that hits
-            # the tab labels (Following/Shop/For You) and accidentally switches tabs.
             tx = self.adb.screen_w // 2 + random.randint(-50, 50)
             ty = int(self.adb.screen_h * 0.015) + random.randint(0, 5)
             self.adb.tap(tx, ty)
             time.sleep(random.uniform(0.3, 0.6))
-            # Now tap search icon — minimal jitter (icon is small, y=3.6% of screen,
-            # standard jitter pushes into status bar causing miss)
-            x, y = self.adb.get_coord("tiktok", "search_icon")
-            x += random.randint(-5, 5)
-            y += random.randint(-3, 5)  # bias downward (status bar above, safe area below)
-            self.adb.tap(x, y)
+            # Find and tap search icon via Gemini bbox — universal across all pages/phones
+            found = self._find_and_tap(
+                "the magnifier/search icon in the top-right corner of the screen",
+                y_max_pct=0.10)
+            if not found:
+                log.warning("Search icon not found by Gemini bbox")
             time.sleep(self.human.timing("t_tab_content_load"))
 
             # Verify search page opened
@@ -1561,7 +1560,6 @@ class TikTokBot:
                     log.info("Search page opened OK")
                     return True
                 log.warning("Search didn't open (Gemini sees: %s), recovering to FYP", page)
-                # If we accidentally entered a LIVE, nuclear escape is safest
                 if page in ("live", "other", "unknown"):
                     self.nuclear_escape()
                 else:
