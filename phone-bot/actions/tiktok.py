@@ -1365,6 +1365,12 @@ class TikTokBot:
         Tier 1: press_back + Story X button (free, fast)
         Tier 2: nav_home tap (works when nav bar visible)
         Tier 3: nuclear_escape (guaranteed, any state)"""
+        # Pre-check: if already on FYP, skip BACK (avoids "Tap again to exit" toast)
+        shot = self.adb.screenshot_bytes()
+        if shot and self._quick_verify_fyp_from_shot(shot):
+            log.debug("_return_to_fyp: already on FYP (quick verify), no BACK needed")
+            return True
+
         # Tier 1: press_back (up to 2 attempts) with retry verification
         for attempt in range(2):
             self.adb.press_back()

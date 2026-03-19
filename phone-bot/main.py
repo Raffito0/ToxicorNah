@@ -1105,6 +1105,59 @@ async def run_search_tab_restore_test(controllers: dict, phone_id: int):
     log.info("_ensure_search_tab returned: %s", result)
 
 
+def run_return_to_fyp_on_fyp_test(controllers: dict, phone_id: int):
+    """TEST: Verify _return_to_fyp() skips BACK when already on FYP.
+    Precondition: TikTok FYP open.
+    Pass: no toast, no BACK, log shows 'already on FYP', FYP stable."""
+    import time as _time
+    if phone_id not in controllers:
+        log.error("Phone %d not connected!", phone_id)
+        return
+
+    adb = controllers[phone_id]
+    human = HumanEngine(account_name=f"test_ph{phone_id}")
+    human.start_session(
+        hour=datetime.now().hour,
+        weekday=datetime.now().weekday(),
+        duration_minutes=5,
+    )
+
+    from .core.monitor import init_monitor
+    import tempfile
+    init_monitor(
+        events_dir=tempfile.mkdtemp(prefix="phone_bot_rtf_test_events_"),
+        screenshots_dir=tempfile.mkdtemp(prefix="phone_bot_rtf_test_shots_"),
+    )
+
+    from .actions.tiktok import TikTokBot
+    bot = TikTokBot(adb, human)
+
+    log.info("=== RETURN-TO-FYP-ON-FYP TEST: Phone %d ===", phone_id)
+    log.info("Precondition: TikTok FYP open")
+
+    # Confirm on FYP first
+    if not bot._quick_verify_fyp():
+        log.error("FAIL: not on FYP at start")
+        return
+
+    # Simulate watching for 3-5 seconds
+    watch = 3.0 + random.random() * 2.0
+    log.info("Watching FYP for %.1fs...", watch)
+    _time.sleep(watch)
+
+    # Call _return_to_fyp — should detect FYP and skip BACK
+    log.info("Calling _return_to_fyp() while on FYP...")
+    result = bot._return_to_fyp()
+
+    log.info("=== RESULT: _return_to_fyp returned %s ===", result)
+    if result:
+        log.info("PASS: returned True (FYP confirmed)")
+    else:
+        log.error("FAIL: returned False")
+    log.info("Check logs for: '_return_to_fyp: already on FYP (quick verify), no BACK needed'")
+    log.info("Check frames: no toast, no BACK gesture, FYP stable")
+
+
 async def run_pymk_detection_test(controllers: dict, phone_id: int):
     """TEST: Generic content skip test.
     Precondition: user positions phone on non-standard FYP content
@@ -1264,6 +1317,13 @@ def main():
             log.error("--test search-tab-restore requires --phone (e.g. --phone 3)")
             sys.exit(1)
         asyncio.run(run_search_tab_restore_test(controllers, args.phone))
+        return
+
+    if args.test == "return-to-fyp-on-fyp":
+        if not args.phone:
+            log.error("--test return-to-fyp-on-fyp requires --phone (e.g. --phone 3)")
+            sys.exit(1)
+        run_return_to_fyp_on_fyp_test(controllers, args.phone)
         return
 
     if args.test:  # default: 'devices'
