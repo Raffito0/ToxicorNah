@@ -1537,11 +1537,11 @@ class TikTokBot:
         Returns True if search page opened."""
         for attempt in range(2):
             log.info("NAV: go_to_search (tap search_icon, attempt %d)", attempt + 1)
-            # Tap top bar area to reveal it if hidden in fullscreen video mode.
-            # NEVER tap center (pauses video) or bottom (triggers LIVE/products).
-            # Top bar area (y=5%) is safe — doesn't interact with video content.
+            # Tap very top edge to reveal top bar if hidden in fullscreen video mode.
+            # y=1.5% = status bar area (above tab text). NEVER use y=5% — that hits
+            # the tab labels (Following/Shop/For You) and accidentally switches tabs.
             tx = self.adb.screen_w // 2 + random.randint(-50, 50)
-            ty = int(self.adb.screen_h * 0.05) + random.randint(-5, 10)
+            ty = int(self.adb.screen_h * 0.015) + random.randint(0, 5)
             self.adb.tap(tx, ty)
             time.sleep(random.uniform(0.3, 0.6))
             # Now tap search icon
