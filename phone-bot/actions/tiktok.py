@@ -1544,9 +1544,11 @@ class TikTokBot:
             ty = int(self.adb.screen_h * 0.015) + random.randint(0, 5)
             self.adb.tap(tx, ty)
             time.sleep(random.uniform(0.3, 0.6))
-            # Now tap search icon
+            # Now tap search icon — minimal jitter (icon is small, y=3.6% of screen,
+            # standard jitter pushes into status bar causing miss)
             x, y = self.adb.get_coord("tiktok", "search_icon")
-            x, y = self.human.jitter_tap(x, y)
+            x += random.randint(-5, 5)
+            y += random.randint(-3, 5)  # bias downward (status bar above, safe area below)
             self.adb.tap(x, y)
             time.sleep(self.human.timing("t_tab_content_load"))
 
