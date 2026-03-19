@@ -1550,15 +1550,28 @@ class TikTokBot:
         Returns True if search page opened."""
         for attempt in range(2):
             log.info("NAV: go_to_search (tap search_icon, attempt %d)", attempt + 1)
-            # Tap very top edge to reveal top bar if hidden in fullscreen video mode.
+            # Tap top area to reveal top bar if hidden in fullscreen video mode.
+            # y=3% (66px on 2220px) is below status bar (avoids opening notification
+            # shade — EP-01) and above tab text (avoids switching tabs).
             tx = self.adb.screen_w // 2 + random.randint(-50, 50)
-            ty = int(self.adb.screen_h * 0.015) + random.randint(0, 5)
+            ty = int(self.adb.screen_h * 0.03) + random.randint(0, 5)
             self.adb.tap(tx, ty)
             time.sleep(random.uniform(0.3, 0.6))
+            # First: quick screenshot to check if we're on Shop (has 🛒 not 🔍).
+            # Shop detection is cheap — look for the cart icon text pattern.
+            pre_shot = self.adb.screenshot_bytes()
+            if pre_shot:
+                pre_check = gemini._call_vision(
+                    pre_shot,
+                    "Does this TikTok screen show a shopping cart icon (🛒) in the "
+                    "top-right corner? Answer ONLY 'yes' or 'no'.",
+                    max_tokens=5, temperature=0.1, timeout=6.0)
+                if (pre_check or "").strip().lower().startswith("y"):
+                    log.info("Shop page detected (cart icon) — going to FYP first")
+                    self._return_to_foryou()
+                    time.sleep(self.human.timing("t_tab_switch"))
+                    continue
             # Find search icon via Gemini bbox — constrained to top-right quadrant.
-            # x_min_pct=0.80 rejects false positives (Shop icon, popup buttons, etc.)
-            # On Shop page the 🔍 doesn't exist (replaced by 🛒 cart) — bbox will
-            # return nothing, and we go to FYP before retrying.
             found = self._find_and_tap(
                 "the magnifier/search icon (not cart/shopping icon) in the "
                 "top-right corner of the screen",
