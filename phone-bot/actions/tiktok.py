@@ -1557,13 +1557,19 @@ class TikTokBot:
             time.sleep(random.uniform(0.3, 0.6))
             # Find search icon via Gemini bbox — constrained to top-right quadrant.
             # x_min_pct=0.80 rejects false positives (Shop icon, popup buttons, etc.)
-            # that Gemini might confuse with the magnifier. Falls back to fixed coords.
+            # On Shop page the 🔍 doesn't exist (replaced by 🛒 cart) — bbox will
+            # return nothing, and we go to FYP before retrying.
             found = self._find_and_tap(
-                "the magnifier/search icon in the top-right corner of the screen",
-                fallback_coord="search_icon",
+                "the magnifier/search icon (not cart/shopping icon) in the "
+                "top-right corner of the screen",
                 y_max_pct=0.10, x_min_pct=0.80)
             if not found:
-                log.warning("Search icon not found (bbox + fallback both failed)")
+                # No search icon found — likely on Shop or a page without it.
+                # Go to FYP where the icon always exists, then retry.
+                log.info("Search icon not found — navigating to FYP first")
+                self._return_to_foryou()
+                time.sleep(self.human.timing("t_tab_switch"))
+                continue
             time.sleep(self.human.timing("t_tab_content_load"))
 
             # Verify search page opened (NOT Shop — Shop also has a search bar)
