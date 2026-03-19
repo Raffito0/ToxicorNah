@@ -974,6 +974,47 @@ async def run_story_exit_test(controllers: dict, phone_id: int):
     log.info("Verify scrcpy frames: no keyboard, no text typed, FYP restored in later frame")
 
 
+async def run_pymk_detection_test(controllers: dict, phone_id: int):
+    """TEST: Browse FYP for up to 15 minutes watching for a PYMK carousel post.
+
+    Pass criteria (from section-02 spec):
+    - PYMK post visible in frame N (photo carousel + Follow button)
+    - Swipe-up occurs within 0.5s of PYMK detection
+    - NO Follow button pressed in any frame
+    - Log contains 'PYMK post detected, scrolling past'
+
+    Record with scrcpy before running:
+      scrcpy --no-window --record pymk_test.mkv --time-limit 900
+    """
+    if phone_id not in controllers:
+        log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
+        return
+
+    adb = controllers[phone_id]
+    human = HumanEngine(account_name=f"test_ph{phone_id}")
+    human.start_session(
+        hour=datetime.now().hour,
+        weekday=datetime.now().weekday(),
+        duration_minutes=15,
+    )
+
+    from .core.monitor import init_monitor
+    import tempfile
+    tmp_events = tempfile.mkdtemp(prefix="phone_bot_pymk_test_events_")
+    tmp_shots = tempfile.mkdtemp(prefix="phone_bot_pymk_test_shots_")
+    init_monitor(events_dir=tmp_events, screenshots_dir=tmp_shots)
+    log.info("Monitor initialized (temp dirs: %s, %s)", tmp_events, tmp_shots)
+
+    from .actions.tiktok import TikTokBot
+    bot = TikTokBot(adb, human)
+
+    log.info("=== PYMK-DETECTION TEST: Phone %d ===", phone_id)
+    log.info("Browsing FYP for up to 15 min -- watching for PYMK carousel post")
+    log.info("Pass: log shows 'PYMK post detected, scrolling past', no Follow press")
+
+    await bot.browse_session(duration_minutes=15, niche_keywords=[])
+
+
 def _check_api_keys():
     """Warn at startup if critical API keys are missing."""
     if not GEMINI.get("api_key"):
@@ -985,7 +1026,7 @@ def _check_api_keys():
 def main():
     parser = argparse.ArgumentParser(description="Phone Bot — TikTok & Instagram Automation")
     parser.add_argument("--test", nargs="?", const="devices", metavar="MODE",
-                        help="Test mode: 'devices' (default), 'story-coord-audit', 'story-exit'")
+                        help="Test mode: 'devices' (default), 'story-coord-audit', 'story-exit', 'pymk-detection'")
     parser.add_argument("--dashboard", action="store_true", help="Start web dashboard")
     parser.add_argument("--warmup", action="store_true", help="Initialize warmup for new accounts")
     parser.add_argument("--scroll-only", action="store_true",
@@ -1033,6 +1074,13 @@ def main():
             log.error("--test story-exit requires --phone (e.g. --phone 1)")
             sys.exit(1)
         asyncio.run(run_story_exit_test(controllers, args.phone))
+        return
+
+    if args.test == "pymk-detection":
+        if not args.phone:
+            log.error("--test pymk-detection requires --phone (e.g. --phone 1)")
+            sys.exit(1)
+        asyncio.run(run_pymk_detection_test(controllers, args.phone))
         return
 
     if args.test:  # default: 'devices'

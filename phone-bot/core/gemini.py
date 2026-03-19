@@ -640,6 +640,35 @@ Answer ONLY "yes" or "no". Nothing else."""
     return is_prof
 
 
+def is_pymk_post(screenshot_bytes: bytes) -> bool:
+    """Check if the current FYP item is a 'People You May Know' suggestion carousel.
+
+    Called when find_sidebar_icons() returns None and the LIVE ring pixel check
+    is also negative. Uses a single yes/no Gemini call (temp=0.1, max_tokens=5).
+
+    Conservative default: ambiguous or empty responses return True (scroll past).
+    Never returns True for LIVE streams, ads, or regular videos.
+    """
+    prompt = (
+        "Is this a 'People you may know' post -- a photo carousel showing multiple "
+        "profile cards with a Follow button for each person? "
+        "Answer ONLY 'yes' or 'no'. "
+        "Do NOT answer yes for: TikTok LIVE streams, video ads, regular videos, "
+        "or any other content type."
+    )
+    result = _call_vision(
+        screenshot_bytes, prompt,
+        max_tokens=5, temperature=0.1, timeout=6.0,
+    )
+    answer = (result or "").strip().lower().replace('"', '').replace("'", "")
+    if answer.startswith("n"):
+        log.info("IS_PYMK: False (raw: %s)", answer)
+        return False
+    # "yes", ambiguous, empty, or parse failure -> scroll past (conservative)
+    log.info("IS_PYMK: True (raw: %s)", answer)
+    return True
+
+
 def count_story_segments(screenshot_bytes: bytes) -> int:
     """Count the number of Story progress bar segments at the top of screen.
 

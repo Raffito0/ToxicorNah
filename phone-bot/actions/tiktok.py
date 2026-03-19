@@ -881,6 +881,31 @@ class TikTokBot:
         from ..core.sidebar import find_sidebar_icons
         return find_sidebar_icons(screenshot, self.adb.screen_w, self.adb.screen_h)
 
+    def _get_sidebar_with_shot(self) -> tuple:
+        """Like _get_sidebar_positions() but also returns the raw screenshot bytes.
+        Returns (sidebar_dict_or_None, screenshot_bytes_or_None).
+        Used when the screenshot must be reused for a follow-up vision call (e.g. PYMK check)."""
+        screenshot = self.adb.screenshot_bytes()
+        if not screenshot:
+            return None, None
+        from ..core.sidebar import find_sidebar_icons
+        sidebar = find_sidebar_icons(screenshot, self.adb.screen_w, self.adb.screen_h)
+        return sidebar, screenshot
+
+    def _is_pymk_post(self, screenshot: bytes | None = None) -> bool:
+        """Return True if the current FYP item is a 'People You May Know' carousel.
+
+        Call ONLY when find_sidebar_icons() returned None AND the LIVE ring pixel
+        check was also negative.  Takes its own screenshot if none is provided.
+        Conservative: ambiguous or empty Gemini responses -> True (scroll past).
+        """
+        if screenshot is None:
+            screenshot = self.adb.screenshot_bytes()
+        if not screenshot:
+            return False
+        from ..core import gemini as _gem
+        return _gem.is_pymk_post(screenshot)
+
     # --- Health check during non-FYP tab scroll ----------------------------
 
     def _health_check_during_scroll(self, target_tab: str = "following") -> bool:
@@ -5002,11 +5027,23 @@ JSON only, no markdown."""
 
             elif action in ("like", "comment", "follow", "profile_visit"):
                 # Before any engagement, check if this is a normal FYP video
-                # Live previews have no sidebar — skip all engagement, just scroll
-                _sidebar = self._get_sidebar_positions()
+                # Live previews have no sidebar — skip all engagement, just scroll.
+                # Capture screenshot once and reuse it for the PYMK vision check.
+                _sidebar, _engagement_shot = self._get_sidebar_with_shot()
                 if _sidebar is None:
-                    # Not a normal video (live preview, ad, etc.)
-                    # Sometimes tap to enter live, watch briefly, then back out
+                    # Not a normal video (live preview, ad, PYMK carousel, etc.)
+                    # Step 1 (section-06): insert LIVE ring pixel check here — MUST run
+                    # BEFORE the PYMK check so LIVE posts aren't passed to Gemini.
+                    #
+                    # Step 2: PYMK carousel check — must scroll past immediately,
+                    # never tap anything (Follow button is exposed on PYMK posts).
+                    if self._is_pymk_post(_engagement_shot):
+                        log.info("FYP: PYMK post detected, scrolling past")
+                        time.sleep(self.human.timing("t_live_skip_pause"))
+                        self.scroll_fyp()
+                        continue
+
+                    # Step 3: Curiosity-based LIVE/ad enter logic
                     curiosity = self.human.personality.explore_curiosity if self.human.personality else 0.1
                     energy = self.human.mood.energy if self.human.mood else 1.0
                     enter_drive = curiosity * 0.8 + energy * 0.3

@@ -304,6 +304,9 @@ HUMAN = {
     "t_carousel_photo":     (2.5, 0.4, 1.0, 6.0),     # per photo in carousel browse
     "t_message_glance":     (3.0, 0.5, 1.5, 7.0),     # DM list glance
     "t_post_celebration":   (5.0, 0.5, 2.0, 12.0),    # pause after posting video
+
+    # --- Non-standard FYP posts (LIVE, PYMK, ads) ---
+    "t_live_skip_pause":    (0.4, 0.2, 0.2, 0.8),     # brief pause before single scroll past PYMK (section-06 reuses for LIVE)
 }
 
 # Max recovery attempts before forcing go_to_fyp()
