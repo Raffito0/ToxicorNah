@@ -807,6 +807,11 @@ Classify it into EXACTLY ONE of these types:
 - "permission": system permission dialog (camera, microphone, location, contacts)
 - "anr": Android system "App not responding" dialog with Wait/Close buttons
 - "content_warning": "This post is age protected" or content warning overlay on a video
+- "photosensitive_warning": full-screen overlay with a lightning bolt icon and warning
+  text about seizures, flashing lights, or photosensitive epilepsy. Has exactly two
+  buttons: one red/prominent labeled "Watch video" and one gray/secondary labeled
+  "Skip all" or "Skip". This is NOT "content_warning" (different button labels, no
+  lightning bolt).
 - "account_warning": community guidelines warning, account restriction, phone/email verify
 - "login_expired": login/signup screen, session expired, re-authentication needed
 - "unknown": cannot classify
@@ -819,6 +824,7 @@ For each type, determine the ACTION:
 - captcha_rotate -> "rotate_image"
 - anr -> "tap_wait" (find the Wait button coords)
 - content_warning -> "swipe_skip" (swipe up to skip the video)
+- photosensitive_warning -> "tap_skip_all" (find the gray "Skip all" button coords)
 - captcha_complex/account_warning/login_expired/unknown -> "escalate"
 
 Find the PIXEL coordinates of the dismiss/verify/wait button center if applicable.
@@ -837,7 +843,8 @@ JSON only, no markdown."""
         overlay_type = data.get("type", "unknown")
         valid_types = {"dismissible_safe", "captcha_simple", "captcha_puzzle",
                        "captcha_rotate", "captcha_complex", "permission", "anr",
-                       "content_warning", "account_warning", "login_expired", "unknown"}
+                       "content_warning", "photosensitive_warning",
+                       "account_warning", "login_expired", "unknown"}
         if overlay_type not in valid_types:
             overlay_type = "unknown"
 

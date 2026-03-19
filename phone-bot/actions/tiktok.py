@@ -494,6 +494,48 @@ class PopupGuardian:
             return {"resolved": True, "action_taken": "content_warning_skipped",
                     "needs_attention": False}
 
+        if overlay_type == "photosensitive_warning":
+            # Tap "Skip all" (gray secondary button) — never "Watch video" (red).
+            # "Skip all" dismisses the warning for this and all future flashing videos.
+            log.info("PopupGuardian: photosensitive_warning detected — tapping Skip all")
+            tapped = False
+            coords = classification.get("dismiss_coords")
+            if coords and len(coords) == 2:
+                cx, cy = self._clamp_coords(coords[0], coords[1])
+                log.info("PopupGuardian: tapping Skip all at (%d, %d) [from classify]", cx, cy)
+                self.adb.tap(cx, cy)
+                tapped = True
+            else:
+                # Fallback: ask Gemini to locate the "Skip all" button
+                log.info("PopupGuardian: no coords — bbox search for Skip all button")
+                skip_shot = self.adb.screenshot_bytes()
+                self.stats["gemini_calls"] += 1
+                found = gemini.find_element_by_vision(
+                    skip_shot,
+                    "the gray or secondary button labeled 'Skip all' or 'Skip' "
+                    "in the bottom half of the photosensitive warning overlay",
+                    self.adb.screen_w, self.adb.screen_h,
+                ) if skip_shot else None
+                if found:
+                    cx, cy = self._clamp_coords(found[0], found[1])
+                    log.info("PopupGuardian: tapping Skip all at (%d, %d) [bbox]", cx, cy)
+                    self.adb.tap(cx, cy)
+                    tapped = True
+                else:
+                    log.warning("PopupGuardian: Skip all button not found, falling through to Tier 2/3")
+            if tapped:
+                time.sleep(self.human.timing("t_popup_dismiss"))
+                shot = self.adb.screenshot_bytes()
+                from ..core.sidebar import find_sidebar_icons
+                sidebar = find_sidebar_icons(shot, self.adb.screen_w, self.adb.screen_h) if shot else None
+                if sidebar is not None:
+                    self.stats["popups_dismissed"] += 1
+                    log.info("PopupGuardian: photosensitive_warning dismissed successfully")
+                    return {"resolved": True, "action_taken": "photosensitive_warning_skipped",
+                            "needs_attention": False}
+                log.warning("PopupGuardian: photosensitive_warning — overlay may still be visible")
+            # fall through to Tier 2/3
+
         if overlay_type in ("captcha_simple", "captcha_puzzle", "captcha_rotate"):
             result = self._tier1_auto_captcha(classification, bot_ref)
             if result["resolved"]:
