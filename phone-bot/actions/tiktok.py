@@ -1551,10 +1551,11 @@ class TikTokBot:
         for attempt in range(2):
             log.info("NAV: go_to_search (tap search_icon, attempt %d)", attempt + 1)
             # Tap top area to reveal top bar if hidden in fullscreen video mode.
-            # y=3% (66px on 2220px) is below status bar (avoids opening notification
-            # shade — EP-01) and above tab text (avoids switching tabs).
+            # y=4% (89px on 2220px) is 26px below status bar (63px at 420dpi)
+            # and 22px above tab labels (y=5%). y=3% still triggered notification
+            # shade briefly on Samsung S9.
             tx = self.adb.screen_w // 2 + random.randint(-50, 50)
-            ty = int(self.adb.screen_h * 0.03) + random.randint(0, 5)
+            ty = int(self.adb.screen_h * 0.04) + random.randint(0, 5)
             self.adb.tap(tx, ty)
             time.sleep(random.uniform(0.3, 0.6))
             # First: quick screenshot to check if we're on Shop (has 🛒 not 🔍).
