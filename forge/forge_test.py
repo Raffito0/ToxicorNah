@@ -155,10 +155,11 @@ def run_test_protocol(section: str, protocol: dict, work_dir: str) -> dict:
 
     # Write result JSON
     result_path = str(work / f"forge_result_{section}.json")
+    result["analysis_path"] = result_path
+    result["suspicious_moments"] = []   # Phase 2: will contain Gemini frame analysis
     with open(result_path, "w") as f:
         json.dump(result, f, indent=2)
 
-    result["analysis_path"] = result_path
     return result
 
 

@@ -114,6 +114,26 @@ def test_result_json_schema(tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout="ok")
         result = run_test_protocol("section-01", protocol, str(tmp_path))
 
-    required_fields = {"exit_code", "frames_extracted", "analysis_path", "hardware_error"}
+    required_fields = {"section", "exit_code", "frames_extracted", "analysis_path", "hardware_error", "message"}
     for field in required_fields:
         assert field in result, f"Missing required field: {field}"
+
+
+def test_pre_condition_printed_when_present(tmp_path, capsys):
+    """pre_condition from protocol is printed to stdout."""
+    from forge.forge_test import run_test_protocol
+
+    protocol = {
+        "type": "unit_test",
+        "commands": ["echo ok"],
+        "pass_threshold": 1,
+        "gemini_analysis": False,
+        "pre_condition": "FYP must be visible on phone 3",
+    }
+
+    with patch("forge.forge_test.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok")
+        run_test_protocol("section-01", protocol, str(tmp_path))
+
+    captured = capsys.readouterr()
+    assert "FYP must be visible on phone 3" in captured.out
