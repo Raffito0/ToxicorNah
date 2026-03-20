@@ -121,3 +121,57 @@ def test_blocks_missing_solutions_on_third_pass():
     code, output = run_hook(payload)
     assert code != 0
     assert "solutions" in output.lower() or "BLOCKED" in output
+
+
+def test_passes_on_third_pass_with_solutions_written(tmp_path):
+    """Run 3/3 with SOLUTIONS.md: written \u2713 must pass."""
+    block_b_3rd_ok = VALID_BLOCK_B.replace(
+        "\u2500\u2500 TEST RESULT (run 1/3)",
+        "\u2500\u2500 TEST RESULT (run 3/3)"
+    ).replace(
+        "SOLUTIONS.md: not yet",
+        "SOLUTIONS.md: written \u2713"
+    )
+    # Need frames on disk for frame count check
+    frames_dir = tmp_path / "tmp_test_browse_frames"
+    frames_dir.mkdir()
+    for i in range(1, 6):
+        (frames_dir / f"f_{i:03d}.jpg").write_bytes(b"x")
+
+    import subprocess
+    result = subprocess.run(
+        ["python", "C:/Users/rafca/.claude/hooks/require-block-b.py"],
+        input=json.dumps(make_payload(block_b_3rd_ok)),
+        capture_output=True, text=True, cwd=str(tmp_path),
+    )
+    assert result.returncode == 0, f"Should pass: {result.stdout}{result.stderr}"
+
+
+def test_recovery_boundary_two_fires_passes():
+    """Recovery firing exactly 2 times must NOT block."""
+    block_b_two = VALID_BLOCK_B.replace(
+        "Recovery: none",
+        "Recovery: _return_to_fyp \u00d7 2"
+    )
+    code, output = run_hook(make_payload(block_b_two))
+    assert code == 0, f"Recovery \u00d7 2 should pass, got: {output}"
+
+
+def test_blocks_recovery_free_text_none_variants():
+    """Recovery: N/A and 'no recovery fired' must NOT be counted as fires."""
+    for recovery_text in ["N/A", "no recovery fired", "none fired"]:
+        block_b = VALID_BLOCK_B.replace("Recovery: none", f"Recovery: {recovery_text}")
+        code, output = run_hook(make_payload(block_b))
+        assert code == 0, f"Recovery '{recovery_text}' should pass, got: {output}"
+
+
+def test_blocks_non_consecutive_frames_without_ellipsis():
+    """Non-consecutive frame numbers without ... are also sampling."""
+    # Replace f_003 and f_004 lines but keep numbering as f_001, f_002, f_005 (skips 3 and 4)
+    block_b_gap = VALID_BLOCK_B.replace(
+        "  f_003 \u2192 FYP after like\n  f_004 \u2192 FYP continuing scroll\n",
+        ""
+    )
+    code, output = run_hook(make_payload(block_b_gap))
+    assert code != 0, f"Non-consecutive frames should block"
+    assert "sampling" in output.lower() or "BLOCKED" in output
