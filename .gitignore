@@ -1,5 +1,8 @@
 logs
 *.log
+
+# phone-bot regression sentinel (created after browse-smoke PASS, deleted by hook after use)
+phone-bot/.browse_smoke_ok
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -59,3 +62,6 @@ temp_reupload.cjs
 # Phone-bot data
 phone-bot/data/logs/
 phone-bot/data/*.json
+
+forge/forge_state.json
+forge/forge_registry.json
