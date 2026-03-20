@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 
 def make_state(section="section-01", pass_count=0, attempt_count=0):
@@ -78,7 +77,7 @@ def test_attempt_count_2_triggers_external_intelligence(tmp_path):
 
 def test_external_intelligence_formats_prompt():
     """External intelligence prompt includes problem, attempts, and failure evidence."""
-    from forge.forge_controller import ForgeController, build_external_intelligence_prompt
+    from forge.forge_controller import build_external_intelligence_prompt
 
     prompt = build_external_intelligence_prompt(
         section="section-06",
