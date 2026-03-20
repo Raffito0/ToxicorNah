@@ -25,8 +25,6 @@ DOMAIN_SIGNALS = {
     "unit_test": ["react", "typescript", "npm", "vite", "pytest", "jest"],
 }
 
-FORGE_HEADER_MARKER = "forge:"
-
 
 def detect_domain(claude_md_content: str) -> str:
     content_lower = claude_md_content.lower()
@@ -37,6 +35,8 @@ def detect_domain(claude_md_content: str) -> str:
 
 
 def build_test_protocol(domain: str) -> dict:
+    # NOTE: {section}, {mode}, {mkv}, {frames} are template tokens for the
+    # consuming tool (forge_controller / forge skill) to substitute at run time.
     if domain == "physical_device":
         return {
             "type": "physical_device",
@@ -105,7 +105,7 @@ def enrich_section_file(section_path: str, claude_md_path: str) -> None:
     content = Path(section_path).read_text(encoding="utf-8")
 
     # Already enriched -- skip
-    if FORGE_HEADER_MARKER in content and "<!--forge" in content:
+    if "<!--forge" in content:
         return
 
     claude_md = Path(claude_md_path).read_text(encoding="utf-8") if Path(claude_md_path).exists() else ""
@@ -128,14 +128,30 @@ def main():
         print(f"No section files found in {sections_dir}")
         return
 
-    claude_md = Path(args.claude_md)
+    # Prefer a CLAUDE.md co-located with the sections dir or its parent
+    local_claude = sections_dir / "CLAUDE.md"
+    parent_claude = sections_dir.parent / "CLAUDE.md"
+    if local_claude.exists():
+        claude_md = local_claude
+    elif parent_claude.exists():
+        claude_md = parent_claude
+    else:
+        claude_md = Path(args.claude_md)
+
+    enriched_count = 0
     for section_file in sorted(section_files):
         if section_file.name == "index.md":
             continue
+        before = section_file.read_text(encoding="utf-8")
         enrich_section_file(str(section_file), str(claude_md))
-        print(f"  enriched: {section_file.name}")
+        after = section_file.read_text(encoding="utf-8")
+        if before != after:
+            enriched_count += 1
+            print(f"  enriched: {section_file.name}")
+        else:
+            print(f"  skipped (already enriched): {section_file.name}")
 
-    print(f"Done. {len(section_files)} section files enriched.")
+    print(f"Done. {enriched_count} section files enriched.")
 
 
 if __name__ == "__main__":

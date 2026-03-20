@@ -24,13 +24,13 @@ def test_adds_forge_header_to_section(tmp_path):
     from forge.forge_planner import enrich_section_file
 
     section_file = tmp_path / "section-01-navigation.md"
-    section_file.write_text(SAMPLE_SECTION)
+    section_file.write_text(SAMPLE_SECTION, encoding="utf-8")
     claude_md = tmp_path / "CLAUDE.md"
-    claude_md.write_text(SAMPLE_CLAUDE_MD_PHONE_BOT)
+    claude_md.write_text(SAMPLE_CLAUDE_MD_PHONE_BOT, encoding="utf-8")
 
     enrich_section_file(str(section_file), str(claude_md))
 
-    content = section_file.read_text()
+    content = section_file.read_text(encoding="utf-8")
     assert "forge:" in content
     assert "test_protocol:" in content
     assert "risk_level:" in content
@@ -42,15 +42,15 @@ def test_idempotent_does_not_overwrite(tmp_path):
     from forge.forge_planner import enrich_section_file
 
     section_file = tmp_path / "section-01-navigation.md"
-    section_file.write_text(SAMPLE_SECTION)
+    section_file.write_text(SAMPLE_SECTION, encoding="utf-8")
     claude_md = tmp_path / "CLAUDE.md"
-    claude_md.write_text(SAMPLE_CLAUDE_MD_PHONE_BOT)
+    claude_md.write_text(SAMPLE_CLAUDE_MD_PHONE_BOT, encoding="utf-8")
 
     enrich_section_file(str(section_file), str(claude_md))
-    content_after_first = section_file.read_text()
+    content_after_first = section_file.read_text(encoding="utf-8")
 
     enrich_section_file(str(section_file), str(claude_md))
-    content_after_second = section_file.read_text()
+    content_after_second = section_file.read_text(encoding="utf-8")
 
     assert content_after_first == content_after_second
 
@@ -86,12 +86,12 @@ def test_preserves_original_content(tmp_path):
     from forge.forge_planner import enrich_section_file
 
     section_file = tmp_path / "section-01.md"
-    section_file.write_text(SAMPLE_SECTION)
+    section_file.write_text(SAMPLE_SECTION, encoding="utf-8")
     claude_md = tmp_path / "CLAUDE.md"
-    claude_md.write_text(SAMPLE_CLAUDE_MD_PHONE_BOT)
+    claude_md.write_text(SAMPLE_CLAUDE_MD_PHONE_BOT, encoding="utf-8")
 
     enrich_section_file(str(section_file), str(claude_md))
 
-    content = section_file.read_text()
+    content = section_file.read_text(encoding="utf-8")
     assert "## Goal" in content
     assert "Fix _return_to_fyp" in content
