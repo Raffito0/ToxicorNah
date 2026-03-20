@@ -116,9 +116,6 @@ def test_blocks_missing_solutions_on_third_pass():
     block_b_3rd = VALID_BLOCK_B.replace(
         "\u2500\u2500 TEST RESULT (run 1/3)",
         "\u2500\u2500 TEST RESULT (run 3/3)"
-    ).replace(
-        "SOLUTIONS.md: not yet",
-        "SOLUTIONS.md: not yet"
     )
     payload = make_payload(block_b_3rd)
     code, output = run_hook(payload)
