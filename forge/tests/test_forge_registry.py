@@ -95,3 +95,40 @@ def test_update_verified_timestamp(tmp_path):
     reg.update_verified("nav")
     stale = reg.get_stale_entries()
     assert len(stale) == 0
+
+
+def test_add_entry_idempotent(tmp_path):
+    """Calling add_entry twice with same id: only one entry, proven_at preserved."""
+    from forge.forge_registry import ForgeRegistry
+
+    reg = ForgeRegistry(str(tmp_path / "registry.json"))
+    reg.add_entry("nav", "section-01", ["fn_a"], "pytest", stale_after_hours=24)
+    first_proven = reg.get_all()[0]["proven_at"]
+
+    time.sleep(0.01)  # ensure timestamps differ
+    reg.add_entry("nav", "section-02", ["fn_b"], "pytest2", stale_after_hours=48)
+
+    entries = reg.get_all()
+    assert len(entries) == 1, "Idempotent add must not create duplicates"
+    assert entries[0]["proven_at"] == first_proven, "proven_at must not be overwritten on update"
+    assert entries[0]["section"] == "section-02", "section should be updated"
+
+
+def test_mark_broken_unknown_id_raises(tmp_path):
+    """mark_broken raises KeyError for unknown entry_id."""
+    from forge.forge_registry import ForgeRegistry
+
+    reg = ForgeRegistry(str(tmp_path / "registry.json"))
+    reg.add_entry("nav", "section-01", ["fn_a"], "pytest")
+    with pytest.raises(KeyError):
+        reg.mark_broken("nonexistent", "section-99")
+
+
+def test_update_verified_unknown_id_raises(tmp_path):
+    """update_verified raises KeyError for unknown entry_id."""
+    from forge.forge_registry import ForgeRegistry
+
+    reg = ForgeRegistry(str(tmp_path / "registry.json"))
+    reg.add_entry("nav", "section-01", ["fn_a"], "pytest")
+    with pytest.raises(KeyError):
+        reg.update_verified("nonexistent")

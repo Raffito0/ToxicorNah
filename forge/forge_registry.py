@@ -24,8 +24,11 @@ class ForgeRegistry:
     def _load(self) -> dict:
         if not self.path.exists():
             return {"entries": []}
-        with open(self.path) as f:
-            return json.load(f)
+        try:
+            with open(self.path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            raise ValueError(f"Registry file {self.path} is corrupted: {e}") from e
 
     def _save(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +84,10 @@ class ForgeRegistry:
         now = datetime.now(timezone.utc)
         stale = []
         for entry in data["entries"]:
-            last = datetime.fromisoformat(entry["last_verified"])
+            try:
+                last = datetime.fromisoformat(entry["last_verified"])
+            except (KeyError, ValueError):
+                continue  # skip malformed entries
             threshold = timedelta(hours=entry.get("stale_after_hours", 24))
             if now - last > threshold:
                 stale.append(entry)
@@ -104,6 +110,7 @@ class ForgeRegistry:
                 entry["broken_by"] = broken_by
                 self._save(data)
                 return
+        raise KeyError(f"Entry not found: {entry_id}")
 
     def update_verified(self, entry_id: str) -> None:
         """Reset last_verified timestamp to now for an entry."""
@@ -115,3 +122,4 @@ class ForgeRegistry:
                 entry["broken_by"] = None
                 self._save(data)
                 return
+        raise KeyError(f"Entry not found: {entry_id}")
