@@ -48,8 +48,9 @@ def run_scrcpy(mkv_path: str) -> tuple:
 
     def _reader():
         try:
-            for raw in proc.stderr:
-                lines_q.put(raw.decode("utf-8", errors="replace"))
+            if proc.stderr:  # always PIPE, guard satisfies type checker
+                for raw in proc.stderr:
+                    lines_q.put(raw.decode("utf-8", errors="replace"))
         except Exception:
             pass
 
