@@ -1,6 +1,4 @@
-import pytest
 import json
-from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 
@@ -125,3 +123,24 @@ def test_attempt_count_3_signals_needs_human_input(tmp_path):
 
     assert result["needs_human_input"] is True
     assert result["attempt_count"] == 3
+
+
+def test_pass_resets_attempt_count(tmp_path):
+    """PASS resets attempt_count so a subsequent FAIL does not falsely trigger needs_human_input."""
+    from forge.forge_controller import ForgeController
+
+    # Simulate: fail -> fail (attempt_count=2), then PASS
+    state_file = tmp_path / "forge_state.json"
+    state_file.write_text(json.dumps(make_state(pass_count=0, attempt_count=2)))
+
+    ctrl = ForgeController(str(state_file))
+
+    # PASS should clear the failure streak
+    ctrl.record_pass()
+    state = json.loads(state_file.read_text())
+    assert state["attempt_count"] == 0
+
+    # Subsequent FAIL should count from 1, not from 3
+    result = ctrl.record_fail()
+    assert result["attempt_count"] == 1
+    assert result["needs_human_input"] is False

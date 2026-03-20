@@ -52,7 +52,6 @@ def call_o3(prompt: str, api_key: str) -> str:
     """Call OpenAI o3 API. Returns response text or error message."""
     try:
         import urllib.request
-        import urllib.error
 
         payload = json.dumps({
             "model": "o3",
@@ -96,6 +95,7 @@ class ForgeController:
         """Record a PASS. Returns dict with section_complete flag."""
         state = self.load_state()
         state["pass_count"] = state.get("pass_count", 0) + 1
+        state["attempt_count"] = 0
         pass_threshold = state.get("pass_threshold", DEFAULT_PASS_THRESHOLD)
 
         result = {"section_complete": False, "pass_count": state["pass_count"]}
