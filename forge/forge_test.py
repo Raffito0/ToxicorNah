@@ -10,7 +10,6 @@ Usage:
 """
 import argparse
 import json
-import os
 import queue
 import subprocess
 import sys
@@ -106,6 +105,7 @@ def run_test_protocol(section: str, protocol: dict, work_dir: str) -> dict:
     }
     """
     work = Path(work_dir)
+    work.mkdir(parents=True, exist_ok=True)
     mkv_path = str(work / f"tmp_forge_{section}.mkv")
     frames_dir = str(work / f"tmp_forge_{section}_frames")
     test_type = protocol.get("type", "unit_test")
@@ -143,6 +143,7 @@ def run_test_protocol(section: str, protocol: dict, work_dir: str) -> dict:
         if r.returncode != 0:
             exit_code = r.returncode
             result["message"] = r.stderr[:500] if r.stderr else r.stdout[:500]
+            break  # preserve first failure, don't overwrite with subsequent ones
 
     result["exit_code"] = exit_code
 
@@ -150,7 +151,9 @@ def run_test_protocol(section: str, protocol: dict, work_dir: str) -> dict:
     if scrcpy_proc is not None:
         stop_scrcpy(scrcpy_proc)
         ffmpeg_cmd = build_ffmpeg_command(mkv_path, frames_dir)
-        subprocess.run(ffmpeg_cmd, shell=True, capture_output=True)
+        ffmpeg_result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True)
+        if ffmpeg_result.returncode != 0:
+            result["message"] += f" | ffmpeg failed (code {ffmpeg_result.returncode}): {ffmpeg_result.stderr[:200].decode('utf-8', errors='replace') if ffmpeg_result.stderr else 'no output'}"
         result["frames_extracted"] = count_frames(frames_dir)
 
     # Write result JSON

@@ -118,6 +118,11 @@ def test_result_json_schema(tmp_path):
     for field in required_fields:
         assert field in result, f"Missing required field: {field}"
 
+    # Verify result JSON was written to disk
+    from pathlib import Path
+    assert result["analysis_path"] is not None
+    assert Path(result["analysis_path"]).exists()
+
 
 def test_pre_condition_printed_when_present(tmp_path, capsys):
     """pre_condition from protocol is printed to stdout."""
