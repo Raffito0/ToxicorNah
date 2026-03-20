@@ -1,3 +1,31 @@
+<!--forge
+forge:
+  risk_level: medium
+  autonomy_gate: continue
+  solutions_md_checked: []
+  solutions_md_match: []
+  solution_selected:
+    approach: "TBD -- filled by forge_planner analysis"
+    score: 0
+  test_protocol:
+    type: "physical_device"
+    pre_condition: "FYP must be visible on phone"
+    commands:
+      - "scrcpy --record tmp_forge_{section}.mkv"
+      - "python phone-bot/main.py --test {mode} --phone 3"
+    frame_extraction: "ffmpeg -y -i {mkv} -vf fps=0.5,scale=720:-2 {frames}/f_%03d.jpg"
+    pass_threshold: "3"
+    scenarios:
+      - "FYP"
+      - "Following"
+      - "Explore"
+      - "Shop"
+    gemini_analysis: true
+  regression_scope: []
+  cross_section_deps: []
+  attempt_count: 0
+forge-->
+
 # Section 1 — Story Exit (CRITICAL)
 
 ## Problem Summary
