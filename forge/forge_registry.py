@@ -19,17 +19,17 @@ from pathlib import Path
 
 class ForgeRegistry:
     def __init__(self, registry_path: str):
-        self.registry_path = Path(registry_path)
+        self.path = Path(registry_path)
 
     def _load(self) -> dict:
-        if not self.registry_path.exists():
+        if not self.path.exists():
             return {"entries": []}
-        with open(self.registry_path) as f:
+        with open(self.path) as f:
             return json.load(f)
 
     def _save(self, data: dict) -> None:
-        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.registry_path, "w") as f:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.path, "w") as f:
             json.dump(data, f, indent=2)
 
     def add_entry(
@@ -53,6 +53,8 @@ class ForgeRegistry:
                 entry["stale_after_hours"] = stale_after_hours
                 entry["last_verified"] = now
                 entry["broken_by"] = None
+                if "proven_at" not in entry:
+                    entry["proven_at"] = now
                 self._save(data)
                 return
 
@@ -64,6 +66,7 @@ class ForgeRegistry:
             "test_command": test_command,
             "stale_after_hours": stale_after_hours,
             "last_verified": now,
+            "proven_at": now,
             "broken_by": None,
         })
         self._save(data)

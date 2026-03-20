@@ -22,6 +22,8 @@ def test_add_entry(tmp_path):
     assert len(entries) == 1
     assert entries[0]["id"] == "browse-smoke"
     assert "_return_to_fyp" in entries[0]["functions"]
+    assert "proven_at" in entries[0]
+    assert entries[0]["proven_at"] != ""
 
 
 def test_staleness_check(tmp_path):
