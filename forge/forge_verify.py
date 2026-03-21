@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -59,7 +60,7 @@ def cmd_filter_logs(args) -> int:
     return 0
 
 
-def cmd_compare_predictions(args) -> int:
+def cmd_compare_predictions(args) -> int:  # noqa: ARG001
     verify = load_verify()
     predict = {}
     if PREDICT_CACHE.exists():
@@ -100,7 +101,7 @@ def cmd_compare_predictions(args) -> int:
     return 0
 
 
-def cmd_interference_check(args) -> int:
+def cmd_interference_check(args) -> int:  # noqa: ARG001
     verify = load_verify()
     gemini = verify.get("gemini", {})
 
@@ -121,8 +122,14 @@ def cmd_interference_check(args) -> int:
         a_ts = anomaly.get("video_timestamp", "00:00:00")
 
         if severity in ("high", "critical") and category in ("popup", "unexpected_screen"):
-            # Check if anomaly happened before failure
-            if failure_ts is None or a_ts <= failure_ts:
+            # Check if anomaly happened before failure (normalize HH:MM:SS for safe comparison)
+            def _ts_seconds(ts: str) -> int:
+                parts = ts.split(":")
+                try:
+                    return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                except (IndexError, ValueError):
+                    return 0
+            if failure_ts is None or _ts_seconds(a_ts) <= _ts_seconds(failure_ts):
                 interference = True
                 break
 
@@ -152,6 +159,8 @@ def cmd_write_emerging(args) -> int:
         if anomaly.get("severity") in ("high", "critical"):
             new_eps.append(anomaly)
 
+    if new_eps and not ep_path.exists():
+        print(f"[forge_verify --write-emerging] WARNING: emerging-problems file not found: {ep_path} -- skipping write")
     if new_eps and ep_path.exists():
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         with open(ep_path, "a", encoding="utf-8") as f:
@@ -198,7 +207,6 @@ def cmd_gemini_analysis(args) -> int:
         return 0
 
     try:
-        import time
         from google import genai  # type: ignore[import-untyped]
         from google.genai import types  # type: ignore[import-untyped]
     except ImportError:
@@ -211,6 +219,9 @@ def cmd_gemini_analysis(args) -> int:
         return 1
 
     video_path = args.video
+    if not video_path:
+        print("ERROR: --gemini-analysis requires --video PATH", file=sys.stderr)
+        return 1
     log_path = args.log or str(FILTERED_LOG)
 
     if not Path(video_path).exists():
@@ -225,7 +236,6 @@ def cmd_gemini_analysis(args) -> int:
     video_file = client.files.upload(file=video_path)
     while video_file.state.name == "PROCESSING":
         print("  processing...")
-        import time
         time.sleep(3)
         video_file = client.files.get(name=video_file.name)
 
