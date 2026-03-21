@@ -227,8 +227,17 @@ No new modules created. Changes are purely additive — `dry_run=False` default 
 
 ## Acceptance Criteria
 
-- [ ] `pytest phone-bot/tests/test_dry_run.py -v` — all 10 tests pass
-- [ ] Manual E2E validation checklist complete on real hardware
+- [x] `pytest phone-bot/tests/test_dry_run.py -v` — all 11 tests pass
+- [ ] Manual E2E validation checklist complete on real hardware (requires phone)
 - [ ] Airtable Content Library shows no changes after dry-run
 - [ ] Telegram shows session start + result messages for each session
 - [ ] `python main.py --dry-run --phone 1` completes in under 10 minutes
+
+## Implementation Notes (post-review)
+
+- **11 tests** (spec had 10): CLI flag parse, 5 delivery dry_run guards, 4 executor behavior tests
+- **_post_with_retry early return**: Returns "dry_run_skipped" immediately in dry_run (code review fix — spec requirement, was missing)
+- **Warmup paths guarded**: 3 mark_posted calls in warmup TikTok/Instagram/camera-trick now check `self._dry_run` (code review fix)
+- **_dry_run initialized in __init__**: No more fragile getattr pattern (code review fix)
+- **duration_min also capped** at 1.5 min in dry-run (not in spec, but prevents long sessions)
+- **delivery/status.py return type** changed to `dict | None` — no callers use return value

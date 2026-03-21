@@ -862,11 +862,11 @@ async def _run_action_steps(bot, adb, human, niche_keywords, results):
     human.end_session()
 
 
-async def run_today(controllers: dict[int, ADBController]):
+async def run_today(controllers: dict[int, ADBController], dry_run: bool = False):
     """Run today's scheduled sessions."""
     proxy = ProxyQueue(controllers)
     executor = SessionExecutor(controllers, proxy)
-    await executor.run_today()
+    await executor.run_today(dry_run=dry_run)
 
 
 # ---------------------------------------------------------------------------
@@ -915,7 +915,7 @@ def wait_until_midnight():
         time.sleep(min(60, remaining))
 
 
-async def run_forever(controllers: dict[int, ADBController]):
+async def run_forever(controllers: dict[int, ADBController], dry_run: bool = False):
     """Daily loop: run today -> wait for midnight -> repeat.
 
     Checks control.json between days for {"action": "stop"}.
@@ -938,7 +938,7 @@ async def run_forever(controllers: dict[int, ADBController]):
         # Auto-enroll any new accounts from config into warmup
         executor.check_new_phones()
 
-        await executor.run_today()
+        await executor.run_today(dry_run=dry_run)
         log.info("=== Daily run complete ===")
 
         # Check control after the day
@@ -1798,6 +1798,9 @@ def main():
     parser.add_argument("--phone", type=int, help="Filter to specific phone ID (1-4)")
     parser.add_argument("--forever", action="store_true",
                         help="Run 24/7 mode: daily loop with automatic plan loading")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Run full pipeline with Airtable writes suppressed, proxy rotation "
+                             "skipped, scroll shortened to 30s, post screen opened but Post not tapped.")
     args = parser.parse_args()
 
     # Verbose logging in TEST_MODE
@@ -1961,11 +1964,11 @@ def main():
 
     if args.forever:
         log.info("Starting always-on (forever) mode")
-        asyncio.run(run_forever(controllers))
+        asyncio.run(run_forever(controllers, dry_run=args.dry_run))
         return
 
     # Default: run today's plan (warmup sessions run automatically if active)
-    asyncio.run(run_today(controllers))
+    asyncio.run(run_today(controllers, dry_run=args.dry_run))
 
 
 if __name__ == "__main__":

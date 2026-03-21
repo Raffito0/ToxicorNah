@@ -100,6 +100,7 @@ class SessionExecutor:
         self.warmup_states: dict[str, AccountWarmupState] = {}
         self._running = False
         self._pending_record = None
+        self._dry_run = False
         self._load_warmup_state()
 
     # --- Warmup State Persistence ------------------------------------------
@@ -344,8 +345,9 @@ class SessionExecutor:
         except Exception:
             pass  # never let monitoring crash the session
 
-        # Connect phone to proxy (skip in TEST_MODE — use local WiFi)
-        if not config.TEST_MODE:
+        # Connect phone to proxy (skip in TEST_MODE and DRY_RUN — use local WiFi)
+        dry_run = self._dry_run
+        if not config.TEST_MODE and not dry_run:
             if session.get("proxy_rotation_before", False) or self.proxy.active_phone_id != phone_id:
                 if not self.proxy.switch_to_phone(phone_id):
                     # Retry once after delay
@@ -355,6 +357,8 @@ class SessionExecutor:
                     if not self.proxy.switch_to_phone(phone_id):
                         log.error("Proxy switch failed twice for Phone %d, skipping session", phone_id)
                         return "proxy_failed"
+        elif dry_run and not config.TEST_MODE:
+            log.info("DRY RUN: skipping proxy rotation for Phone %d", phone_id)
 
         adb = self.controllers[phone_id]
         human = self._get_human(account)
@@ -574,7 +578,9 @@ class SessionExecutor:
     ) -> str:
         """Try to post, reset app and retry once on retryable failure, fall back to draft.
 
-        Returns one of: "posted" | "draft" | "failed" | "failed_permanent"
+        Returns one of: "posted" | "draft" | "failed" | "failed_permanent" | "dry_run_skipped"
+
+        In dry_run mode: logs the skip and returns "dry_run_skipped" without calling post.
 
         Retry flow:
             Attempt 1: post_video/post_reel
@@ -591,6 +597,11 @@ class SessionExecutor:
 
         DeviceLostError propagates up (not caught here).
         """
+        if dry_run:
+            log.info("DRY RUN: skipping post (would post %s on %s, phone %d)",
+                     video_path, platform, phone_id)
+            return "dry_run_skipped"
+
         from ..actions.tiktok import TIKTOK_PKG
         from ..actions.instagram import INSTAGRAM_PKG
 
@@ -654,6 +665,15 @@ class SessionExecutor:
                                pre_minutes: float, post_minutes: float,
                                phone_id: int):
         """Normal/extended session: scroll -> post -> scroll."""
+        dry_run = self._dry_run
+
+        # In dry-run mode, cap scroll to 30s (0.5 min)
+        if dry_run:
+            pre_minutes = min(pre_minutes, 0.5)
+            post_minutes = min(post_minutes, 0.5)
+            duration_min = min(duration_min, 1.5)
+            log.info("DRY RUN: scroll capped to %.1f/%.1f min", pre_minutes, post_minutes)
+
         video_path = ""
         caption = ""
         record_id = None
@@ -686,16 +706,20 @@ class SessionExecutor:
             video_info = get_next_video(phone_id, platform) if get_next_video else None
             if video_info:
                 self._pending_record = video_info["record_id"]
-                if mark_draft:
+                if not dry_run and mark_draft:
                     mark_draft(video_info["record_id"], platform)
+                elif dry_run:
+                    log.info("DRY RUN: would mark_draft %s [%s]", video_info["record_id"], platform)
             should_post = False
 
         elif should_post and post_outcome == "skipped":
             video_info = get_next_video(phone_id, platform) if get_next_video else None
             if video_info:
                 self._pending_record = video_info["record_id"]
-                if mark_skipped:
+                if not dry_run and mark_skipped:
                     mark_skipped(video_info["record_id"], platform)
+                elif dry_run:
+                    log.info("DRY RUN: would mark_skipped %s [%s]", video_info["record_id"], platform)
             should_post = False
 
         session_keywords = random.sample(
@@ -719,7 +743,7 @@ class SessionExecutor:
         if should_post and video_path and record_id:
             post_result = await self._post_with_retry(
                 bot, adb, platform, video_path, caption,
-                phone_id, record_id,
+                phone_id, record_id, dry_run=dry_run,
             )
             log.info("Post result: %s (phone=%d, platform=%s)", post_result, phone_id, platform)
 
@@ -940,9 +964,12 @@ class SessionExecutor:
                     if video_info:
                         local_path = download_video(video_info["video_url"]) if download_video else None
                         if local_path:
-                            result = bot.post_video(local_path, video_info.get("caption", ""))
-                            if result == "success" and mark_posted:
-                                mark_posted(video_info["record_id"], "tiktok")
+                            if not self._dry_run:
+                                result = bot.post_video(local_path, video_info.get("caption", ""))
+                                if result == "success" and mark_posted:
+                                    mark_posted(video_info["record_id"], "tiktok")
+                            else:
+                                log.info("DRY RUN: would post TikTok video %s", local_path)
             except Exception as e:
                 log.error("Warmup TikTok post failed: %s", e, exc_info=True)
 
@@ -1132,9 +1159,12 @@ class SessionExecutor:
                 if video_info:
                     local_path = download_video(video_info["video_url"]) if download_video else None
                     if local_path:
-                        result = bot.post_reel(local_path, video_info.get("caption", ""))
-                        if result == "success" and mark_posted:
-                            mark_posted(video_info["record_id"], "instagram")
+                        if not self._dry_run:
+                            result = bot.post_reel(local_path, video_info.get("caption", ""))
+                            if result == "success" and mark_posted:
+                                mark_posted(video_info["record_id"], "instagram")
+                        else:
+                            log.info("DRY RUN: would post Instagram reel %s", local_path)
             except Exception as e:
                 log.error("Warmup Instagram post failed: %s", e, exc_info=True)
 
@@ -1244,19 +1274,25 @@ class SessionExecutor:
         if coords:
             x, y = human.jitter_tap(coords[0], coords[1])
             adb.tap(x, y)
-            log.info("Warmup: video posted with camera trick!")
-            await asyncio.sleep(human.timing("t_post_upload"))
-            mark_posted(video_info["record_id"], "tiktok")
+            if not self._dry_run:
+                log.info("Warmup: video posted with camera trick!")
+                await asyncio.sleep(human.timing("t_post_upload"))
+                mark_posted(video_info["record_id"], "tiktok")
+            else:
+                log.info("DRY RUN: would post TikTok camera trick video")
 
         # Clean up
         adb.shell(f'rm "{device_video_path}"')
 
     # --- Day Runner --------------------------------------------------------
 
-    async def run_today(self):
+    async def run_today(self, dry_run: bool = False):
         """Load today's plan and execute all sessions.
         If accounts are in warmup, runs warmup sessions instead of the weekly plan.
         """
+        self._dry_run = dry_run
+        if dry_run:
+            log.info("DRY RUN mode — Airtable writes suppressed, proxy rotation skipped, scroll capped at 30s")
         self._running = True
 
         # Initialize structured event logger
