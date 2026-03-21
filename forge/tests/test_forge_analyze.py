@@ -6,13 +6,16 @@ import os
 from pathlib import Path
 
 
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+
+
 def run_analyze(tmp_path, *args):
     """Run forge_analyze.py with given args, with FORGE_DIR pointing to tmp_path."""
     result = subprocess.run(
         [sys.executable, "forge/forge_analyze.py", *args],
         capture_output=True, text=True,
         env={"FORGE_CACHE_DIR": str(tmp_path), **os.environ},
-        cwd="c:/Users/rafca/OneDrive/Desktop/Toxic or Nah",
+        cwd=str(PROJECT_ROOT),
     )
     return result
 
