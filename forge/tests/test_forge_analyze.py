@@ -59,3 +59,68 @@ def test_callers_no_results(tmp_path):
     cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
     assert "callers" in cache["steps_completed"]
     assert cache["callers"] == []
+
+
+def test_call_chain_finds_app_states(tmp_path):
+    """--call-chain traces up 3 levels and identifies app states."""
+    run_analyze(tmp_path, "--init", "--section", "section-07")
+
+    # Create fake call hierarchy: browse_session -> _return_to_fyp
+    (tmp_path / "tiktok.py").write_text(
+        "def browse_session():\n    _return_to_fyp()\n\n"
+        "def _return_to_fyp():\n    pass\n"
+    )
+    # browse_session is called from main.py
+    (tmp_path / "main.py").write_text("browse_session()\n")
+
+    result = run_analyze(tmp_path, "--call-chain", "_return_to_fyp",
+                         "--search-dir", str(tmp_path))
+    assert result.returncode == 0
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert "call-chain" in cache["steps_completed"]
+    assert isinstance(cache["app_states"], list)
+
+
+def test_protected_core_detects_in_list(tmp_path):
+    """--protected-core returns True for functions in PROTECTED_CORE."""
+    run_analyze(tmp_path, "--init", "--section", "section-07")
+    result = run_analyze(tmp_path, "--protected-core", "_return_to_fyp")
+    assert result.returncode == 0
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert cache["protected_core"] is True
+    assert "protected-core" in cache["steps_completed"]
+
+
+def test_protected_core_not_in_list(tmp_path):
+    """--protected-core returns False for functions NOT in PROTECTED_CORE."""
+    run_analyze(tmp_path, "--init", "--section", "section-07")
+    result = run_analyze(tmp_path, "--protected-core", "browse_session")
+    assert result.returncode == 0
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert cache["protected_core"] is False
+
+
+def test_config_check_finds_missing(tmp_path):
+    """--config-check flags params not in config.py."""
+    run_analyze(tmp_path, "--init", "--section", "section-07")
+    # Create a config.py without the param
+    (tmp_path / "config.py").write_text('HUMAN = {"t_existing": (1.0, 0.1, 0.5, 3.0)}\n')
+
+    result = run_analyze(tmp_path, "--config-check", "--params", "t_missing_param",
+                         "--config-file", str(tmp_path / "config.py"))
+    assert result.returncode == 0
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert "t_missing_param" in cache["config_missing"]
+    assert "config-check" in cache["steps_completed"]
+
+
+def test_config_check_all_present(tmp_path):
+    """--config-check passes when all params exist in config.py."""
+    run_analyze(tmp_path, "--init", "--section", "section-07")
+    (tmp_path / "config.py").write_text('HUMAN = {"t_existing": (1.0, 0.1, 0.5, 3.0)}\n')
+
+    result = run_analyze(tmp_path, "--config-check", "--params", "t_existing",
+                         "--config-file", str(tmp_path / "config.py"))
+    assert result.returncode == 0
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert cache["config_missing"] == []

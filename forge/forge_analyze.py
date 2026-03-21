@@ -136,6 +136,93 @@ def cmd_callers(args) -> int:
     return 0
 
 
+def cmd_call_chain(args) -> int:
+    """Trace call chain for FUNCTION and identify app states."""
+    cache = load_cache()
+    search_dir = args.search_dir or "phone-bot"
+    fn = getattr(args, "call_chain", None)
+
+    # Level 1: direct callers of fn
+    direct = _grep_fallback(search_dir, fn)
+
+    # Cross-reference with known app state entry points
+    entry_points = {
+        "browse_session": "FYP",
+        "browse_following_session": "Following",
+        "browse_explore_session": "Explore",
+        "browse_shop_session": "Shop",
+        "browse_inbox_session": "Inbox",
+    }
+    app_states = []
+
+    for ep, state in entry_points.items():
+        # Check if ep is in direct callers of fn
+        if any(ep in line for line in direct):
+            app_states.append(state)
+        else:
+            # Level 2 check: does ep call fn indirectly?
+            ep_calls = _grep_fallback(search_dir, ep)
+            if any(fn in line for line in ep_calls):
+                app_states.append(state)
+
+    if not app_states:
+        app_states = ["unknown — trace manually"]
+
+    cache.setdefault("steps_completed", [])
+    if "call-chain" not in cache["steps_completed"]:
+        cache["steps_completed"].append("call-chain")
+    cache["app_states"] = app_states
+    save_cache(cache)
+
+    print(f"[forge_analyze --call-chain] {fn} reachable from: {', '.join(app_states)}")
+    return 0
+
+
+def cmd_protected_core(args) -> int:
+    """Check if FUNCTION is in PROTECTED_CORE."""
+    cache = load_cache()
+    fn = getattr(args, "protected_core", None)
+    is_protected = fn in PROTECTED_CORE
+
+    cache.setdefault("steps_completed", [])
+    if "protected-core" not in cache["steps_completed"]:
+        cache["steps_completed"].append("protected-core")
+    cache["protected_core"] = is_protected
+    save_cache(cache)
+
+    status = "YES — browse-smoke required after fix" if is_protected else "no"
+    print(f"[forge_analyze --protected-core] {fn}: {status}")
+    return 0
+
+
+def cmd_config_check(args) -> int:
+    """Check if config params exist in config.py."""
+    cache = load_cache()
+    params = [p.strip() for p in (args.params or "").split(",") if p.strip()]
+    config_file = Path(args.config_file or "phone-bot/config.py")
+
+    missing = []
+    if config_file.exists():
+        config_text = config_file.read_text(encoding="utf-8", errors="replace")
+        for param in params:
+            if f'"{param}"' not in config_text and f"'{param}'" not in config_text:
+                missing.append(param)
+    else:
+        print(f"[forge_analyze --config-check] WARNING: config file not found: {config_file}")
+
+    cache.setdefault("steps_completed", [])
+    if "config-check" not in cache["steps_completed"]:
+        cache["steps_completed"].append("config-check")
+    cache["config_missing"] = missing
+    save_cache(cache)
+
+    if missing:
+        print(f"[forge_analyze --config-check] MISSING in config.py: {', '.join(missing)}")
+    else:
+        print(f"[forge_analyze --config-check] all params present")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="FORGE v2 Phase 1 — Analysis CLI")
     parser.add_argument("--init", action="store_true", help="Initialize fresh cache")
@@ -146,6 +233,7 @@ def main() -> int:
     parser.add_argument("--protected-core", metavar="FUNCTION", help="Check if FUNCTION is PROTECTED_CORE")
     parser.add_argument("--config-check", action="store_true", help="Check config params exist")
     parser.add_argument("--params", default="", help="Comma-separated param names to check")
+    parser.add_argument("--config-file", default="phone-bot/config.py", help="Path to config.py")
     parser.add_argument("--pixel-check", action="store_true", help="Compute pixel math for all phones")
     parser.add_argument("--factor", type=float, help="Proportional factor for pixel math (e.g. 0.20)")
     parser.add_argument("--gemini-check", action="store_true", help="Check if Gemini prompts changed")
@@ -158,6 +246,12 @@ def main() -> int:
         return cmd_init(args)
     elif args.callers:
         return cmd_callers(args)
+    elif getattr(args, "call_chain", None):
+        return cmd_call_chain(args)
+    elif getattr(args, "protected_core", None):
+        return cmd_protected_core(args)
+    elif args.config_check:
+        return cmd_config_check(args)
     else:
         parser.print_help()
         return 1
