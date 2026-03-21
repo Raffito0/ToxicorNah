@@ -1,4 +1,5 @@
 """Tests for Phone, Bot, BotAccount, Proxy, ProxyRotation models."""
+import json
 import os
 import time
 import pytest
@@ -7,6 +8,9 @@ from app.models import (Phone, Bot, BotAccount, User, Proxy, ProxyRotation,
                         TimingPreset, TimingOverride, WeeklyPlan, SessionLog,
                         InterventionLog)
 from app import ensure_columns
+from app.seed_tiktok import (seed_phones, seed_proxy, seed_presets,
+                              migrate_warmup, migrate_personality,
+                              migrate_niche, NORMAL_PARAMS)
 
 
 def test_phone_table_created(app, db):
@@ -677,3 +681,199 @@ def test_full_schema_creation(app, db):
     assert db.session.get(Phone, 1) is not None
     assert db.session.get(Proxy, proxy.id) is not None
     assert db.session.get(TimingPreset, preset.id) is not None
+
+
+# ─── Section 07: Seed script ──────────────────────────────────────
+
+def test_seed_phones(app, db):
+    """After seed_phones(), Phone.query.count() == 4."""
+    count = seed_phones(db)
+    assert count == 4
+    assert Phone.query.count() == 4
+    p1 = db.session.get(Phone, 1)
+    assert p1.name == 'Galaxy S9+'
+    assert p1.screen_w == 1080
+    p4 = db.session.get(Phone, 4)
+    assert p4.name == 'Motorola E22i'
+    assert p4.density == 280
+    assert p4.retry_tolerance == 4
+
+
+def test_seed_phones_idempotent(app, db):
+    """Calling seed_phones() twice should still result in 4."""
+    seed_phones(db)
+    seed_phones(db)
+    assert Phone.query.count() == 4
+
+
+def test_seed_proxy(app, db):
+    """After seed_proxy(), Proxy with sinister.services exists."""
+    count = seed_proxy(db)
+    assert count == 1
+    proxy = Proxy.query.filter_by(host='sinister.services').first()
+    assert proxy is not None
+    assert proxy.username_env == 'PROXY_1_USERNAME'
+    assert proxy.password_env == 'PROXY_1_PASSWORD'
+
+
+def test_seed_proxy_idempotent(app, db):
+    """Calling seed_proxy() twice should still result in 1."""
+    seed_proxy(db)
+    seed_proxy(db)
+    assert Proxy.query.count() == 1
+
+
+def test_seed_presets_count(app, db):
+    """After seed_presets(), TimingPreset.query.count() == 4."""
+    count = seed_presets(db)
+    assert count == 4
+    assert TimingPreset.query.count() == 4
+
+
+def test_seed_presets_normal(app, db):
+    """Normal preset should contain key timing params."""
+    seed_presets(db)
+    normal = TimingPreset.query.filter_by(name='Normal').first()
+    assert 't_app_load' in normal.params_json
+    assert 't_scroll_pause' in normal.params_json or 't_nav_settle' in normal.params_json
+    assert normal.is_default is True
+
+
+def test_seed_presets_cautious(app, db):
+    """Cautious median should be Normal * 1.3."""
+    seed_presets(db)
+    normal = TimingPreset.query.filter_by(name='Normal').first()
+    cautious = TimingPreset.query.filter_by(name='Cautious').first()
+    for param in ['t_app_load', 't_nav_settle']:
+        n_median = normal.params_json[param][0]
+        c_median = cautious.params_json[param][0]
+        assert abs(c_median - n_median * 1.3) < 0.01
+
+
+def test_seed_presets_aggressive(app, db):
+    """Aggressive median should be Normal * 0.7."""
+    seed_presets(db)
+    normal = TimingPreset.query.filter_by(name='Normal').first()
+    aggressive = TimingPreset.query.filter_by(name='Aggressive').first()
+    for param in ['t_app_load', 't_nav_settle']:
+        n_median = normal.params_json[param][0]
+        a_median = aggressive.params_json[param][0]
+        assert abs(a_median - n_median * 0.7) < 0.01
+
+
+def test_seed_presets_stealth(app, db):
+    """Stealth: action params * 1.5, verification params * 1.0."""
+    seed_presets(db)
+    normal = TimingPreset.query.filter_by(name='Normal').first()
+    stealth = TimingPreset.query.filter_by(name='Stealth').first()
+    # Action param should be 1.5x
+    n_action = normal.params_json['t_app_load'][0]
+    s_action = stealth.params_json['t_app_load'][0]
+    assert abs(s_action - n_action * 1.5) < 0.01
+    # Verify param should be 1.0x
+    n_verify = normal.params_json['t_recovery_settle'][0]
+    s_verify = stealth.params_json['t_recovery_settle'][0]
+    assert abs(s_verify - n_verify * 1.0) < 0.01
+
+
+def test_seed_presets_clamps(app, db):
+    """Derived preset min >= Normal_min * 0.5, max <= Normal_max * 2.0."""
+    seed_presets(db)
+    normal = TimingPreset.query.filter_by(name='Normal').first()
+    for preset_name in ['Cautious', 'Aggressive', 'Stealth']:
+        preset = TimingPreset.query.filter_by(name=preset_name).first()
+        for param in preset.params_json:
+            n_min = normal.params_json[param][2]
+            n_max = normal.params_json[param][3]
+            p_min = preset.params_json[param][2]
+            p_max = preset.params_json[param][3]
+            assert p_min >= n_min * 0.5 - 0.01, f"{preset_name}.{param} min too low"
+            assert p_max <= n_max * 2.0 + 0.01, f"{preset_name}.{param} max too high"
+
+
+def test_seed_presets_idempotent(app, db):
+    """Calling seed_presets() twice should still result in 4."""
+    seed_presets(db)
+    seed_presets(db)
+    assert TimingPreset.query.count() == 4
+
+
+def test_migrate_warmup(app, db, tmp_path):
+    """Create a fake warmup JSON, run migrate_warmup(), verify."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot, username='test_warmup_acct')
+    warmup_file = tmp_path / 'warmup_state.json'
+    warmup_file.write_text(json.dumps({
+        'test_warmup_acct': {'current_day': 3, 'completed': False}
+    }))
+    count = migrate_warmup(db, warmup_path=str(warmup_file))
+    assert count == 1
+    result = db.session.get(BotAccount, acct.id)
+    assert result.warmup_json['current_day'] == 3
+
+
+def test_migrate_warmup_no_file(app, db):
+    """migrate_warmup() with nonexistent path should not raise."""
+    count = migrate_warmup(db, warmup_path='/nonexistent/path.json')
+    assert count == 0
+
+
+def test_migrate_warmup_no_overwrite(app, db, tmp_path):
+    """If BotAccount already has warmup_json, don't overwrite."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot, username='warmup_existing',
+                         warmup_json={'current_day': 5, 'completed': True})
+    warmup_file = tmp_path / 'warmup_state.json'
+    warmup_file.write_text(json.dumps({
+        'warmup_existing': {'current_day': 1, 'completed': False}
+    }))
+    migrate_warmup(db, warmup_path=str(warmup_file))
+    result = db.session.get(BotAccount, acct.id)
+    assert result.warmup_json['current_day'] == 5  # unchanged
+
+
+def test_migrate_personality_defaults(app, db):
+    """Without memory files, personality_json should use midpoint defaults."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot)
+    migrate_personality(db, data_dir='/nonexistent/dir')
+    result = db.session.get(BotAccount, acct.id)
+    assert result.personality_json['reels_preference'] == 0.5
+    assert result.personality_json['switch_threshold'] == 0.7
+
+
+def test_migrate_personality_from_file(app, db, tmp_path):
+    """When memory file exists, evolved personality values should be used."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot, username='evolved_acct')
+    memory = {'evolved_acct': {'reels_preference': 0.9, 'story_affinity': 0.8}}
+    (tmp_path / 'memory_test_ph1.json').write_text(json.dumps(memory))
+    migrate_personality(db, data_dir=str(tmp_path))
+    result = db.session.get(BotAccount, acct.id)
+    assert result.personality_json['reels_preference'] == 0.9
+
+
+def test_migrate_niche(app, db):
+    """After migrate_niche(), TikTok BotAccounts should have niche_json."""
+    u = _make_user(db)
+    bot = _make_bot(db, u, platform='tiktok')
+    acct = _make_account(db, bot, platform='tiktok')
+    migrate_niche(db)
+    result = db.session.get(BotAccount, acct.id)
+    assert result.niche_json is not None
+    assert 'toxic relationship' in result.niche_json['keywords']
+
+
+def test_seed_full_run(app, db, capsys):
+    """Running the full seed should print a summary."""
+    seed_phones(db)
+    seed_proxy(db)
+    seed_presets(db)
+    # Verify all data exists
+    assert Phone.query.count() == 4
+    assert Proxy.query.count() == 1
+    assert TimingPreset.query.count() == 4
