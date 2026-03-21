@@ -129,6 +129,7 @@ def cmd_callers(args) -> int:
             pass
 
     cache["callers"] = callers
+    cache["function"] = fn
     if "callers" not in cache.get("steps_completed", []):
         cache.setdefault("steps_completed", []).append("callers")
     save_cache(cache)
@@ -272,10 +273,19 @@ def cmd_regression_check(args) -> int:
     # Find entries whose proven functions overlap with fn
     overlapping = [e for e in entries if fn in e.get("functions", [])]
 
-    # For each overlapping entry, find the files that call fn
+    # Only search for caller files when there is registry overlap
+    files_to_read = []
+    if not overlapping:
+        cache.setdefault("steps_completed", [])
+        if "regression-check" not in cache["steps_completed"]:
+            cache["steps_completed"].append("regression-check")
+        cache["regression_files_to_read"] = []
+        save_cache(cache)
+        print(f"[forge_analyze --regression-check] no proven sections overlap with {fn}")
+        return 0
+
     search_dir = args.search_dir or "phone-bot"
     caller_lines = _grep_fallback(search_dir, fn)
-    files_to_read = []
     for line in caller_lines:
         parts = line.split(":")
         if len(parts) >= 3:

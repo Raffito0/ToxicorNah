@@ -48,6 +48,7 @@ def test_callers_finds_function(tmp_path):
     assert len(cache["callers"]) >= 1
     assert cache["callers"][0]["file"].endswith("tiktok.py")
     assert cache["callers"][0]["line"] == 2
+    assert cache["function"] == "_return_to_fyp"
 
 
 def test_callers_no_results(tmp_path):
@@ -142,15 +143,17 @@ def test_regression_check_reads_function_from_cache(tmp_path):
     """--regression-check uses function name stored by --callers step and finds caller files."""
     run_analyze(tmp_path, "--init", "--section", "section-07")
 
-    # Simulate --callers having run and stored function name
-    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
-    cache["function"] = "_return_to_fyp"
-    (tmp_path / ".analyze_cache.json").write_text(json.dumps(cache))
-
     # Create a fake caller file that CALLS _return_to_fyp (not just defines it)
     (tmp_path / "tiktok.py").write_text(
         "def browse_session():\n    result = _return_to_fyp()\n    return result\n"
     )
+
+    # Use --callers to set cache["function"] (real workflow, not manual injection)
+    run_analyze(tmp_path, "--callers", "_return_to_fyp", "--search-dir", str(tmp_path))
+
+    # Verify --callers stored the function name
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert cache["function"] == "_return_to_fyp"
 
     # Create a fake registry with a completed section covering _return_to_fyp
     registry = {
