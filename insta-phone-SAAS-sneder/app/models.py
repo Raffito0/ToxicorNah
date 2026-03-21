@@ -19,6 +19,18 @@ class Phone(db.Model):
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
+class Proxy(db.Model):
+    """Stub for FK resolution — fully implemented in section-03."""
+    __tablename__ = 'proxy'
+    id = db.Column(db.Integer, primary_key=True)
+
+
+class TimingPreset(db.Model):
+    """Stub for FK resolution — fully implemented in section-04."""
+    __tablename__ = 'timing_preset'
+    id = db.Column(db.Integer, primary_key=True)
+
+
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), nullable=False, unique=True)
@@ -78,7 +90,16 @@ class Bot(db.Model):
     typing_speed_min = db.Column(db.Integer, default=2)
     typing_speed_max = db.Column(db.Integer, default=5)
 
-    
+    # ─── New fields (section-02) ───────────────────────────────────
+    platform = db.Column(db.String(20), default='instagram')
+    phone_ref_id = db.Column(db.Integer, db.ForeignKey('phone.id'), nullable=True)
+    proxy_id = db.Column(db.Integer, db.ForeignKey('proxy.id'), nullable=True)
+    timing_preset_id = db.Column(db.Integer, db.ForeignKey('timing_preset.id'), nullable=True)
+    always_on = db.Column(db.Boolean, default=False)
+    dry_run = db.Column(db.Boolean, default=False)
+    control_status = db.Column(db.String(20), default='stopped')
+    scrcpy_port = db.Column(db.Integer, nullable=True)
+
     accounts = db.relationship('BotAccount', backref='bot', lazy=True, cascade='all, delete-orphan')
     leads = db.relationship('ToMessage', backref='assigned_bot', lazy=True, cascade='all, delete-orphan')
     history = db.relationship('Messaged', backref='assigned_bot', lazy=True, cascade='all, delete-orphan')
@@ -180,9 +201,23 @@ class BotAccount(db.Model):
     like_probability_during_browse_min = db.Column(db.Integer, default=60)
     like_probability_during_browse_max = db.Column(db.Integer, default=70)
     
+    # ─── New fields (section-02) ───────────────────────────────────
+    platform = db.Column(db.String(20), default='instagram')
+    personality_json = db.Column(db.JSON, nullable=True)
+    warmup_json = db.Column(db.JSON, nullable=True)
+    niche_json = db.Column(db.JSON, nullable=True)
+    notify_before_post = db.Column(db.Boolean, default=True)
+
+    @property
+    def warmup_completed(self) -> bool:
+        """Read warmup completion from JSON (single source of truth)."""
+        if self.warmup_json is None:
+            return False
+        return self.warmup_json.get('completed', False)
+
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-   
+
     # Add relationships to handle cascading deletes for BotAccount
     followers = db.relationship('AccountFollowers', backref='account', lazy=True, cascade='all, delete-orphan')
     follows = db.relationship('Follow', backref='bot_account', lazy=True, cascade='all, delete-orphan')
