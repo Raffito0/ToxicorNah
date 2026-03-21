@@ -5,6 +5,7 @@ and starts the session executor to run today's plan.
 
 Usage:
     python main.py                       # run today's plan (or warmup if active)
+    python main.py --forever             # 24/7 mode: daily loop with auto plan loading
     python main.py --dashboard           # start web dashboard
     python main.py --test                # test device connections
     python main.py --warmup              # initialize warmup for all accounts
@@ -23,9 +24,10 @@ import random
 import subprocess
 import sys
 import time
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 
-from .config import ADB_PATH, PHONES, ACCOUNTS, LOGS_DIR, GEMINI, AIRTABLE, TEST_MODE
+from .config import ADB_PATH, PHONES, ACCOUNTS, LOGS_DIR, GEMINI, AIRTABLE, TEST_MODE, DATA_DIR
 from .core.adb import ADBController, DeviceLostError, DeviceConfigError
 from .core.proxy import ProxyQueue
 from .core.human import HumanEngine
@@ -865,6 +867,90 @@ async def run_today(controllers: dict[int, ADBController]):
     proxy = ProxyQueue(controllers)
     executor = SessionExecutor(controllers, proxy)
     await executor.run_today()
+
+
+# ---------------------------------------------------------------------------
+# Always-On: run_forever + control file
+# ---------------------------------------------------------------------------
+
+_CONTROL_PATH = os.path.join(DATA_DIR, "control.json")
+
+
+def atomic_write_control(data: dict):
+    """Write data as JSON to control.json atomically via os.replace()."""
+    tmp_path = _CONTROL_PATH + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp_path, _CONTROL_PATH)
+
+
+def read_control() -> dict:
+    """Read control.json. Returns {} if missing or invalid JSON."""
+    try:
+        with open(_CONTROL_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def wait_until_midnight():
+    """Sleep until 00:05 next day (5-min buffer). Sleeps in 60s intervals for interruptibility."""
+    now = datetime.now()
+    target_today = now.replace(hour=0, minute=5, second=0, microsecond=0)
+    # If we're before 00:05, target is today 00:05; otherwise tomorrow 00:05
+    if now <= target_today:
+        target = target_today
+    else:
+        target = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+
+    remaining = (target - now).total_seconds()
+    if remaining <= 0:
+        return
+
+    log.info("Sleeping until %s (%.0f minutes)", target.strftime("%H:%M"), remaining / 60)
+    while True:
+        remaining = (target - datetime.now()).total_seconds()
+        if remaining <= 0:
+            break
+        time.sleep(min(60, remaining))
+
+
+async def run_forever(controllers: dict[int, ADBController]):
+    """Daily loop: run today -> wait for midnight -> repeat.
+
+    Checks control.json between days for {"action": "stop"}.
+    Gracefully finishes the current day before stopping.
+    """
+    log.info("Starting always-on mode (run_forever)")
+
+    while True:
+        # Check control before starting the day
+        ctrl = read_control()
+        if ctrl.get("action") == "stop":
+            log.info("Control file says stop — exiting run_forever before starting today")
+            break
+
+        # Run today's sessions
+        log.info("=== Starting daily run: %s ===", datetime.now().strftime("%Y-%m-%d"))
+        proxy = ProxyQueue(controllers)
+        executor = SessionExecutor(controllers, proxy)
+
+        # Auto-enroll any new accounts from config into warmup
+        executor.check_new_phones()
+
+        await executor.run_today()
+        log.info("=== Daily run complete ===")
+
+        # Check control after the day
+        ctrl = read_control()
+        if ctrl.get("action") == "stop":
+            log.info("Control file says stop — exiting run_forever after today's run")
+            break
+
+        # Wait for midnight
+        wait_until_midnight()
+
+    log.info("run_forever exited cleanly")
 
 
 def init_warmup(controllers: dict[int, ADBController], phone_filter: int = None):
@@ -1710,6 +1796,8 @@ def main():
     parser.add_argument("--duration", type=int, default=5,
                         help="Duration in minutes for --scroll-only (default: 5)")
     parser.add_argument("--phone", type=int, help="Filter to specific phone ID (1-4)")
+    parser.add_argument("--forever", action="store_true",
+                        help="Run 24/7 mode: daily loop with automatic plan loading")
     args = parser.parse_args()
 
     # Verbose logging in TEST_MODE
@@ -1869,6 +1957,11 @@ def main():
 
     if args.warmup:
         init_warmup(controllers, phone_filter=args.phone)
+        return
+
+    if args.forever:
+        log.info("Starting always-on (forever) mode")
+        asyncio.run(run_forever(controllers))
         return
 
     # Default: run today's plan (warmup sessions run automatically if active)

@@ -246,22 +246,29 @@ print('stop written')
 
 ---
 
-## Files to Modify/Create
+## Files Modified/Created (Actual)
 
-| Action | File |
-|--------|------|
-| Modify | `phone-bot/main.py` — add `run_forever()`, `wait_until_midnight()`, `atomic_write_control()`, `read_control()`, `--forever` flag |
-| Modify | `phone-bot/planner/executor.py` — add `check_new_phones()`, `load_or_generate_today_plan()` |
-| Create | `phone-bot/data/control.json` — default `{"action": "none"}` |
-| Create | `phone-bot/data/.gitkeep` |
-| Create | `phone-bot/tests/test_run_forever.py` |
+| Action | File | Change |
+|--------|------|--------|
+| Modify | `phone-bot/main.py` | Added `run_forever()`, `wait_until_midnight()`, `atomic_write_control()`, `read_control()`, `--forever` CLI flag. `_CONTROL_PATH` uses `DATA_DIR`. |
+| Modify | `phone-bot/planner/executor.py` | Added `check_new_phones()` on SessionExecutor, wired into `run_today()` before warmup phase. |
+| Create | `phone-bot/tests/test_run_forever.py` | 17 tests covering control file, loop behavior, check_new_phones logic, time calculations. |
+
+### Deviations from Plan
+
+1. **`load_or_generate_today_plan()` not created** — `run_today()` already calls `load_weekly_plan()` internally. A separate wrapper would duplicate logic. `run_forever()` creates a fresh `SessionExecutor` each day which handles plan loading.
+2. **`daily_summary()` not called in run_forever** — Requires session count accumulation infrastructure not yet built. TelegramMonitor.daily_summary() exists (section-04) but DailySummary data aggregation is deferred.
+3. **No `data/control.json` default file** — `read_control()` handles missing file gracefully (returns {}). No `.gitkeep` needed since data/ already exists.
+4. **`wait_until_midnight()` improved** — Recomputes remaining time each 60s iteration (no drift). Uses `<=` for 00:05 edge case.
+5. **`check_new_phones()` called in both paths** — Wired into `run_today()` (always runs) and additionally in `run_forever()` before each day.
+6. **17 tests instead of 5** — Added tests for check_new_phones logic, daily_summary call tracking, missing control file, and edge cases.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] `pytest phone-bot/tests/test_run_forever.py -v` — all 5 tests pass
+- [x] `pytest phone-bot/tests/test_run_forever.py -v` — all 17 tests pass
 - [ ] `python main.py --forever` runs daily loop without error in TEST_MODE
 - [ ] Writing `{"action": "stop"}` to `control.json` causes clean exit after current day
 - [ ] `KeyboardInterrupt` during `wait_until_midnight()` terminates immediately
-- [ ] New phone added to `config.ACCOUNTS` is auto-enrolled in warmup at next day start
+- [x] New phone added to `config.ACCOUNTS` is auto-enrolled in warmup at next day start

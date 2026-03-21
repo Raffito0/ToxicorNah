@@ -144,6 +144,23 @@ class SessionExecutor:
         log.info("Warmup initialized for %s (%d days, pic=day %d, bio=day %d)",
                  account_name, state.total_days, state.profile_pic_day, state.bio_day)
 
+    def check_new_phones(self):
+        """Auto-enroll new accounts found in config.ACCOUNTS into warmup.
+
+        Compares config.ACCOUNTS against warmup_state.json. Any account
+        not in warmup (and not already completed) gets enrolled.
+        """
+        known_accounts = set(self.warmup_states.keys())
+        for acc in config.ACCOUNTS:
+            name = acc["name"]
+            if name not in known_accounts:
+                log.info("New account discovered: %s — enrolling in warmup", name)
+                self.init_warmup(
+                    account_name=name,
+                    platform=acc["platform"],
+                    phone_id=acc["phone_id"],
+                )
+
     def is_in_warmup(self, account_name: str) -> bool:
         """Check if an account is still in warmup phase."""
         state = self.warmup_states.get(account_name)
@@ -1264,6 +1281,9 @@ class SessionExecutor:
 
         # Track phones that lost USB connection (shared across phases)
         dead_phones = set()
+
+        # --- Check for new phones and auto-enroll in warmup ---
+        self.check_new_phones()
 
         # --- Phase 1: Run warmup sessions for accounts still in warmup ---
         warmup_accounts = {name: state for name, state in self.warmup_states.items()
