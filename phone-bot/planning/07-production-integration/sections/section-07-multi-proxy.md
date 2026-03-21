@@ -183,8 +183,18 @@ No code changes will be needed in `proxy.py` for this migration — only the dat
 
 ## Acceptance Criteria
 
-- [ ] `pytest phone-bot/tests/test_multi_proxy.py -v` — all 5 tests pass
-- [ ] `grep -n "config.PROXY[^S]" phone-bot/core/proxy.py` returns no results (old single-proxy ref gone)
-- [ ] Existing proxy behavior unchanged with only 1 entry in `PROXIES` (backward compatible)
-- [ ] `ValueError` raised with missing proxy_id in message when proxy_id not found
-- [ ] All accounts in `config.ACCOUNTS` have valid `proxy_id` (validated by test)
+- [x] `pytest phone-bot/tests/test_multi_proxy.py -v` — all 9 tests pass
+- [x] `grep -n "config.PROXY[^S]" phone-bot/core/proxy.py` returns no results (old single-proxy ref gone)
+- [x] Existing proxy behavior unchanged with only 1 entry in `PROXIES` (backward compatible via `PROXY = PROXIES[0]` alias)
+- [x] `ValueError` raised with missing proxy_id in message when proxy_id not found
+- [x] `ValueError` raised when account missing proxy_id key entirely (no silent fallback)
+- [x] `ValueError` raised when no account exists for phone_id
+- [x] All accounts in `config.ACCOUNTS` have valid `proxy_id` (validated by test)
+- [x] All accounts on same phone share same proxy_id (validated by test)
+
+## Implementation Notes (post-review)
+
+- **9 tests** instead of spec's 5: added tests for no-account phone, missing proxy_id key, and same-phone consistency
+- **No silent fallback**: `_get_proxy_for_phone()` raises ValueError if proxy_id key is missing (code review fix #3)
+- **Backward compat alias**: `PROXY = PROXIES[0]` kept for any external code that still references `config.PROXY`
+- **Env var fallback chain**: `PROXY_1_USERNAME` → `PROXY_USERNAME` — existing .env files work without changes

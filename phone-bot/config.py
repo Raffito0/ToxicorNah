@@ -81,30 +81,43 @@ for i, p in enumerate(PHONES):
 
 # --- Accounts -----------------------------------------------------------------
 ACCOUNTS = [
-    {"name": "ph1_tiktok",    "phone_id": 1, "platform": "tiktok"},
-    {"name": "ph1_instagram", "phone_id": 1, "platform": "instagram"},
-    {"name": "ph2_tiktok",    "phone_id": 2, "platform": "tiktok"},
-    {"name": "ph2_instagram", "phone_id": 2, "platform": "instagram"},
-    {"name": "ph3_tiktok",    "phone_id": 3, "platform": "tiktok"},
-    {"name": "ph3_instagram", "phone_id": 3, "platform": "instagram"},
-    {"name": "ph4_tiktok",    "phone_id": 4, "platform": "tiktok"},
-    {"name": "ph4_instagram", "phone_id": 4, "platform": "instagram"},
+    {"name": "ph1_tiktok",    "phone_id": 1, "platform": "tiktok",    "proxy_id": "proxy-1"},
+    {"name": "ph1_instagram", "phone_id": 1, "platform": "instagram", "proxy_id": "proxy-1"},
+    {"name": "ph2_tiktok",    "phone_id": 2, "platform": "tiktok",    "proxy_id": "proxy-1"},
+    {"name": "ph2_instagram", "phone_id": 2, "platform": "instagram", "proxy_id": "proxy-1"},
+    {"name": "ph3_tiktok",    "phone_id": 3, "platform": "tiktok",    "proxy_id": "proxy-1"},
+    {"name": "ph3_instagram", "phone_id": 3, "platform": "instagram", "proxy_id": "proxy-1"},
+    {"name": "ph4_tiktok",    "phone_id": 4, "platform": "tiktok",    "proxy_id": "proxy-1"},
+    {"name": "ph4_instagram", "phone_id": 4, "platform": "instagram", "proxy_id": "proxy-1"},
 ]
 
-# --- Proxy (SOCKS5 via SSTap + MyPublicWiFi) ----------------------------------
-_proxy_user = os.getenv("PROXY_USERNAME", "")
-_proxy_pass = os.getenv("PROXY_PASSWORD", "")
-_proxy_token = os.getenv("PROXY_ROTATION_TOKEN", "")
-PROXY = {
-    "host": "sinister.services",
-    "port": 20002,
-    "username": _proxy_user,
-    "password": _proxy_pass,
-    "rotation_url": f"https://sinister.services/selling/rotate?token={_proxy_token}",
-    "socks5_url": f"socks5://{_proxy_user}:{_proxy_pass}@sinister.services:20002",
-    "hotspot_ssid": os.getenv("HOTSPOT_SSID", "PhoneBot_Proxy"),
-    "hotspot_password": os.getenv("HOTSPOT_PASSWORD", ""),
-}
+# --- Proxies (SOCKS5 via SSTap + MyPublicWiFi) --------------------------------
+# Each proxy has a unique "id" used by account proxy_id for lookup.
+# Env var fallback chain: PROXY_1_* → PROXY_* (backward compatible).
+_p1_user = os.getenv("PROXY_1_USERNAME", os.getenv("PROXY_USERNAME", ""))
+_p1_pass = os.getenv("PROXY_1_PASSWORD", os.getenv("PROXY_PASSWORD", ""))
+_p1_token = os.getenv("PROXY_1_ROTATION_TOKEN", os.getenv("PROXY_ROTATION_TOKEN", ""))
+PROXIES = [
+    {
+        "id": "proxy-1",
+        "host": "sinister.services",
+        "port": 20002,
+        "username": _p1_user,
+        "password": _p1_pass,
+        "rotation_url": f"https://sinister.services/selling/rotate?token={_p1_token}",
+        "socks5_url": f"socks5://{_p1_user}:{_p1_pass}@sinister.services:20002",
+        "hotspot_ssid": os.getenv("PROXY_1_HOTSPOT_SSID", os.getenv("HOTSPOT_SSID", "PhoneBot_Proxy")),
+        "hotspot_password": os.getenv("PROXY_1_HOTSPOT_PASSWORD", os.getenv("HOTSPOT_PASSWORD", "")),
+    },
+    # Add proxy-2, proxy-3 etc. when scaling beyond 3 phones:
+    # {
+    #     "id": "proxy-2",
+    #     "host": "...",
+    #     ...
+    # },
+]
+# Backward compat alias (read-only, points to first proxy)
+PROXY = PROXIES[0]
 
 # --- Airtable (Content Library) -----------------------------------------------
 AIRTABLE = {

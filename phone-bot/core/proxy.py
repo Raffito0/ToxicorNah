@@ -38,7 +38,28 @@ class ProxyQueue:
         """controllers: {phone_id: ADBController}"""
         self.controllers = controllers
         self.active_phone_id: int | None = None
-        self._proxy_config = config.PROXY
+        self._proxies: list[dict] = config.PROXIES
+
+    def _get_proxy_for_phone(self, phone_id: int) -> dict:
+        """Return the proxy config assigned to this phone's account.
+
+        Looks up the account for phone_id, reads its proxy_id, then finds
+        the matching entry in config.PROXIES.
+        Raises ValueError if proxy_id not found in PROXIES list.
+        """
+        account = next((a for a in config.ACCOUNTS if a["phone_id"] == phone_id), None)
+        if account is None:
+            raise ValueError(f"No account found for phone_id={phone_id}")
+
+        proxy_id = account.get("proxy_id")
+        if proxy_id is None:
+            raise ValueError(f"Account '{account['name']}' missing proxy_id")
+
+        proxy = next((p for p in self._proxies if p["id"] == proxy_id), None)
+        if proxy is None:
+            raise ValueError(f"proxy_id '{proxy_id}' not found in config.PROXIES")
+
+        return proxy
 
     @property
     def active_controller(self) -> ADBController | None:
@@ -60,12 +81,15 @@ class ProxyQueue:
         if self.active_phone_id:
             self.disconnect_current()
 
+        # Look up the proxy assigned to this phone
+        proxy_config = self._get_proxy_for_phone(phone_id)
+
         # Step 2: Rotate proxy IP (retry once on failure)
         if rotate_ip:
-            if not self._rotate_proxy_ip():
+            if not self._rotate_proxy_ip(proxy_config):
                 log.warning("Proxy rotation failed, retrying in 3s...")
                 time.sleep(_hw_delay(3.0, 0.3, 1, 6))
-                if not self._rotate_proxy_ip():
+                if not self._rotate_proxy_ip(proxy_config):
                     log.error("Proxy rotation failed twice -- aborting phone switch "
                               "(risk: two phones on same IP)")
                     return False
@@ -77,8 +101,8 @@ class ProxyQueue:
             log.error("Phone %d not found in controllers", phone_id)
             return False
 
-        ssid = self._proxy_config["hotspot_ssid"]
-        password = self._proxy_config["hotspot_password"]
+        ssid = proxy_config["hotspot_ssid"]
+        password = proxy_config["hotspot_password"]
 
         log.info("Connecting Phone %d to WiFi '%s'...", phone_id, ssid)
         ctrl.connect_wifi(ssid, password)
@@ -116,9 +140,9 @@ class ProxyQueue:
                 log.warning("Failed to disconnect Phone %d: %s", phone_id, e)
         self.active_phone_id = None
 
-    def _rotate_proxy_ip(self) -> bool:
+    def _rotate_proxy_ip(self, proxy_config: dict) -> bool:
         """Call the proxy rotation URL to get a new IP. Returns True on success."""
-        url = self._proxy_config["rotation_url"]
+        url = proxy_config["rotation_url"]
         try:
             resp = httpx.get(url, timeout=10)
             if resp.status_code == 200:
