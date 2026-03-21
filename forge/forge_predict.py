@@ -74,9 +74,9 @@ def _get_diff_text(args) -> str:
         return Path(diff_file).read_text(encoding="utf-8")
     result = subprocess.run(
         ["git", "diff", "phone-bot/"],
-        capture_output=True, text=True
+        capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
-    return result.stdout
+    return result.stdout or ""
 
 
 def cmd_log_signatures(args) -> int:
@@ -207,7 +207,7 @@ def cmd_precondition_verify(args) -> int:
             ])],
             config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=100),
         )
-        answer = response.text.strip().upper()
+        answer = (response.text or "").strip().upper()
         met = answer.startswith("YES")
     except Exception as e:
         print(f"[forge_predict --precondition-verify] Gemini error: {e}")

@@ -65,3 +65,8 @@ phone-bot/data/*.json
 
 forge/forge_state.json
 forge/forge_registry.json
+forge/.analyze_cache.json
+forge/.predict_cache.json
+forge/.verify_result.json
+forge/.read_log.json
+forge/.filtered_log.txt
