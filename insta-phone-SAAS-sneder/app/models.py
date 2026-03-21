@@ -1,0 +1,340 @@
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
+from . import db
+from datetime import datetime,timezone,time
+
+
+class Phone(db.Model):
+    __tablename__ = 'phone'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    name = db.Column(db.String(100), nullable=False)
+    model = db.Column(db.String(100), nullable=False)
+    adb_serial = db.Column(db.String(100), nullable=True)
+    screen_w = db.Column(db.Integer, default=1080)
+    screen_h = db.Column(db.Integer, default=2220)
+    density = db.Column(db.Integer, default=420)
+    retry_tolerance = db.Column(db.Integer, default=3)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), nullable=False, unique=True)
+    email = db.Column(db.String(150), nullable=False, unique=True)
+    password = db.Column(db.String(150), nullable=False)
+    
+    start_parts = db.relationship('StartPart', backref='user', lazy=True, cascade='all, delete-orphan')
+    body_parts = db.relationship('BodyPart', backref='user', lazy=True, cascade='all, delete-orphan')
+    end_parts = db.relationship('EndPart', backref='user', lazy=True, cascade='all, delete-orphan')
+    bots = db.relationship('Bot', backref='user', lazy=True, cascade='all, delete-orphan')
+    to_messages = db.relationship('ToMessage', backref='user', lazy=True, cascade='all, delete-orphan')
+    messaged = db.relationship('Messaged', backref='user', lazy=True, cascade='all, delete-orphan')
+
+class Bot(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    phone_id = db.Column(db.String(150), nullable=False)
+    status = db.Column(db.String(20), default='stopped')  # active, paused, stopped
+    name = db.Column(db.String(150), nullable=False)
+    should_stop = db.Column(db.Boolean, default=False)
+   
+   # Scheduling
+    start_exec_from = db.Column(db.Time, default=time(6, 30))
+    start_exec_to   = db.Column(db.Time, default=time(7, 0))
+    stop_exec_from  = db.Column(db.Time, default=time(14, 0))
+    stop_exec_to    = db.Column(db.Time, default=time(15, 0))
+
+    # Wait times
+    same_account_wait_min = db.Column(db.Integer, default=5)
+    same_account_wait_max = db.Column(db.Integer, default=7)
+    diff_account_wait_min = db.Column(db.Integer, default=25)
+    diff_account_wait_max = db.Column(db.Integer, default=40)
+
+    # Sessions
+    sessions_per_account_min = db.Column(db.Integer, default=2)
+    sessions_per_account_max = db.Column(db.Integer, default=2)
+    session_duration_min = db.Column(db.Integer, default=80)
+    session_duration_max = db.Column(db.Integer, default=120)
+
+    # Pauses
+    pause_during_session_min = db.Column(db.Integer, default=6)
+    pause_during_session_max = db.Column(db.Integer, default=11)
+    pause_probability_min = db.Column(db.Integer, default=90)
+    pause_probability_max = db.Column(db.Integer, default=100)
+    pauses_per_session_min = db.Column(db.Integer, default=2)
+    pauses_per_session_max = db.Column(db.Integer, default=4)
+
+    # Browse
+    browse_ig_start_min = db.Column(db.Integer, default=63)
+    browse_ig_start_max = db.Column(db.Integer, default=124)
+    browse_ig_action_min = db.Column(db.Integer, default=90)
+    browse_ig_action_max = db.Column(db.Integer, default=120)
+    browse_ig_action_probability_min = db.Column(db.Integer, default=60)
+    browse_ig_action_probability_max = db.Column(db.Integer, default=80)
+
+    # Typing
+    typing_speed_min = db.Column(db.Integer, default=2)
+    typing_speed_max = db.Column(db.Integer, default=5)
+
+    
+    accounts = db.relationship('BotAccount', backref='bot', lazy=True, cascade='all, delete-orphan')
+    leads = db.relationship('ToMessage', backref='assigned_bot', lazy=True, cascade='all, delete-orphan')
+    history = db.relationship('Messaged', backref='assigned_bot', lazy=True, cascade='all, delete-orphan')
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'phone_id', name='uq_user_phone'),
+        db.UniqueConstraint('user_id', 'name', name='uq_user_botname'),
+    )
+ 
+
+class BotAccount(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    bot_id = db.Column(db.Integer, db.ForeignKey('bot.id'), nullable=False)
+    clone_id = db.Column(db.String(150), nullable=False)
+    
+    # Basic account info
+    username = db.Column(db.String(150), nullable=False)
+    password = db.Column(db.String(150), nullable=False)
+    session_data = db.Column(db.LargeBinary())
+    verification_code = db.Column(db.String(10))
+    status = db.Column(db.String(20), default='pending')
+    total_messages_sent = db.Column(db.Integer, default=0)
+    
+    # account started time
+    account_started = db.Column(db.DateTime)
+    account_stoped = db.Column(db.DateTime)
+    total_session_made = db.Column(db.Integer, default=0)
+    
+    # Action tracking fields
+    follows_done_today = db.Column(db.Integer, default=0)
+    likes_done_today = db.Column(db.Integer, default=0) 
+    dms_done_today = db.Column(db.Integer, default=0)
+    follows_done_this_hour = db.Column(db.Integer, default=0)
+    likes_done_this_hour = db.Column(db.Integer, default=0)
+    dms_done_this_hour = db.Column(db.Integer, default=0)
+    last_action_date = db.Column(db.Date)  # Track when counts were last updated
+    last_action_reset = db.Column(db.DateTime)  # Track which hour (0-23) was last updated
+    last_followers_scrape_date = db.Column(db.Date)
+    last_follow_time = db.Column(db.DateTime)  # Track when last follow action was executed
+    last_dm_time = db.Column(db.DateTime)  # Track when last DM action was executed
+
+    # Follow settings
+    follow_per_session_min = db.Column(db.Integer, default=10)
+    follow_per_session_max = db.Column(db.Integer, default=14)
+    follow_per_hour_min = db.Column(db.Integer, default=5)
+    follow_per_hour_max = db.Column(db.Integer, default=7)
+    follow_per_day_min = db.Column(db.Integer, default=20)
+    follow_per_day_max = db.Column(db.Integer, default=30)
+    follow_delay_min = db.Column(db.Integer, default=90)
+    follow_delay_max = db.Column(db.Integer, default=130)
+    
+    # Likes settings
+    likes_per_session_min = db.Column(db.Integer, default=10)
+    likes_per_session_max = db.Column(db.Integer, default=14)
+    likes_per_hour_min = db.Column(db.Integer, default=5)
+    likes_per_hour_max = db.Column(db.Integer, default=7)
+    likes_per_day_min = db.Column(db.Integer, default=20)
+    likes_per_day_max = db.Column(db.Integer, default=30)
+    likes_per_target_profile_min = db.Column(db.Integer, default=0)
+    likes_per_target_profile_max = db.Column(db.Integer, default=3)
+    liking_target_profile_posts_probability_min = db.Column(db.Integer, default=80)
+    liking_target_profile_posts_probability_max = db.Column(db.Integer, default=90)
+    delay_between_target_profile_posts_likes_min = db.Column(db.Integer, default=40)
+    delay_between_target_profile_posts_likes_max = db.Column(db.Integer, default=70)
+    
+    # DMs settings
+    dms_per_session_min = db.Column(db.Integer, default=10)
+    dms_per_session_max = db.Column(db.Integer, default=14)
+    dms_per_hour_min = db.Column(db.Integer, default=5)
+    dms_per_hour_max = db.Column(db.Integer, default=7)
+    dms_per_day_min = db.Column(db.Integer, default=20)
+    dms_per_day_max = db.Column(db.Integer, default=30)
+    dms_delay_min = db.Column(db.Integer, default=60)
+    dms_delay_max = db.Column(db.Integer, default=90)
+    dm_only_followers = db.Column(db.Boolean, default=True)
+    profile_to_take_highlight_from = db.Column(db.String(255), default='')
+    highlight_number = db.Column(db.Integer, default=1)
+    changehighlightnumber = db.Column(db.Boolean, default=False)
+    text_dm_sent_probability_min = db.Column(db.Integer, default=70)
+    text_dm_sent_probability_max = db.Column(db.Integer, default=80)
+    long_term_delay_highlight_text_dm_min = db.Column(db.Integer, default=5)
+    long_term_delay_highlight_text_dm_max = db.Column(db.Integer, default=24)
+    short_term_delay_probability_min = db.Column(db.Integer, default=40)
+    short_term_delay_probability_max = db.Column(db.Integer, default=50)
+    short_term_delay_highlight_text_dm_min = db.Column(db.Integer, default=60)
+    short_term_delay_highlight_text_dm_max = db.Column(db.Integer, default=100)
+    long_term_delay_probability_min = db.Column(db.Integer, default=50)
+    long_term_delay_probability_max = db.Column(db.Integer, default=60)
+    
+    # Browse IG Actions
+    watch_stories_probability_min = db.Column(db.Integer, default=70)
+    watch_stories_probability_max = db.Column(db.Integer, default=80)
+    watch_reels_probability_min = db.Column(db.Integer, default=80)
+    watch_reels_probability_max = db.Column(db.Integer, default=90)
+    scroll_feed_probability_min = db.Column(db.Integer, default=90)
+    scroll_feed_probability_max = db.Column(db.Integer, default=100)
+    scroll_explore_page_probability_min = db.Column(db.Integer, default=70)
+    scroll_explore_page_probability_max = db.Column(db.Integer, default=80)
+    like_probability_during_browse_min = db.Column(db.Integer, default=60)
+    like_probability_during_browse_max = db.Column(db.Integer, default=70)
+    
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+   
+    # Add relationships to handle cascading deletes for BotAccount
+    followers = db.relationship('AccountFollowers', backref='account', lazy=True, cascade='all, delete-orphan')
+    follows = db.relationship('Follow', backref='bot_account', lazy=True, cascade='all, delete-orphan')
+    message_states = db.relationship('MessageState', backref='bot_account', lazy=True, cascade='all, delete-orphan')
+   
+    __table_args__ = (
+        db.UniqueConstraint('bot_id', 'clone_id', name='uq_clone_id'),
+    )
+ 
+
+class StartPart(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+class BodyPart(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+class EndPart(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+class ToMessage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), nullable=False)
+    first_name = db.Column(db.String(150), nullable=True)
+    last_name = db.Column(db.String(150), nullable=True)
+    phone = db.Column(db.String(150), nullable=True)
+    bot = db.Column(db.String(150), nullable=True)
+    verified = db.Column(db.Boolean, nullable=True)
+    restricted = db.Column(db.Boolean, nullable=True)
+    scam = db.Column(db.Boolean, nullable=True)
+    fake = db.Column(db.Boolean, nullable=True)
+    premium = db.Column(db.Boolean, nullable=True)
+    access_hash = db.Column(db.String(150), nullable=True)
+    lang_code = db.Column(db.String(10), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    bot_id = db.Column(db.Integer, db.ForeignKey('bot.id'), nullable=True)  # New field for bot association
+
+class Messaged(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    bot_id = db.Column(db.Integer, db.ForeignKey('bot.id'), nullable=True)  # New field for bot association
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class AccountFollowers(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('bot_account.id'), nullable=False)
+    username = db.Column(db.String(150), nullable=False)
+    first_name = db.Column(db.String(150))
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+
+# Add these new models to track follows and message states
+class Follow(db.Model):
+    """Track which bot accounts have followed which users"""
+    id = db.Column(db.Integer, primary_key=True)
+    bot_account_id = db.Column(db.Integer, db.ForeignKey('bot_account.id'), nullable=False)
+    target_username = db.Column(db.String(150), nullable=False)
+    followed_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    follow_status = db.Column(db.String(20), default='pending')  # pending, accepted, rejected
+    
+    __table_args__ = (
+        db.UniqueConstraint('bot_account_id', 'target_username', name='uq_follow_target'),
+    )
+
+class MessageState(db.Model):
+    """Track messaging states for targets"""
+    id = db.Column(db.Integer, primary_key=True)
+    bot_account_id = db.Column(db.Integer, db.ForeignKey('bot_account.id'), nullable=False)
+    target_username = db.Column(db.String(150), nullable=False)
+    highlight_sent = db.Column(db.Boolean, default=False)
+    text_message_sent = db.Column(db.Boolean, default=False)
+    highlight_sent_at = db.Column(db.DateTime)
+    text_message_sent_at = db.Column(db.DateTime)
+    needs_text_message = db.Column(db.Boolean, default=False)  # Flag for delayed text messages
+    
+    __table_args__ = (
+        db.UniqueConstraint('bot_account_id', 'target_username', name='uq_message_state_target'),
+    )
+
+
+class ScheduledAction(db.Model):
+    """Track scheduled actions for bot accounts on specific dates"""
+    id = db.Column(db.Integer, primary_key=True)
+    bot_account_id = db.Column(db.Integer, db.ForeignKey('bot_account.id'), nullable=False)
+    scheduled_date = db.Column(db.Date, nullable=False)
+    action_type = db.Column(db.String(50), nullable=False)  # follows, dms, post, story, profile, name, bio
+    
+    # For min/max actions (follows, dms)
+    min_value = db.Column(db.Integer)
+    max_value = db.Column(db.Integer)
+    
+    # For text actions (name, bio)
+    text_value = db.Column(db.Text)
+    
+    # For media actions (post, story, profile)
+    media_file_path = db.Column(db.String(500))
+    media_description = db.Column(db.Text)
+    content_type = db.Column(db.String(20))  # photo, reel, video
+    
+    # Execution tracking
+    is_executed = db.Column(db.Boolean, default=False)
+    executed_at = db.Column(db.DateTime)
+    execution_status = db.Column(db.String(50))  # pending, completed, failed
+    error_message = db.Column(db.Text)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
+    # Relationship
+    bot_account = db.relationship('BotAccount', backref=db.backref('scheduled_actions', lazy=True, cascade='all, delete-orphan'))
+    
+    def to_dict(self):
+        """Convert scheduled action to dictionary"""
+        data = {
+            'id': self.id,
+            'bot_account_id': self.bot_account_id,
+            'scheduled_date': self.scheduled_date.isoformat(),
+            'action_type': self.action_type,
+            'is_executed': self.is_executed,
+            'execution_status': self.execution_status or 'pending',
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+        
+        # Add type-specific fields
+        if self.action_type in ['follows', 'dms']:
+            data['min_value'] = self.min_value
+            data['max_value'] = self.max_value
+        elif self.action_type in ['name', 'bio']:
+            data['text_value'] = self.text_value
+        elif self.action_type in ['post', 'story', 'profile']:
+            # Convert file path to web-accessible URL
+            if self.media_file_path:
+                import os
+                filename = os.path.basename(self.media_file_path)
+                data['media_file_path'] = f'/uploads/schedule_media/{filename}'
+            else:
+                data['media_file_path'] = None
+            data['media_description'] = self.media_description
+            data['content_type'] = self.content_type
+            
+        if self.executed_at:
+            data['executed_at'] = self.executed_at.isoformat()
+        if self.error_message:
+            data['error_message'] = self.error_message
+            
+        return data
