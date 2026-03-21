@@ -22,6 +22,7 @@ from ..core.proxy import ProxyQueue
 from ..core.rate_limiter import SessionRateLimiter
 from ..core.monitor import init_monitor, log_event as monitor_log, BotEvent, get_logger as get_monitor, get_action_trace
 from ..core.telegram_alerts import init_alerts, send_alert as tg_alert
+from ..core.telegram_monitor import init_monitor as init_prod_monitor, get_monitor as get_prod_monitor
 from ..actions.tiktok import TikTokBot
 from ..actions.instagram import InstagramBot
 from .warmup import AccountWarmupState, generate_warmup_sessions, generate_warmup_plan
@@ -254,6 +255,8 @@ class SessionExecutor:
 
         session_id = f"{account}_{uuid.uuid4().hex[:8]}"
 
+        post_scheduled = session.get("post_scheduled", False)
+
         log.info("=== Session: %s | Phone %d | %s | %s | %d min ===",
                  account, phone_id, platform, session_type, total_duration)
 
@@ -261,6 +264,16 @@ class SessionExecutor:
         self._monitor_event(phone_id, account, session_id, "session_start",
                             metadata={"platform": platform, "session_type": session_type,
                                       "total_duration_minutes": total_duration})
+
+        # Production monitor: session start
+        try:
+            get_prod_monitor().session_start(
+                phone_id=phone_id, account=account,
+                session_type=session_type, post_scheduled=post_scheduled,
+                platform=platform,
+            )
+        except Exception:
+            pass  # never let monitoring crash the session
 
         # Connect phone to proxy (skip in TEST_MODE — use local WiFi)
         if not config.TEST_MODE:
@@ -327,6 +340,7 @@ class SessionExecutor:
 
         # Hard session timeout: duration * 1.5 + 5 min grace
         timeout_seconds = total_duration * 60 * 1.5 + 300
+        self._session_start_time = time.time()
 
         try:
             await asyncio.wait_for(
@@ -346,6 +360,14 @@ class SessionExecutor:
                 adb.press_home()
             except Exception:
                 pass
+            try:
+                get_prod_monitor().session_result(
+                    phone_id=phone_id, account=account, success=False,
+                    duration_minutes=timeout_seconds / 60,
+                    error_reason="session timeout",
+                )
+            except Exception:
+                pass
             human.end_session()
             return "timeout"
 
@@ -357,6 +379,13 @@ class SessionExecutor:
                                 metadata={"error": str(e)})
             tg_alert(phone_id, account, f"DEVICE LOST: {e}",
                      action_trace=get_action_trace(session_id))
+            try:
+                get_prod_monitor().session_result(
+                    phone_id=phone_id, account=account, success=False,
+                    error_reason=f"device lost: {e}",
+                )
+            except Exception:
+                pass
             human.end_session()
             return "device_lost"
 
@@ -385,6 +414,18 @@ class SessionExecutor:
 
         self._monitor_event(phone_id, account, session_id, "session_end",
                             human=human, metadata={"result": "ok"})
+
+        # Production monitor: session completed
+        elapsed_min = (time.time() - self._session_start_time) / 60 if hasattr(self, '_session_start_time') else total_duration
+        try:
+            get_prod_monitor().session_result(
+                phone_id=phone_id, account=account, success=True,
+                post_outcome=session.get("post_outcome"),
+                duration_minutes=elapsed_min,
+            )
+        except Exception:
+            pass
+
         human.end_session()
         log.info("=== Session complete: %s ===", account)
         return "ok"
@@ -512,16 +553,30 @@ class SessionExecutor:
         # Both attempts failed — try saving as draft
         log.warning("Post failed after 2 attempts — trying save_as_draft")
         draft_ok = bot.save_as_draft(video_path, caption)
+        account = getattr(self, '_current_account', '')
         if draft_ok:
             if not dry_run and mark_draft:
                 mark_draft(record_id, platform)
+            try:
+                get_prod_monitor().post_failure(
+                    phone_id=phone_id, account=account, retries=2,
+                    outcome="draft", video_name=caption or "unknown",
+                )
+            except Exception:
+                pass
             return "draft"
 
         # Draft also failed — critical alert
         log.critical("BOTH post AND draft failed (phone=%d, platform=%s)", phone_id, platform)
-        account = getattr(self, '_current_account', '')
         tg_alert(phone_id, account,
                  f"CRITICAL: Post AND draft both failed for {platform}")
+        try:
+            get_prod_monitor().post_failure(
+                phone_id=phone_id, account=account, retries=2,
+                outcome="failed", video_name=caption or "unknown",
+            )
+        except Exception:
+            pass
         return "failed"
 
     async def _execute_normal(self, adb: ADBController, human: HumanEngine,
@@ -1142,6 +1197,7 @@ class SessionExecutor:
 
         # Initialize Telegram alerts (warns if env vars missing)
         init_alerts()
+        init_prod_monitor()
 
         # --- UHID JAR deployment check (once per day, before any sessions) ---
         for pid, adb in self.controllers.items():

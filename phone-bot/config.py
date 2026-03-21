@@ -120,6 +120,14 @@ GEMINI = {
     "max_tokens": 256,
 }
 
+# --- Groq (fast vision inference for bbox calls) ------------------------------
+GROQ = {
+    "api_key": os.getenv("GROQ_API_KEY", "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"),
+    "model": "meta-llama/llama-4-scout-17b-16e-instruct",  # Llama 4 Scout: vision, free tier
+    "model_large": "meta-llama/llama-4-scout-17b-16e-instruct",  # only vision model available on Groq
+    "enabled": False,  # set True after precision test passes
+}
+
 # --- ADB ----------------------------------------------------------------------
 ADB_PATH = os.getenv("ADB_PATH", "adb")
 
@@ -305,7 +313,11 @@ HUMAN = {
     "t_message_glance":     (3.0, 0.5, 1.5, 7.0),     # DM list glance
     "t_post_celebration":   (5.0, 0.5, 2.0, 12.0),    # pause after posting video
 
+    # --- Search/profile grid scroll (section-08) ---
+    "t_grid_scroll_duration": (0.35, 0.1, 0.25, 0.55),   # scroll duration for search/profile grids (slower than FYP)
+
     # --- Non-standard FYP posts (LIVE, PYMK, ads) ---
+    "t_swipe_settle":       (0.2, 0.3, 0.1, 0.5),     # settle wait after swipe before sidebar scan (section-06)
     "t_live_skip_pause":    (0.4, 0.2, 0.2, 0.8),     # brief pause before single scroll past PYMK (section-06 reuses for LIVE)
 }
 
@@ -454,6 +466,12 @@ for d in [DATA_DIR, PLANS_DIR, VIDEOS_DIR, LOGS_DIR]:
 # --- Telegram Alerts ----------------------------------------------------------
 TELEGRAM_ALERT_BOT_TOKEN = os.getenv("PHONEBOT_TELEGRAM_TOKEN", "")
 TELEGRAM_ALERT_CHAT_ID = os.getenv("PHONEBOT_TELEGRAM_CHAT", "")
+
+# --- Telegram Production Monitor ----------------------------------------------
+TELEGRAM_MONITOR = {
+    "token": TELEGRAM_ALERT_BOT_TOKEN,  # reuses PHONEBOT_TELEGRAM_TOKEN env var
+    "chat_id": TELEGRAM_ALERT_CHAT_ID,  # reuses PHONEBOT_TELEGRAM_CHAT env var
+}
 
 # --- Timezone -----------------------------------------------------------------
 TIMEZONE = "Europe/Rome" if TEST_MODE else "US/Eastern"

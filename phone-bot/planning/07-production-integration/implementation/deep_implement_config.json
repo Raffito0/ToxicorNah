@@ -24,6 +24,10 @@
     "section-02-cross-platform": {
       "status": "complete",
       "commit_hash": "0324691"
+    },
+    "section-03-post-retry": {
+      "status": "complete",
+      "commit_hash": "6396dcd"
     }
   },
   "pre_commit": {
