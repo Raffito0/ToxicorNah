@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from app.models import (Phone, Bot, BotAccount, User, Proxy, ProxyRotation,
                         TimingPreset, TimingOverride, WeeklyPlan, SessionLog,
                         InterventionLog)
+from app import ensure_columns
 
 
 def test_phone_table_created(app, db):
@@ -630,3 +631,49 @@ def test_interventionlog_fk(app, db):
     result = db.session.get(InterventionLog, log.id)
     assert result.bot_account_id == acct.id
     assert result.resolution == 'done'
+
+
+# ─── Section 06: ensure_columns ────────────────────────────────────
+
+def test_ensure_columns_fresh_db(app, db):
+    """On a fresh DB, ensure_columns should not raise."""
+    ensure_columns(db)
+
+
+def test_ensure_columns_idempotent(app, db):
+    """Calling ensure_columns twice in a row should not raise any errors."""
+    ensure_columns(db)
+    ensure_columns(db)
+
+
+def test_ensure_columns_bot_platform(app, db):
+    """After ensure_columns, Bot.platform column exists and is queryable."""
+    ensure_columns(db)
+    u = _make_user(db)
+    bot = _make_bot(db, u, platform='tiktok')
+    result = db.session.get(Bot, bot.id)
+    assert result.platform == 'tiktok'
+
+
+def test_ensure_columns_botaccount_json(app, db):
+    """After ensure_columns, personality_json column should be usable."""
+    ensure_columns(db)
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot, personality_json={"reels_preference": 0.5})
+    result = db.session.get(BotAccount, acct.id)
+    assert result.personality_json["reels_preference"] == 0.5
+
+
+def test_full_schema_creation(app, db):
+    """db.create_all() + ensure_columns() should result in full schema."""
+    ensure_columns(db)
+    # Test all new models are usable
+    phone = Phone(id=1, name='Test', model='TEST')
+    proxy = Proxy(name='P1', host='h', port=1, username_env='U', password_env='P')
+    preset = TimingPreset(name='Normal', params_json={"a": [1, 2, 3, 4]})
+    db.session.add_all([phone, proxy, preset])
+    db.session.commit()
+    assert db.session.get(Phone, 1) is not None
+    assert db.session.get(Proxy, proxy.id) is not None
+    assert db.session.get(TimingPreset, preset.id) is not None

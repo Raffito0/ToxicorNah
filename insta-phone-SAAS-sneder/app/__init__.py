@@ -1,0 +1,111 @@
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+import os
+# from .models import db, User
+from flask_login import LoginManager
+from flask_migrate import Migrate
+from datetime import timedelta
+from flask_session import Session
+import sys
+
+db = SQLAlchemy()
+login_manager = LoginManager()
+migrate = Migrate()
+
+def get_db_path():
+    if getattr(sys, 'frozen', False):  # App is running as .exe
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.abspath(os.path.dirname(__file__))
+
+    db_dir = os.path.join(base_dir, 'user_data')
+    os.makedirs(db_dir, exist_ok=True)
+    return os.path.join(db_dir, 'app.db')
+
+
+def ensure_columns(db):
+    """Add new columns to existing tables. Safe to run multiple times.
+
+    SQLAlchemy's create_all() creates new tables but cannot add columns
+    to existing tables. This function uses raw ALTER TABLE ADD COLUMN
+    statements. Each is wrapped in try/except -- if the column already
+    exists, SQLite raises 'duplicate column name' which we catch and ignore.
+    """
+    alter_statements = [
+        # Bot table new columns (section-02)
+        "ALTER TABLE bot ADD COLUMN platform VARCHAR(20) DEFAULT 'instagram'",
+        "ALTER TABLE bot ADD COLUMN phone_ref_id INTEGER REFERENCES phone(id)",
+        "ALTER TABLE bot ADD COLUMN proxy_id INTEGER REFERENCES proxy(id)",
+        "ALTER TABLE bot ADD COLUMN timing_preset_id INTEGER REFERENCES timing_preset(id)",
+        "ALTER TABLE bot ADD COLUMN always_on BOOLEAN DEFAULT 0",
+        "ALTER TABLE bot ADD COLUMN dry_run BOOLEAN DEFAULT 0",
+        "ALTER TABLE bot ADD COLUMN control_status VARCHAR(20) DEFAULT 'stopped'",
+        "ALTER TABLE bot ADD COLUMN scrcpy_port INTEGER",
+        # BotAccount table new columns (section-02)
+        "ALTER TABLE bot_account ADD COLUMN platform VARCHAR(20) DEFAULT 'instagram'",
+        "ALTER TABLE bot_account ADD COLUMN personality_json JSON",
+        "ALTER TABLE bot_account ADD COLUMN warmup_json JSON",
+        "ALTER TABLE bot_account ADD COLUMN niche_json JSON",
+        "ALTER TABLE bot_account ADD COLUMN notify_before_post BOOLEAN DEFAULT 1",
+    ]
+
+    from sqlalchemy import text
+    for stmt in alter_statements:
+        try:
+            db.session.execute(text(stmt))
+        except Exception:
+            pass  # Column already exists — safe to ignore
+    db.session.commit()
+
+
+def create_app():
+    app = Flask(__name__)
+
+    # Ensure the instance folder exists
+    # instance_path = os.path.join(app.instance_path, 'app.db')
+    # if not os.path.exists(app.instance_path):
+    #     os.makedirs(app.instance_path)
+    db_path = get_db_path()
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SECRET_KEY']=os.urandom(24)
+    db.init_app(app)
+    migrate = Migrate(app, db)
+
+    # Configure session
+    app.permanent_session_lifetime = timedelta(days=7)
+    app.config['SESSION_REFRESH_EACH_REQUEST'] = True
+    app.config.from_object('config.Config')
+    Session(app)
+
+    # Ensure full schema exists (safe on both fresh and existing DBs)
+    with app.app_context():
+        from . import models
+        db.create_all()
+        ensure_columns(db)
+
+    login_manager.init_app(app)
+    login_manager.login_view = 'auth.signin'
+    login_manager.login_message_category = 'info'
+
+    # Import and register the blueprints
+    from .routes import auth
+    from .analysis_routes import analysis
+    app.register_blueprint(auth)
+    app.register_blueprint(analysis)
+
+    # Handle favicon.ico requests to prevent 404 errors
+    @app.route('/favicon.ico')
+    def favicon():
+        from flask import send_from_directory
+        import os
+        favicon_path = os.path.join(app.root_path, 'static')
+        # Try to serve favicon.ico if it exists, otherwise return 204 No Content
+        if os.path.exists(os.path.join(favicon_path, 'favicon.ico')):
+            return send_from_directory(favicon_path, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+        else:
+            return '', 204
+
+    return app
+
+
