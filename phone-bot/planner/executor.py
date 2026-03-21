@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 
 from .. import config  # NOTE: config.py adds delivery module to sys.path
-from ..core.adb import ADBController, DeviceLostError
+from ..core.adb import ADBController, DeviceLostError, DeviceConfigError
 from ..core.human import HumanEngine
 from ..core.proxy import ProxyQueue
 from ..core.rate_limiter import SessionRateLimiter
@@ -26,9 +26,9 @@ from ..actions.tiktok import TikTokBot
 from ..actions.instagram import InstagramBot
 from .warmup import AccountWarmupState, generate_warmup_sessions, generate_warmup_plan
 try:
-    from delivery import get_next_video, download_video, push_to_phone, mark_posted, mark_draft, mark_skipped
+    from delivery import get_next_video, download_video, mark_posted, mark_draft, mark_skipped
 except ImportError:
-    get_next_video = download_video = push_to_phone = mark_posted = mark_draft = mark_skipped = None
+    get_next_video = download_video = mark_posted = mark_draft = mark_skipped = None
 
 log = logging.getLogger(__name__)
 
@@ -1088,6 +1088,10 @@ class SessionExecutor:
                         log.error("DEVICE LOST during warmup %s (Phone %d): %s", name, phone_id, e)
                         dead_phones.add(phone_id)
                         break
+                    except DeviceConfigError as e:
+                        log.critical("DEVICE CONFIG FAILED phone %d: %s", phone_id, e)
+                        dead_phones.add(phone_id)
+                        break
                     except Exception as e:
                         log.error("Warmup session %s crashed: %s",
                                   session.get("account_name", "?"), e, exc_info=True)
@@ -1143,6 +1147,9 @@ class SessionExecutor:
                         log.warning("Phone %d marked as dead for this run", phone_id)
                 except DeviceLostError as e:
                     log.error("DEVICE LOST (uncaught): Phone %d — %s", phone_id, e)
+                    dead_phones.add(phone_id)
+                except DeviceConfigError as e:
+                    log.critical("DEVICE CONFIG FAILED phone %d: %s", phone_id, e)
                     dead_phones.add(phone_id)
                 except Exception as e:
                     log.error("Session %s crashed: %s",
