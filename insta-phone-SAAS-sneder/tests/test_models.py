@@ -4,7 +4,8 @@ import time
 import pytest
 from sqlalchemy.exc import IntegrityError
 from app.models import (Phone, Bot, BotAccount, User, Proxy, ProxyRotation,
-                        TimingPreset, TimingOverride)
+                        TimingPreset, TimingOverride, WeeklyPlan, SessionLog,
+                        InterventionLog)
 
 
 def test_phone_table_created(app, db):
@@ -455,3 +456,177 @@ def test_timing_preset_updated_at(app, db):
     db.session.commit()
     result = db.session.get(TimingPreset, preset.id)
     assert result.updated_at > original
+
+
+# ─── Section 05: WeeklyPlan / SessionLog / InterventionLog ─────────
+
+def test_weeklyplan_creates(app, db):
+    """WeeklyPlan with proxy_id, week_number, year, plan_json should persist."""
+    proxy = _make_proxy(db)
+    plan = WeeklyPlan(proxy_id=proxy.id, week_number=12, year=2026,
+                      plan_json={"monday": [{"account": "ph1_tiktok"}]})
+    db.session.add(plan)
+    db.session.commit()
+    result = db.session.get(WeeklyPlan, plan.id)
+    assert result.proxy_id == proxy.id
+    assert result.week_number == 12
+    assert result.year == 2026
+    assert result.status == 'active'
+
+
+def test_weeklyplan_unique(app, db):
+    """Two WeeklyPlan with same (proxy_id, week_number, year) should raise IntegrityError."""
+    proxy = _make_proxy(db)
+    p1 = WeeklyPlan(proxy_id=proxy.id, week_number=12, year=2026, plan_json={})
+    db.session.add(p1)
+    db.session.commit()
+    p2 = WeeklyPlan(proxy_id=proxy.id, week_number=12, year=2026, plan_json={})
+    db.session.add(p2)
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    db.session.rollback()
+
+
+def test_weeklyplan_different_week(app, db):
+    """Same proxy, different week should succeed."""
+    proxy = _make_proxy(db)
+    p1 = WeeklyPlan(proxy_id=proxy.id, week_number=12, year=2026, plan_json={})
+    p2 = WeeklyPlan(proxy_id=proxy.id, week_number=13, year=2026, plan_json={})
+    db.session.add_all([p1, p2])
+    db.session.commit()
+    assert p1.id != p2.id
+
+
+def test_weeklyplan_json(app, db):
+    """plan_json with nested session objects should round-trip correctly."""
+    proxy = _make_proxy(db)
+    plan_data = {"monday": [{"account": "ph1_tiktok", "start_time": "09:00",
+                             "type": "normal", "post_scheduled": True}]}
+    plan = WeeklyPlan(proxy_id=proxy.id, week_number=12, year=2026, plan_json=plan_data)
+    db.session.add(plan)
+    db.session.commit()
+    result = db.session.get(WeeklyPlan, plan.id)
+    assert result.plan_json["monday"][0]["account"] == "ph1_tiktok"
+    assert result.plan_json["monday"][0]["post_scheduled"] is True
+
+
+def test_sessionlog_creates(app, db):
+    """SessionLog with bot_account_id, session_id, started_at should persist."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot)
+    from datetime import datetime as dt, timezone as tz
+    log = SessionLog(bot_account_id=acct.id, session_id='uuid-123',
+                     started_at=dt.now(tz.utc), session_type='normal',
+                     status='running')
+    db.session.add(log)
+    db.session.commit()
+    result = db.session.get(SessionLog, log.id)
+    assert result.session_id == 'uuid-123'
+    assert result.session_type == 'normal'
+
+
+def test_sessionlog_ended_at_nullable(app, db):
+    """A running session has ended_at=None."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot)
+    from datetime import datetime as dt, timezone as tz
+    log = SessionLog(bot_account_id=acct.id, session_id='uuid-456',
+                     started_at=dt.now(tz.utc), session_type='normal',
+                     status='running')
+    db.session.add(log)
+    db.session.commit()
+    assert db.session.get(SessionLog, log.id).ended_at is None
+
+
+def test_sessionlog_phase_log(app, db):
+    """phase_log_json should round-trip correctly."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot)
+    from datetime import datetime as dt, timezone as tz
+    phases = [{"phase": "warmup", "actions_count": 5},
+              {"phase": "peak", "actions_count": 12}]
+    log = SessionLog(bot_account_id=acct.id, session_id='uuid-789',
+                     started_at=dt.now(tz.utc), session_type='normal',
+                     status='completed', phase_log_json=phases)
+    db.session.add(log)
+    db.session.commit()
+    result = db.session.get(SessionLog, log.id)
+    assert result.phase_log_json[0]["phase"] == "warmup"
+    assert result.phase_log_json[1]["actions_count"] == 12
+
+
+def test_sessionlog_dry_run_default(app, db):
+    """SessionLog.dry_run should default to False."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot)
+    from datetime import datetime as dt, timezone as tz
+    log = SessionLog(bot_account_id=acct.id, session_id='uuid-dry',
+                     started_at=dt.now(tz.utc), session_type='normal',
+                     status='running')
+    db.session.add(log)
+    db.session.commit()
+    assert db.session.get(SessionLog, log.id).dry_run is False
+
+
+def test_sessionlog_index(app, db):
+    """The composite index on (bot_account_id, started_at) should exist."""
+    inspector = db.inspect(db.engine)
+    indexes = inspector.get_indexes('session_log')
+    index_names = [idx['name'] for idx in indexes]
+    assert 'ix_session_log_account_date' in index_names
+
+
+def test_interventionlog_creates(app, db):
+    """InterventionLog with required fields should persist."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot)
+    log = InterventionLog(bot_account_id=acct.id, session_id='uuid-int',
+                          intervention_type='post_approval')
+    db.session.add(log)
+    db.session.commit()
+    result = db.session.get(InterventionLog, log.id)
+    assert result.intervention_type == 'post_approval'
+
+
+def test_interventionlog_resolved_at_nullable(app, db):
+    """A pending intervention has resolved_at=None."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot)
+    log = InterventionLog(bot_account_id=acct.id, session_id='uuid-pend',
+                          intervention_type='takeover')
+    db.session.add(log)
+    db.session.commit()
+    assert db.session.get(InterventionLog, log.id).resolved_at is None
+
+
+def test_interventionlog_resolution_nullable(app, db):
+    """A pending intervention has resolution=None."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot)
+    log = InterventionLog(bot_account_id=acct.id, session_id='uuid-res',
+                          intervention_type='skip')
+    db.session.add(log)
+    db.session.commit()
+    assert db.session.get(InterventionLog, log.id).resolution is None
+
+
+def test_interventionlog_fk(app, db):
+    """InterventionLog.bot_account_id should reference an existing BotAccount."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot)
+    log = InterventionLog(bot_account_id=acct.id, session_id='uuid-fk',
+                          intervention_type='post_approval',
+                          resolution='done')
+    db.session.add(log)
+    db.session.commit()
+    result = db.session.get(InterventionLog, log.id)
+    assert result.bot_account_id == acct.id
+    assert result.resolution == 'done'

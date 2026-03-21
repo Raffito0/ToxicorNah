@@ -436,3 +436,56 @@ class ScheduledAction(db.Model):
             data['error_message'] = self.error_message
             
         return data
+
+
+# ─── Section 05: WeeklyPlan, SessionLog, InterventionLog ──────────
+
+class WeeklyPlan(db.Model):
+    __tablename__ = 'weekly_plan'
+
+    id = db.Column(db.Integer, primary_key=True)
+    proxy_id = db.Column(db.Integer, db.ForeignKey('proxy.id'), nullable=False)
+    week_number = db.Column(db.Integer, nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    plan_json = db.Column(db.JSON, nullable=False)
+    generated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    status = db.Column(db.String(20), default='active')
+
+    __table_args__ = (
+        db.UniqueConstraint('proxy_id', 'week_number', 'year',
+                           name='uq_weekly_plan_proxy_week_year'),
+    )
+
+
+class SessionLog(db.Model):
+    __tablename__ = 'session_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    bot_account_id = db.Column(db.Integer, db.ForeignKey('bot_account.id'), nullable=False)
+    session_id = db.Column(db.String(100), nullable=False)
+    started_at = db.Column(db.DateTime, nullable=False)
+    ended_at = db.Column(db.DateTime, nullable=True)
+    session_type = db.Column(db.String(20), nullable=False)
+    phase_log_json = db.Column(db.JSON, nullable=True)
+    actions_json = db.Column(db.JSON, nullable=True)
+    status = db.Column(db.String(20), nullable=False)
+    error_message = db.Column(db.Text, nullable=True)
+    post_outcome = db.Column(db.String(20), nullable=True)
+    dry_run = db.Column(db.Boolean, default=False)
+
+    __table_args__ = (
+        db.Index('ix_session_log_account_date', 'bot_account_id', 'started_at'),
+    )
+
+
+class InterventionLog(db.Model):
+    __tablename__ = 'intervention_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    bot_account_id = db.Column(db.Integer, db.ForeignKey('bot_account.id'), nullable=False)
+    session_id = db.Column(db.String(100), nullable=False)
+    intervention_type = db.Column(db.String(20), nullable=False)
+    requested_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    resolution = db.Column(db.String(20), nullable=True)
+    telegram_message_id = db.Column(db.Integer, nullable=True)
