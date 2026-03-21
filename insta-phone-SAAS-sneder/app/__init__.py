@@ -115,8 +115,15 @@ def create_app():
     # Import and register the blueprints
     from .routes import auth
     from .analysis_routes import analysis
+    from .proxy_routes import proxy_bp
     app.register_blueprint(auth)
     app.register_blueprint(analysis)
+    app.register_blueprint(proxy_bp)
+
+    # Start proxy health-check thread (skip in tests)
+    if not app.config.get('TESTING'):
+        from .proxy_health import start_health_check
+        start_health_check(app)
 
     # Handle favicon.ico requests to prevent 404 errors
     @app.route('/favicon.ico')

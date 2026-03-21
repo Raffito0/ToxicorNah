@@ -874,6 +874,83 @@ def toggle_bot_status(bot_id):
 
 
 
+@auth.route('/api/bots/<int:bot_id>/start-forever', methods=['POST'])
+@login_required
+def start_forever(bot_id):
+    """Start bot in 24/7 always-on mode."""
+    import threading
+    try:
+        user_id = current_user.id
+        bot = Bot.query.filter_by(id=bot_id, user_id=user_id).first()
+        if not bot:
+            return jsonify(success=False, error='Bot not found'), 404
+        if bot.control_status == 'running':
+            return jsonify(success=False, error='Bot is already running'), 409
+
+        bot.always_on = True
+        bot.should_stop = False
+        db.session.commit()
+
+        from .control import write_control
+        write_control({'action': 'run'})
+
+        from .tiktok_worker import tiktok_worker
+        t = threading.Thread(target=tiktok_worker, args=(bot_id, user_id), daemon=True)
+        t.start()
+
+        return jsonify(success=True, control_status='running'), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(success=False, error=str(e)[:100]), 500
+
+
+@auth.route('/api/bots/<int:bot_id>/stop-graceful', methods=['POST'])
+@login_required
+def stop_graceful(bot_id):
+    """Stop bot gracefully — finish current session, then exit."""
+    try:
+        user_id = current_user.id
+        bot = Bot.query.filter_by(id=bot_id, user_id=user_id).first()
+        if not bot:
+            return jsonify(success=False, error='Bot not found'), 404
+
+        bot.should_stop = True
+        bot.control_status = 'stopping'
+        db.session.commit()
+
+        from .control import write_control
+        write_control({'action': 'stop'})
+
+        return jsonify(success=True, control_status='stopping'), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(success=False, error=str(e)[:100]), 500
+
+
+@auth.route('/api/bots/<int:bot_id>/dry-run', methods=['PUT'])
+@login_required
+def toggle_dry_run(bot_id):
+    """Toggle dry-run mode for a bot."""
+    try:
+        user_id = current_user.id
+        bot = Bot.query.filter_by(id=bot_id, user_id=user_id).first()
+        if not bot:
+            return jsonify(success=False, error='Bot not found'), 404
+
+        data = request.get_json()
+        enabled = data.get('enabled', False) if data else False
+        bot.dry_run = enabled
+        db.session.commit()
+
+        from .control import write_control
+        write_control({'action': 'dry_run', 'enabled': enabled})
+
+        return jsonify(success=True, dry_run=enabled), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(success=False, error=str(e)[:100]), 500
+
+
 @auth.route('/api/bots/<int:bot_id>/status', methods=['GET'])
 @login_required
 def get_bot_status(bot_id):
