@@ -582,7 +582,9 @@ class SessionExecutor:
         account = getattr(self, '_current_account', '')
         bot = self._create_bot(platform, adb, human, account_name=account)
 
-        # Pre-scroll phase
+        # Pre-scroll phase (or full session if no post)
+        # When posting: session splits into pre_minutes + post + post_minutes
+        # When not posting: single browse for total duration_min
         await bot.browse_session(
             duration_minutes=pre_minutes if should_post else duration_min,
             should_post=False,
