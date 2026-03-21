@@ -223,6 +223,136 @@ def cmd_config_check(args) -> int:
     return 0
 
 
+def cmd_pixel_check(args) -> int:
+    """Compute pixel math for all 3 target phones."""
+    cache = load_cache()
+    if args.factor is None:
+        print("ERROR: --pixel-check requires --factor", file=sys.stderr)
+        return 1
+
+    factor = args.factor
+    pixel_math = {}
+    for name, height in PHONE_SCREENS:
+        pixel_math[name] = round(factor * height)
+
+    cache.setdefault("conditional_steps", [])
+    if "pixel-check" not in cache["conditional_steps"]:
+        cache["conditional_steps"].append("pixel-check")
+    cache["pixel_math"] = pixel_math
+    save_cache(cache)
+
+    print(f"[forge_analyze --pixel-check] factor={factor}")
+    for name, px in pixel_math.items():
+        print(f"  {name}: {factor} * screen_h = {px}px")
+    return 0
+
+
+def cmd_regression_check(args) -> int:
+    """Find files that call the function for regression testing."""
+    cache = load_cache()
+    fn = cache.get("function", "")
+    if not fn:
+        print("ERROR: --regression-check requires --callers to run first (no 'function' in cache)",
+              file=sys.stderr)
+        return 1
+
+    registry_path = Path(getattr(args, "registry", "forge/forge_registry.json"))
+    if not registry_path.exists():
+        cache.setdefault("steps_completed", [])
+        if "regression-check" not in cache["steps_completed"]:
+            cache["steps_completed"].append("regression-check")
+        cache["regression_files_to_read"] = []
+        save_cache(cache)
+        print(f"[forge_analyze --regression-check] registry not found, skipping")
+        return 0
+
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    entries = registry.get("entries", [])
+
+    # Find entries whose proven functions overlap with fn
+    overlapping = [e for e in entries if fn in e.get("functions", [])]
+
+    # For each overlapping entry, find the files that call fn
+    search_dir = args.search_dir or "phone-bot"
+    caller_lines = _grep_fallback(search_dir, fn)
+    files_to_read = []
+    for line in caller_lines:
+        parts = line.split(":")
+        if len(parts) >= 3:
+            # Handle Windows drive letter: C:\path\file.py:42:code
+            if len(parts[0]) == 1 and parts[0].isalpha():
+                file_path = parts[0] + ":" + parts[1]
+                rest = parts[2:]
+            else:
+                file_path = parts[0]
+                rest = parts[1:]
+            if len(rest) >= 2:
+                code = ":".join(rest[1:])
+                if f"def {fn}" not in code:
+                    if file_path not in files_to_read:
+                        files_to_read.append(file_path)
+
+    cache.setdefault("steps_completed", [])
+    if "regression-check" not in cache["steps_completed"]:
+        cache["steps_completed"].append("regression-check")
+    cache["regression_files_to_read"] = files_to_read
+    save_cache(cache)
+
+    if overlapping:
+        print(f"[forge_analyze --regression-check] {fn} covered by {len(overlapping)} proven section(s)")
+        print(f"  Read these files before implementing: {files_to_read}")
+    else:
+        print(f"[forge_analyze --regression-check] no proven sections overlap with {fn}")
+    return 0
+
+
+def cmd_gemini_check(args) -> int:
+    """Detect if Gemini prompts changed in the diff."""
+    cache = load_cache()
+
+    diff_text = ""
+    diff_file = getattr(args, "diff_file", None)
+    if diff_file:
+        diff_text = Path(diff_file).read_text(encoding="utf-8")
+    else:
+        diff_result = subprocess.run(
+            ["git", "diff", args.search_dir or "phone-bot", "--", "*.py"],
+            capture_output=True, text=True
+        )
+        diff_text = diff_result.stdout
+
+    # Detect Gemini prompt constant changes or new genai API calls in added lines
+    GEMINI_PATTERNS = [r'PROMPT\s*=', r'generate_content', r'genai\.', r'ThinkingConfig']
+    prompt_changed = any(
+        re.search(rf'^\+.*{pat}', diff_text, re.MULTILINE)
+        for pat in GEMINI_PATTERNS
+    )
+
+    if prompt_changed:
+        # Check that callers have JSON error handling
+        caller_files = [c["file"] for c in cache.get("callers", [])]
+        missing_fallback = []
+        for f in caller_files:
+            try:
+                content = Path(f).read_text(encoding="utf-8", errors="replace")
+                if "json.JSONDecodeError" not in content and "JSONDecodeError" not in content:
+                    missing_fallback.append(f)
+            except Exception:
+                pass
+        if missing_fallback:
+            print(f"[forge_analyze --gemini-check] WARNING: callers without JSON error fallback: {missing_fallback}")
+
+    cache.setdefault("conditional_steps", [])
+    if "gemini-check" not in cache["conditional_steps"]:
+        cache["conditional_steps"].append("gemini-check")
+    cache["gemini_prompt_changed"] = prompt_changed
+    save_cache(cache)
+
+    status = "CHANGED" if prompt_changed else "unchanged"
+    print(f"[forge_analyze --gemini-check] Gemini prompt: {status}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="FORGE v2 Phase 1 — Analysis CLI")
     parser.add_argument("--init", action="store_true", help="Initialize fresh cache")
@@ -237,6 +367,7 @@ def main() -> int:
     parser.add_argument("--pixel-check", action="store_true", help="Compute pixel math for all phones")
     parser.add_argument("--factor", type=float, help="Proportional factor for pixel math (e.g. 0.20)")
     parser.add_argument("--gemini-check", action="store_true", help="Check if Gemini prompts changed")
+    parser.add_argument("--registry", default="forge/forge_registry.json", help="Path to registry file")
     parser.add_argument("--search-dir", default=None, help="Directory to search (default: phone-bot)")
     parser.add_argument("--diff-file", default=None, help="Path to diff file for --gemini-check")
 
@@ -252,6 +383,12 @@ def main() -> int:
         return cmd_protected_core(args)
     elif args.config_check:
         return cmd_config_check(args)
+    elif args.pixel_check:
+        return cmd_pixel_check(args)
+    elif args.regression_check:
+        return cmd_regression_check(args)
+    elif args.gemini_check:
+        return cmd_gemini_check(args)
     else:
         parser.print_help()
         return 1

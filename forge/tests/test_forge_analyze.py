@@ -124,3 +124,103 @@ def test_config_check_all_present(tmp_path):
     assert result.returncode == 0
     cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
     assert cache["config_missing"] == []
+
+
+def test_pixel_check_computes_all_phones(tmp_path):
+    """--pixel-check computes correct px values for all 3 target phones."""
+    run_analyze(tmp_path, "--init", "--section", "section-07")
+    result = run_analyze(tmp_path, "--pixel-check", "--factor", "0.20")
+    assert result.returncode == 0
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert cache["pixel_math"]["motorola_1600"] == 320    # 0.20 * 1600
+    assert cache["pixel_math"]["samsung_s9_2220"] == 444  # 0.20 * 2220
+    assert cache["pixel_math"]["samsung_s22_2340"] == 468 # 0.20 * 2340
+    assert "pixel-check" in cache["conditional_steps"]
+
+
+def test_regression_check_reads_function_from_cache(tmp_path):
+    """--regression-check uses function name stored by --callers step and finds caller files."""
+    run_analyze(tmp_path, "--init", "--section", "section-07")
+
+    # Simulate --callers having run and stored function name
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    cache["function"] = "_return_to_fyp"
+    (tmp_path / ".analyze_cache.json").write_text(json.dumps(cache))
+
+    # Create a fake caller file that CALLS _return_to_fyp (not just defines it)
+    (tmp_path / "tiktok.py").write_text(
+        "def browse_session():\n    result = _return_to_fyp()\n    return result\n"
+    )
+
+    # Create a fake registry with a completed section covering _return_to_fyp
+    registry = {
+        "entries": [{
+            "id": "browse-smoke",
+            "section": "section-06",
+            "functions": ["_return_to_fyp", "_tap_top_tab"],
+            "test_command": "pytest",
+            "proven_at": "2026-01-01T00:00:00+00:00",
+            "last_verified": "2026-01-01T00:00:00+00:00",
+        }]
+    }
+    (tmp_path / "forge_registry.json").write_text(json.dumps(registry))
+
+    result = run_analyze(tmp_path, "--regression-check",
+                         "--registry", str(tmp_path / "forge_registry.json"),
+                         "--search-dir", str(tmp_path))
+    assert result.returncode == 0
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert "regression-check" in cache["steps_completed"]
+    # Must find tiktok.py as a file to read (it calls _return_to_fyp)
+    assert len(cache["regression_files_to_read"]) >= 1
+    assert any("tiktok.py" in f for f in cache["regression_files_to_read"])
+
+
+def test_gemini_check_detects_prompt_change(tmp_path):
+    """--gemini-check sets gemini_prompt_changed=True when diff contains Gemini prompt changes."""
+    run_analyze(tmp_path, "--init", "--section", "section-07")
+
+    diff_file = tmp_path / "fake.diff"
+    diff_file.write_text('+ANALYSIS_PROMPT = """You are analyzing..."""\n')
+
+    result = run_analyze(tmp_path, "--gemini-check",
+                         "--diff-file", str(diff_file),
+                         "--search-dir", str(tmp_path))
+    assert result.returncode == 0
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert "gemini-check" in cache["conditional_steps"]
+    assert cache["gemini_prompt_changed"] is True
+
+
+def test_gemini_check_no_change(tmp_path):
+    """--gemini-check sets gemini_prompt_changed=False when diff has no Gemini changes."""
+    run_analyze(tmp_path, "--init", "--section", "section-07")
+
+    diff_file = tmp_path / "fake.diff"
+    diff_file.write_text('+    result = some_other_function()\n')
+
+    result = run_analyze(tmp_path, "--gemini-check",
+                         "--diff-file", str(diff_file),
+                         "--search-dir", str(tmp_path))
+    assert result.returncode == 0
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert cache["gemini_prompt_changed"] is False
+
+
+def test_regression_check_no_overlap(tmp_path):
+    """--regression-check with no overlap produces empty regression_files_to_read."""
+    run_analyze(tmp_path, "--init", "--section", "section-07")
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    cache["function"] = "_unrelated_fn"
+    (tmp_path / ".analyze_cache.json").write_text(json.dumps(cache))
+
+    registry = {"entries": [{"id": "x", "section": "s1", "functions": ["_other_fn"],
+                              "test_command": "pytest", "proven_at": "", "last_verified": ""}]}
+    (tmp_path / "forge_registry.json").write_text(json.dumps(registry))
+
+    result = run_analyze(tmp_path, "--regression-check",
+                         "--registry", str(tmp_path / "forge_registry.json"),
+                         "--search-dir", str(tmp_path))
+    assert result.returncode == 0
+    cache = json.loads((tmp_path / ".analyze_cache.json").read_text())
+    assert cache["regression_files_to_read"] == []
