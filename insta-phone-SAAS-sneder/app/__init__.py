@@ -84,6 +84,30 @@ def create_app():
         db.create_all()
         ensure_columns(db)
 
+    # Add phone-bot to Python path for TikTok engine imports
+    # phone-bot/ uses relative imports (from .. import config), so the PARENT
+    # directory must be in sys.path and phone-bot must be importable as a package.
+    # Since 'phone-bot' has a hyphen, we add a phone_bot symlink.
+    project_root = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..'))
+    phone_bot_src = os.path.join(project_root, 'phone-bot')
+    phone_bot_link = os.path.join(project_root, 'phone_bot')
+    if os.path.isdir(phone_bot_src):
+        # Create symlink phone_bot -> phone-bot (skip if exists or can't create)
+        if not os.path.exists(phone_bot_link):
+            try:
+                os.symlink(phone_bot_src, phone_bot_link, target_is_directory=True)
+            except OSError:
+                pass  # No admin rights for symlinks on Windows — use junction
+                try:
+                    import subprocess
+                    subprocess.run(['cmd', '/c', 'mklink', '/J', phone_bot_link, phone_bot_src],
+                                   capture_output=True)
+                except Exception:
+                    pass
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+
     login_manager.init_app(app)
     login_manager.login_view = 'auth.signin'
     login_manager.login_message_category = 'info'
