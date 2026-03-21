@@ -786,6 +786,8 @@ def get_bots():
                 'name': bot.name,
                 'phone_id': bot.phone_id,
                 'status': bot.status,
+                'platform': bot.platform or 'instagram',
+                'control_status': bot.control_status or 'stopped',
                 'accounts_count': accounts_count
             })
         
@@ -1125,15 +1127,33 @@ def get_bot_accounts(bot_id):
         
         accounts_data = []
         for account in accounts:
-            accounts_data.append({
+            acct_data = {
                 'id': account.id,
                 'clone_id': account.clone_id,
                 'username': account.username,
                 'status': account.status,
+                'platform': account.platform or 'instagram',
                 'daily_messages_sent': account.dms_done_today or 0,
                 'total_messages_sent': account.total_messages_sent or 0,
                 'last_message_time': account.last_dm_time.isoformat() if account.last_dm_time else None,
-            })
+            }
+            # TikTok-specific fields
+            if account.platform == 'tiktok':
+                acct_data['warmup_completed'] = account.warmup_completed
+                if account.warmup_json:
+                    acct_data['warmup_day'] = account.warmup_json.get('current_day', 0)
+                    acct_data['warmup_total_days'] = account.warmup_json.get('total_days', 7)
+                if account.personality_json:
+                    acct_data['personality'] = {
+                        k: v for k, v in account.personality_json.items()
+                        if k in ('reels_preference', 'story_affinity', 'double_tap_habit',
+                                'explore_curiosity', 'boredom_rate', 'boredom_relief',
+                                'switch_threshold')
+                    }
+                if account.niche_json:
+                    acct_data['niche_description'] = account.niche_json.get('description', '')
+                    acct_data['niche_keywords_count'] = len(account.niche_json.get('keywords', []))
+            accounts_data.append(acct_data)
         
         return jsonify({
             'success': True,
