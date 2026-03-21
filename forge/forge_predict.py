@@ -192,8 +192,8 @@ def cmd_precondition_verify(args) -> int:
         return 0
 
     try:
-        from google import genai
-        from google.genai import types
+        from google import genai  # type: ignore[import-untyped]
+        from google.genai import types  # type: ignore[import-untyped]
         client = genai.Client(api_key=api_key)
         img_bytes = tmp_ss.read_bytes()
         response = client.models.generate_content(
