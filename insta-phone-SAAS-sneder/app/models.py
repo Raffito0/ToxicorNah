@@ -1,3 +1,4 @@
+import os
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from . import db
@@ -20,9 +21,49 @@ class Phone(db.Model):
 
 
 class Proxy(db.Model):
-    """Stub for FK resolution — fully implemented in section-03."""
     __tablename__ = 'proxy'
+
     id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    host = db.Column(db.String(255), nullable=False)
+    port = db.Column(db.Integer, nullable=False)
+    username_env = db.Column(db.String(100), nullable=False)
+    password_env = db.Column(db.String(100), nullable=False)
+    rotation_url_env = db.Column(db.String(100), nullable=True)
+    hotspot_ssid = db.Column(db.String(100), nullable=True)
+    hotspot_password_env = db.Column(db.String(100), nullable=True)
+    current_ip = db.Column(db.String(45), nullable=True)
+    status = db.Column(db.String(20), default='active')
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    rotations = db.relationship('ProxyRotation', backref='proxy', lazy='dynamic')
+
+    @property
+    def socks5_url(self) -> str:
+        """Compute SOCKS5 URL from components + env vars.
+        Raises KeyError if env vars are not set."""
+        username = os.environ[self.username_env]
+        password = os.environ[self.password_env]
+        return f"socks5://{username}:{password}@{self.host}:{self.port}"
+
+
+class ProxyRotation(db.Model):
+    __tablename__ = 'proxy_rotation'
+
+    id = db.Column(db.Integer, primary_key=True)
+    proxy_id = db.Column(db.Integer, db.ForeignKey('proxy.id'), nullable=False)
+    old_ip = db.Column(db.String(45), nullable=False)
+    new_ip = db.Column(db.String(45), nullable=True)
+    rotated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    triggered_by = db.Column(db.String(100), nullable=False)
+    phone_id = db.Column(db.Integer, nullable=True)
+    status = db.Column(db.String(20), nullable=False)
+    error_message = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        db.Index('ix_proxy_rotation_history', 'proxy_id', 'rotated_at'),
+    )
 
 
 class TimingPreset(db.Model):

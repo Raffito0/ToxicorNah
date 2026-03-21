@@ -1,7 +1,9 @@
-"""Tests for Phone, Bot, BotAccount models (sections 01-02)."""
+"""Tests for Phone, Bot, BotAccount, Proxy, ProxyRotation models."""
+import os
 import time
+import pytest
 from sqlalchemy.exc import IntegrityError
-from app.models import Phone, Bot, BotAccount, User
+from app.models import Phone, Bot, BotAccount, User, Proxy, ProxyRotation
 
 
 def test_phone_table_created(app, db):
@@ -37,7 +39,6 @@ def test_phone_duplicate_id(app, db):
 
     phone2 = Phone(id=1, name='Phone B', model='Model B')
     db.session.add(phone2)
-    import pytest
     with pytest.raises(IntegrityError):
         db.session.commit()
     db.session.rollback()
@@ -279,3 +280,98 @@ def test_botaccount_json_replace(app, db):
     db.session.commit()
     result = db.session.get(BotAccount, acct.id)
     assert result.personality_json["reels_preference"] == 0.9
+
+
+# ─── Section 03: Proxy / ProxyRotation ─────────────────────────────
+
+def _make_proxy(db, **kwargs):
+    """Helper to create a Proxy with required fields."""
+    defaults = dict(name='Florida Mobile', host='sinister.services', port=20002,
+                    username_env='PROXY_1_USERNAME', password_env='PROXY_1_PASSWORD')
+    defaults.update(kwargs)
+    proxy = Proxy(**defaults)
+    db.session.add(proxy)
+    db.session.commit()
+    return proxy
+
+
+def test_proxy_creates(app, db):
+    """Proxy with host, port, env var names should persist."""
+    proxy = _make_proxy(db)
+    result = db.session.get(Proxy, proxy.id)
+    assert result.name == 'Florida Mobile'
+    assert result.host == 'sinister.services'
+    assert result.port == 20002
+    assert result.username_env == 'PROXY_1_USERNAME'
+    assert result.password_env == 'PROXY_1_PASSWORD'
+
+
+def test_proxy_status_default(app, db):
+    """Proxy created without status should default to 'active'."""
+    proxy = _make_proxy(db)
+    assert proxy.status == 'active'
+
+
+def test_proxy_socks5_url(app, db, monkeypatch):
+    """socks5_url should compute URL from env vars."""
+    monkeypatch.setenv('PROXY_1_USERNAME', 'testuser')
+    monkeypatch.setenv('PROXY_1_PASSWORD', 'testpass')
+    proxy = _make_proxy(db)
+    assert proxy.socks5_url == 'socks5://testuser:testpass@sinister.services:20002'
+
+
+def test_proxy_socks5_url_missing_env(app, db):
+    """socks5_url should raise KeyError when env var is not set."""
+    proxy = _make_proxy(db)
+    # Ensure env vars are NOT set
+    os.environ.pop('PROXY_1_USERNAME', None)
+    os.environ.pop('PROXY_1_PASSWORD', None)
+    with pytest.raises(KeyError):
+        _ = proxy.socks5_url
+
+
+def test_proxy_rotation_fk(app, db):
+    """ProxyRotation with proxy_id referencing Proxy should persist."""
+    proxy = _make_proxy(db)
+    rotation = ProxyRotation(proxy_id=proxy.id, old_ip='1.2.3.4',
+                             new_ip='5.6.7.8', triggered_by='manual',
+                             status='success')
+    db.session.add(rotation)
+    db.session.commit()
+    result = db.session.get(ProxyRotation, rotation.id)
+    assert result.proxy_id == proxy.id
+    assert result.old_ip == '1.2.3.4'
+    assert result.new_ip == '5.6.7.8'
+
+
+def test_proxy_rotation_status(app, db):
+    """ProxyRotation status should accept both 'success' and 'failed'."""
+    proxy = _make_proxy(db)
+    r1 = ProxyRotation(proxy_id=proxy.id, old_ip='1.1.1.1', new_ip='2.2.2.2',
+                       triggered_by='session_switch', status='success')
+    r2 = ProxyRotation(proxy_id=proxy.id, old_ip='2.2.2.2',
+                       triggered_by='health_check', status='failed',
+                       error_message='Timeout')
+    db.session.add_all([r1, r2])
+    db.session.commit()
+    assert db.session.get(ProxyRotation, r1.id).status == 'success'
+    assert db.session.get(ProxyRotation, r2.id).status == 'failed'
+
+
+def test_proxy_rotation_error_nullable(app, db):
+    """ProxyRotation can be created without error_message."""
+    proxy = _make_proxy(db)
+    rotation = ProxyRotation(proxy_id=proxy.id, old_ip='1.2.3.4',
+                             new_ip='5.6.7.8', triggered_by='manual',
+                             status='success')
+    db.session.add(rotation)
+    db.session.commit()
+    assert db.session.get(ProxyRotation, rotation.id).error_message is None
+
+
+def test_proxy_rotation_index(app, db):
+    """The composite index on (proxy_id, rotated_at) should exist."""
+    inspector = db.inspect(db.engine)
+    indexes = inspector.get_indexes('proxy_rotation')
+    index_names = [idx['name'] for idx in indexes]
+    assert 'ix_proxy_rotation_history' in index_names
