@@ -140,7 +140,7 @@ def cmd_call_chain(args) -> int:
     """Trace call chain for FUNCTION and identify app states."""
     cache = load_cache()
     search_dir = args.search_dir or "phone-bot"
-    fn = getattr(args, "call_chain", None)
+    fn: str = args.call_chain
 
     # Level 1: direct callers of fn
     direct = _grep_fallback(search_dir, fn)
