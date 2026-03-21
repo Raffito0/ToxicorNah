@@ -166,19 +166,27 @@ After implementing warmup-only mode, run a FORGE v2 test with `stock=0` mocked f
 
 ---
 
-## Files Modified
+## Files Modified (Actual)
 
 | File | Change |
 |------|--------|
-| `phone-bot/planner/executor.py` | Add `check_content_stock()`, call it in `run_today()`, implement warmup-only branching in session loop |
-| `phone-bot/core/telegram_monitor.py` | `stock_alert()` method (stubbed in section-04, fully implemented here) |
-| `phone-bot/tests/test_stock_monitor.py` | New test file (write first) |
+| `phone-bot/planner/executor.py` | Added `check_content_stock()` with Airtable pagination + per-phone error handling. Added stock check + alert dispatch in `run_today()` Phase 2. Added warmup-only override (sets `post_scheduled=False` via shallow copy). Added `urllib.request`, `urllib.error`, `urllib.parse` imports. |
+| `phone-bot/core/telegram_monitor.py` | No changes needed — `stock_alert()` was fully implemented in section-04 already |
+| `phone-bot/tests/test_stock_monitor.py` | New test file — 16 tests covering stock check, pagination, partial failure, alerts, warmup-only logic |
+
+### Deviations from Plan
+
+1. **Pagination**: Plan did not mention Airtable pagination. Added pagination loop following `offset` to handle >100 records correctly (code review fix).
+2. **Per-phone error handling**: Plan wrapped entire stock check in single try/except. Changed to per-phone try/except so partial results are returned when one phone's query fails (code review fix).
+3. **telegram_monitor.py unchanged**: Plan said `stock_alert()` would be "fully implemented here", but it was already complete in section-04.
+4. **No `_execute_scroll_only()` needed**: Warmup-only mode achieved by overriding `post_scheduled=False` in the session dict before `execute_session()`, which reuses the existing normal session flow with no-post behavior.
+5. **16 tests instead of 8**: Added tests for pagination, partial failure, URL construction, multiple phones at zero.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] `pytest phone-bot/tests/test_stock_monitor.py -v` — all 8 tests pass
+- [x] `pytest phone-bot/tests/test_stock_monitor.py -v` — all 16 tests pass
 - [ ] When `AIRTABLE_API_KEY` is valid, `check_content_stock()` returns real counts from Airtable
 - [ ] FORGE v2: warmup-only mode verified on real hardware — session runs, no post attempted
-- [ ] When Airtable fails, `run_today()` continues normally (no crash, no incorrect warmup mode)
+- [x] When Airtable fails, `run_today()` continues normally (no crash, no incorrect warmup mode)

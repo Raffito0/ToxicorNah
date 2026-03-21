@@ -11,6 +11,9 @@ import logging
 import os
 import random
 import time
+import urllib.request
+import urllib.error
+import urllib.parse
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
@@ -36,6 +39,55 @@ log = logging.getLogger(__name__)
 WARMUP_STATE_FILE = os.path.join(config.DATA_DIR, "warmup_state.json")
 VIDEO_DOWNLOAD_TIMEOUT = 30  # seconds
 _download_pool = ThreadPoolExecutor(max_workers=1)
+
+_AIRTABLE_BASE_ID = "appsgjIdkpak2kaXq"
+_CONTENT_LIBRARY_TABLE = "tblx1KX7mlTX5QyGb"
+_LOW_STOCK_THRESHOLD = 14
+
+
+def check_content_stock(phones: list[int]) -> dict[int, int]:
+    """Query Airtable for pending video count per phone.
+
+    Uses the Content Library table with filter:
+    AND(FIND('Phone N', {content_label}), {platform_status_tiktok}='pending')
+
+    Returns {phone_id: count}. On any error, logs warning and returns {}.
+    """
+    api_key = os.environ.get("AIRTABLE_API_KEY", "")
+    if not api_key:
+        log.warning("AIRTABLE_API_KEY not set — skipping stock check")
+        return {}
+
+    result = {}
+    for phone_id in phones:
+        try:
+            formula = f"AND(FIND('Phone {phone_id}', {{content_label}}), {{platform_status_tiktok}}='pending')"
+            encoded_formula = urllib.parse.quote(formula, safe="")
+            base_url = (
+                f"https://api.airtable.com/v0/{_AIRTABLE_BASE_ID}/{_CONTENT_LIBRARY_TABLE}"
+                f"?filterByFormula={encoded_formula}"
+            )
+            # Paginate through all results (Airtable returns max 100 per page)
+            count = 0
+            offset = None
+            while True:
+                url = base_url
+                if offset:
+                    url += f"&offset={urllib.parse.quote(offset, safe='')}"
+                req = urllib.request.Request(url, headers={
+                    "Authorization": f"Bearer {api_key}",
+                })
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                count += len(data.get("records", []))
+                offset = data.get("offset")
+                if not offset:
+                    break
+            result[phone_id] = count
+        except Exception as e:
+            log.warning("Stock check failed for Phone %d: %s", phone_id, e)
+            # Continue checking other phones — partial results are better than none
+    return result
 
 
 class SessionExecutor:
@@ -1276,6 +1328,21 @@ class SessionExecutor:
         else:
             log.info("Found %d regular sessions for today", len(sessions))
 
+            # --- Content stock check (once per day, before session loop) ---
+            phone_ids = list({s.get("phone_id") for s in sessions if s.get("phone_id")})
+            stock = check_content_stock(phone_ids)
+
+            if stock:
+                for pid, count in stock.items():
+                    if count == 0:
+                        get_prod_monitor().stock_alert(phone_id=pid, count=0, critical=True)
+                        log.warning("Phone %d: ZERO stock — sessions will run scroll-only", pid)
+                    elif count < _LOW_STOCK_THRESHOLD:
+                        get_prod_monitor().stock_alert(phone_id=pid, count=count, critical=False)
+                        log.info("Phone %d: low stock (%d videos)", pid, count)
+            else:
+                log.info("Stock check returned empty — proceeding with normal posting for all")
+
             # dead_phones set is shared from Phase 1 (top of run_today)
 
             for session in sessions:
@@ -1288,6 +1355,14 @@ class SessionExecutor:
                     log.warning("Skipping session %s — Phone %d lost connection",
                                 session.get("account_name", "?"), phone_id)
                     continue
+
+                # Warmup-only override: if stock=0, disable posting for this phone
+                phone_stock = stock.get(phone_id, None)
+                warmup_only = (phone_stock is not None and phone_stock == 0)
+                if warmup_only and session.get("post_scheduled", False):
+                    log.info("Phone %d: stock=0, overriding to scroll-only (no post)", phone_id)
+                    session = dict(session)  # shallow copy to avoid mutating plan
+                    session["post_scheduled"] = False
 
                 start_time_str = session.get("start_time", "")
                 if start_time_str:
