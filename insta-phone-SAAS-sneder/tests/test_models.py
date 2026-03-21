@@ -877,3 +877,88 @@ def test_seed_full_run(app, db, capsys):
     assert Phone.query.count() == 4
     assert Proxy.query.count() == 1
     assert TimingPreset.query.count() == 4
+
+
+# ─── Section 08: Backward Compatibility (Integration) ─────────────
+
+def test_existing_bot_survives_schema_update(app, db):
+    """Bot with only original fields works after schema changes."""
+    u = _make_user(db)
+    bot = _make_bot(db, u, status='active')
+    result = db.session.get(Bot, bot.id)
+    assert result.status == 'active'
+    assert result.platform == 'instagram'  # default
+    assert result.control_status == 'stopped'  # default
+    assert result.phone_ref_id is None
+    assert result.proxy_id is None
+    # Can update original fields
+    result.status = 'paused'
+    db.session.commit()
+    assert db.session.get(Bot, bot.id).status == 'paused'
+
+
+def test_existing_botaccount_survives(app, db):
+    """BotAccount with Instagram-specific fields survives schema extension."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    acct = _make_account(db, bot)
+    acct.follow_per_session_min = 10
+    acct.likes_per_day_max = 30
+    acct.dms_per_hour_min = 5
+    db.session.commit()
+    result = db.session.get(BotAccount, acct.id)
+    assert result.follow_per_session_min == 10
+    assert result.likes_per_day_max == 30
+    assert result.personality_json is None
+    assert result.warmup_json is None
+    assert result.niche_json is None
+
+
+def test_bot_unique_constraint_preserved(app, db):
+    """The existing unique constraint (user_id, phone_id) on Bot still works."""
+    u = _make_user(db)
+    _make_bot(db, u, phone_id='phone1', name='Bot1')
+    b2 = Bot(user_id=u.id, phone_id='phone1', name='Bot2')
+    db.session.add(b2)
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    db.session.rollback()
+
+
+def test_botaccount_unique_constraint_preserved(app, db):
+    """The existing unique constraint (bot_id, clone_id) on BotAccount still works."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    _make_account(db, bot, clone_id='clone1')
+    a2 = BotAccount(bot_id=bot.id, clone_id='clone1', username='other', password='p')
+    db.session.add(a2)
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    db.session.rollback()
+
+
+def test_existing_relationships_preserved(app, db):
+    """User -> Bot -> BotAccount cascade still works."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    _make_account(db, bot)
+    assert BotAccount.query.count() == 1
+    assert Bot.query.count() == 1
+    # Delete user — cascade should delete bot and account
+    db.session.delete(u)
+    db.session.commit()
+    assert Bot.query.count() == 0
+    assert BotAccount.query.count() == 0
+
+
+def test_mixed_platform_query(app, db):
+    """Bots with different platforms can coexist and be filtered."""
+    u = _make_user(db)
+    _make_bot(db, u, phone_id='ph1', name='IG Bot', platform='instagram')
+    _make_bot(db, u, phone_id='ph2', name='TK Bot', platform='tiktok')
+    ig_bots = Bot.query.filter_by(platform='instagram').all()
+    tk_bots = Bot.query.filter_by(platform='tiktok').all()
+    all_bots = Bot.query.all()
+    assert len(ig_bots) == 1
+    assert len(tk_bots) == 1
+    assert len(all_bots) == 2
