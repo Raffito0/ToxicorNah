@@ -3,7 +3,8 @@ import os
 import time
 import pytest
 from sqlalchemy.exc import IntegrityError
-from app.models import Phone, Bot, BotAccount, User, Proxy, ProxyRotation
+from app.models import (Phone, Bot, BotAccount, User, Proxy, ProxyRotation,
+                        TimingPreset, TimingOverride)
 
 
 def test_phone_table_created(app, db):
@@ -375,3 +376,82 @@ def test_proxy_rotation_index(app, db):
     indexes = inspector.get_indexes('proxy_rotation')
     index_names = [idx['name'] for idx in indexes]
     assert 'ix_proxy_rotation_history' in index_names
+
+
+# ─── Section 04: TimingPreset / TimingOverride ─────────────────────
+
+def test_timing_preset_json(app, db):
+    """TimingPreset with params_json should round-trip as dict."""
+    params = {"t_app_load": [4.0, 0.3, 2.0, 10.0],
+              "t_scroll_pause": [1.5, 0.4, 0.5, 5.0]}
+    preset = TimingPreset(name='Normal', params_json=params)
+    db.session.add(preset)
+    db.session.commit()
+    result = db.session.get(TimingPreset, preset.id)
+    assert result.params_json["t_app_load"] == [4.0, 0.3, 2.0, 10.0]
+
+
+def test_timing_preset_is_default(app, db):
+    """is_default=True should persist and be queryable."""
+    preset = TimingPreset(name='Normal', params_json={}, is_default=True)
+    db.session.add(preset)
+    db.session.commit()
+    result = TimingPreset.query.filter_by(is_default=True).first()
+    assert result is not None
+    assert result.name == 'Normal'
+
+
+def test_timing_override_unique(app, db):
+    """TimingOverride unique constraint on (bot_id, param_name)."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    o1 = TimingOverride(bot_id=bot.id, param_name='t_app_load',
+                        median=5.0, sigma=0.4, min_val=2.0, max_val=12.0)
+    db.session.add(o1)
+    db.session.commit()
+    # Same bot_id + param_name should fail
+    o2 = TimingOverride(bot_id=bot.id, param_name='t_app_load',
+                        median=3.0, sigma=0.2, min_val=1.0, max_val=8.0)
+    db.session.add(o2)
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    db.session.rollback()
+
+
+def test_timing_override_different_params(app, db):
+    """Same bot with different param_name should succeed."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    o1 = TimingOverride(bot_id=bot.id, param_name='t_app_load',
+                        median=5.0, sigma=0.4, min_val=2.0, max_val=12.0)
+    o2 = TimingOverride(bot_id=bot.id, param_name='t_scroll_pause',
+                        median=1.5, sigma=0.3, min_val=0.5, max_val=4.0)
+    db.session.add_all([o1, o2])
+    db.session.commit()
+    assert db.session.get(TimingOverride, o1.id).param_name == 't_app_load'
+    assert db.session.get(TimingOverride, o2.id).param_name == 't_scroll_pause'
+
+
+def test_timing_override_fk(app, db):
+    """TimingOverride.bot_id should reference an existing Bot record."""
+    u = _make_user(db)
+    bot = _make_bot(db, u)
+    override = TimingOverride(bot_id=bot.id, param_name='t_like_delay',
+                              median=0.8, sigma=0.3, min_val=0.3, max_val=3.0)
+    db.session.add(override)
+    db.session.commit()
+    result = db.session.get(TimingOverride, override.id)
+    assert result.bot_id == bot.id
+
+
+def test_timing_preset_updated_at(app, db):
+    """After modifying a TimingPreset, updated_at should change."""
+    preset = TimingPreset(name='Test', params_json={"a": [1, 2, 3, 4]})
+    db.session.add(preset)
+    db.session.commit()
+    original = preset.updated_at
+    time.sleep(0.1)
+    preset.name = 'Updated'
+    db.session.commit()
+    result = db.session.get(TimingPreset, preset.id)
+    assert result.updated_at > original

@@ -67,9 +67,31 @@ class ProxyRotation(db.Model):
 
 
 class TimingPreset(db.Model):
-    """Stub for FK resolution — fully implemented in section-04."""
     __tablename__ = 'timing_preset'
+
     id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    params_json = db.Column(db.JSON, nullable=False)
+    is_default = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class TimingOverride(db.Model):
+    __tablename__ = 'timing_override'
+
+    id = db.Column(db.Integer, primary_key=True)
+    bot_id = db.Column(db.Integer, db.ForeignKey('bot.id'), nullable=False)
+    param_name = db.Column(db.String(100), nullable=False)
+    median = db.Column(db.Float, nullable=False)
+    sigma = db.Column(db.Float, nullable=False)
+    min_val = db.Column(db.Float, nullable=False)
+    max_val = db.Column(db.Float, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('bot_id', 'param_name', name='uq_timing_override_bot_param'),
+    )
 
 
 class User(db.Model, UserMixin):
