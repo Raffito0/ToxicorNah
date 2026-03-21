@@ -201,9 +201,16 @@ class EventLogger:
 _default_logger: EventLogger | None = None
 
 
-def init_monitor(events_dir, screenshots_dir, **kwargs):
-    """Initialize the global event logger."""
+def init_monitor(events_dir=None, screenshots_dir=None, test_mode=False, **kwargs):
+    """Initialize the global event logger.
+    If test_mode=True, auto-creates temp directories so test functions need only
+    call init_monitor(test_mode=True) without managing paths manually.
+    """
+    import tempfile as _tempfile
     global _default_logger
+    if test_mode:
+        events_dir = events_dir or _tempfile.mkdtemp(prefix="phone_bot_test_events_")
+        screenshots_dir = screenshots_dir or _tempfile.mkdtemp(prefix="phone_bot_test_shots_")
     if _default_logger is not None:
         _default_logger.close()
     _default_logger = EventLogger(events_dir, screenshots_dir, **kwargs)

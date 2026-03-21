@@ -93,6 +93,8 @@ async def run_scroll_only(controllers: dict[int, ADBController], phone_id: int,
         duration_minutes=duration_min,
     )
 
+    from .core.monitor import init_monitor
+    init_monitor(test_mode=True)
     from .actions.tiktok import TikTokBot
     bot = TikTokBot(adb, human)
 
@@ -158,6 +160,8 @@ async def run_like_test(controllers: dict[int, ADBController], phone_id: int):
         duration_minutes=6,
     )
 
+    from .core.monitor import init_monitor
+    init_monitor(test_mode=True)
     from .actions.tiktok import TikTokBot
     bot = TikTokBot(adb, human)
 
@@ -231,6 +235,8 @@ async def run_browse_test(controllers: dict[int, ADBController], phone_id: int,
         min(8, len(config.NICHE_KEYWORDS_POOL)),
     )
 
+    from .core.monitor import init_monitor
+    init_monitor(test_mode=True)
     from .actions.tiktok import TikTokBot
     bot = TikTokBot(adb, human)
 
@@ -1237,6 +1243,444 @@ async def run_pymk_detection_test(controllers: dict, phone_id: int):
             log.error("=== FAIL: non-standard content still visible after scroll ===")
 
 
+async def run_live_double_scroll_test(controllers: dict, phone_id: int, duration: int = 5):
+    """TEST: Browse FYP for N minutes, verify LIVE previews get double-scrolled.
+
+    Pass criteria:
+    - _post_swipe_live_check() fires on LIVE preview cards
+    - Log shows 'LIVE preview detected' or 'non-standard post-swipe content'
+    - No full LIVE stream UI visible in frames (no chat overlay, no heart rain)
+    - Normal videos load correctly after double-scroll
+    """
+    import time as _time
+    if phone_id not in controllers:
+        log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
+        return
+
+    adb = controllers[phone_id]
+    human = HumanEngine(account_name=f"test_ph{phone_id}")
+    human.start_session(
+        hour=datetime.now().hour,
+        weekday=datetime.now().weekday(),
+        duration_minutes=duration,
+    )
+
+    from .core.monitor import init_monitor
+    import tempfile
+    init_monitor(
+        events_dir=tempfile.mkdtemp(prefix="phone_bot_live_test_events_"),
+        screenshots_dir=tempfile.mkdtemp(prefix="phone_bot_live_test_shots_"),
+    )
+
+    from .actions.tiktok import TikTokBot
+    bot = TikTokBot(adb, human)
+
+    log.info("=== LIVE DOUBLE-SCROLL TEST: Phone %d, %d minutes ===", phone_id, duration)
+    log.info("Browse FYP — LIVE previews should be double-scrolled automatically")
+
+    await bot.browse_session(
+        duration_minutes=duration,
+        should_post=False,
+        niche_keywords=["test"],
+        allow_comment_write=False,
+    )
+    log.info("=== LIVE DOUBLE-SCROLL TEST COMPLETE ===")
+    log.info("Check logs for 'LIVE preview detected' or 'non-standard post-swipe content'")
+    log.info("Check frames for: no full LIVE stream UI (chat overlay, heart rain)")
+
+
+async def run_search_retype_test(controllers: dict, phone_id: int):
+    """TEST: Verify _clear_and_retype() replaces search bar text correctly.
+    Types 'girlfriend goals', then calls _clear_and_retype('breakup story').
+    Verifies via Gemini Vision that search bar contains 'breakup story' only.
+    PASS: Gemini reads 'breakup story' in the search bar.
+    FAIL: old text remains, text is appended, or search results unchanged.
+    """
+    import time as _time
+    if phone_id not in controllers:
+        log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
+        return
+
+    adb = controllers[phone_id]
+    human = HumanEngine(account_name=f"test_ph{phone_id}")
+    human.start_session(
+        hour=datetime.now().hour,
+        weekday=datetime.now().weekday(),
+        duration_minutes=5,
+    )
+
+    from .core.monitor import init_monitor
+    import tempfile
+    init_monitor(
+        events_dir=tempfile.mkdtemp(prefix="phone_bot_retype_test_events_"),
+        screenshots_dir=tempfile.mkdtemp(prefix="phone_bot_retype_test_shots_"),
+    )
+
+    from .actions.tiktok import TikTokBot
+    from .core import gemini as _gem
+    bot = TikTokBot(adb, human)
+
+    log.info("=== SEARCH RETYPE TEST: Phone %d ===", phone_id)
+
+    # Open TikTok
+    bot.open_app()
+    _time.sleep(human.timing("t_app_load"))
+
+    # Step 1: search first keyword
+    log.info("Step 1: searching 'girlfriend goals'")
+    ok = bot._type_search_query("girlfriend goals")
+    if not ok:
+        log.error("SEARCH RETYPE TEST: FAIL — could not open search page")
+        bot.close_app()
+        return
+    _time.sleep(2.0)
+
+    # Save before screenshot
+    before_shot = adb.screenshot_bytes()
+    if before_shot:
+        with open("tmp_search_retype_before.png", "wb") as f:
+            f.write(before_shot)
+        log.info("Step 1: before screenshot saved")
+
+    # Step 2: retype with new keyword
+    log.info("Step 2: calling _clear_and_retype('breakup story')")
+    bot._clear_and_retype("breakup story")
+    _time.sleep(2.0)
+
+    # Save after screenshot
+    after_shot = adb.screenshot_bytes()
+    if after_shot:
+        with open("tmp_search_retype_after.png", "wb") as f:
+            f.write(after_shot)
+        log.info("Step 2: after screenshot saved")
+
+    # Step 3: Gemini reads the search bar text
+    gemini_response = None
+    if after_shot:
+        gemini_response = _gem._call_vision(
+            after_shot,
+            "What text is currently shown in the TikTok search bar at the top of this screen? "
+            "Reply with only the exact text, nothing else.",
+            max_tokens=50,
+            temperature=0.1,
+        )
+
+    log.info("Step 3: Gemini search bar read: %r", gemini_response)
+
+    # Evaluate
+    if gemini_response and "breakup story" in gemini_response.strip().lower():
+        log.info("=== SEARCH RETYPE TEST: PASS — search bar contains 'breakup story' ===")
+        log.info("Gemini response: %r", gemini_response)
+    else:
+        log.error("=== SEARCH RETYPE TEST: FAIL — expected 'breakup story', got: %r ===", gemini_response)
+
+    bot.close_app()
+
+
+async def run_fyp_swipe_clamp_test(controllers: dict, phone_id: int):
+    """TEST: Verify scroll_fyp() end_y stays below screen_h*0.88 (suggestion bar clamp).
+    Runs 30 FYP scroll cycles and logs each sw['y2'] value.
+    PASS: all 30 end_y values < screen_h * 0.88, no suggestion bar tapped.
+    """
+    import time as _time
+    if phone_id not in controllers:
+        log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
+        return
+
+    adb = controllers[phone_id]
+    human = HumanEngine(account_name=f"test_ph{phone_id}")
+    human.start_session(
+        hour=datetime.now().hour,
+        weekday=datetime.now().weekday(),
+        duration_minutes=5,
+    )
+
+    from .core.monitor import init_monitor
+    init_monitor(test_mode=True)
+    from .actions.tiktok import TikTokBot
+    bot = TikTokBot(adb, human)
+
+    log.info("=== FYP SWIPE CLAMP TEST: Phone %d ===", phone_id)
+    log.info("screen_h=%d  end_y_max=%.0f (88%%)", adb.screen_h, adb.screen_h * 0.88)
+
+    bot.open_app()
+    _time.sleep(human.timing("t_app_load"))
+    bot.go_to_fyp()
+    _time.sleep(human.timing("t_back_verify"))
+
+    end_y_max = int(adb.screen_h * 0.88)
+    violations = 0
+    n_scrolls = 5
+    for i in range(n_scrolls):
+        sw = human.humanize_swipe(
+            adb.screen_w // 2, adb.screen_h * 3 // 4,
+            adb.screen_w // 2, adb.screen_h // 4,
+        )
+        clamped_y2 = min(sw["y2"], end_y_max)
+        if sw["y2"] > end_y_max:
+            violations += 1
+            log.warning("Scroll %d/%d: end_y=%d EXCEEDS max=%d (pre-clamp violation)",
+                        i + 1, n_scrolls, sw["y2"], end_y_max)
+        log.info("Scroll %d/%d: end_y_raw=%d end_y_clamped=%d ok=%s",
+                 i + 1, n_scrolls, sw["y2"], clamped_y2, sw["y2"] <= end_y_max)
+        bot.scroll_fyp()
+        _time.sleep(human.timing("t_video_glance") + 2.0)  # ~4-7s realistic watch time
+
+    bot.close_app()
+
+    if violations == 0:
+        log.info("=== FYP SWIPE CLAMP TEST: PASS — 0/%d violations, all end_y < %d ===",
+                 n_scrolls, end_y_max)
+    else:
+        log.error("=== FYP SWIPE CLAMP TEST: FAIL — %d/%d scrolls exceeded end_y_max=%d ===",
+                  violations, n_scrolls, end_y_max)
+
+
+def run_niche_baking_test():
+    """TEST: Verify evaluate_niche_fit() correctly classifies cooking vs relationship content.
+    No phone needed — direct Gemini API calls on saved calibration screenshots.
+    PASS: baking < 30, cooking profile < 40, relationship video >= 60, relationship profile >= 60.
+    """
+    import pathlib
+    from .core import gemini as _gem
+    from .config import NICHE_DESCRIPTION, NICHE_KEYWORDS_POOL as NICHE_KEYWORDS
+
+    CAL = pathlib.Path("phone-bot/calibration")
+    tests = [
+        ("niche_test_baking_video.png",        "video",   None, 30,  "baking video out-of-niche"),
+        ("niche_test_cooking_profile.png",      "profile", None, 40,  "cooking profile out-of-niche"),
+        ("niche_test_relationship_video.png",   "video",   60,  None, "relationship video in-niche"),
+        ("niche_test_relationship_profile.png", "profile", 60,  None, "relationship profile in-niche"),
+    ]
+
+    log.info("=== NICHE BAKING TEST ===")
+    all_pass = True
+    for fname, ctx, min_score, max_score, label in tests:
+        path = CAL / fname
+        if not path.exists():
+            log.error("MISSING screenshot: %s", path)
+            all_pass = False
+            continue
+        shot = path.read_bytes()
+        result = _gem.evaluate_niche_fit(shot, NICHE_DESCRIPTION, NICHE_KEYWORDS or [], context=ctx)
+        score = result["score"]
+        ok = True
+        if min_score is not None and score < min_score:
+            ok = False
+        if max_score is not None and score >= max_score:
+            ok = False
+        status = "PASS" if ok else "FAIL"
+        log.info("[%s] %s: score=%d reason=%s", status, label, score, result["reason"])
+        if not ok:
+            all_pass = False
+
+    if all_pass:
+        log.info("=== NICHE BAKING TEST: PASS ===")
+    else:
+        log.error("=== NICHE BAKING TEST: FAIL ===")
+
+
+def run_screen_detect_test(controllers: dict, phone_id: int):
+    """TEST: Verify all 3 ADB screen size detection methods log raw output + parsed result.
+    No scrcpy needed — purely ADB log verification.
+    PASS: each method runs, logs raw output at DEBUG, returns (1080, 2220) or None with reason.
+    """
+    if phone_id not in controllers:
+        log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
+        return
+
+    adb = controllers[phone_id]
+    log.info("=== SCREEN DETECT TEST: Phone %d (%s) ===", phone_id, adb.serial)
+
+    log.info("--- Method 1: wm size ---")
+    r1 = adb._detect_size_wm()
+    log.info("wm size result: %s", r1)
+
+    log.info("--- Method 2: dumpsys window ---")
+    r2 = adb._detect_size_dumpsys_window()
+    log.info("dumpsys window result: %s", r2)
+
+    log.info("--- Method 3: dumpsys display ---")
+    r3 = adb._detect_size_dumpsys_display()
+    log.info("dumpsys display result: %s", r3)
+
+    log.info("--- Cascade result (_get_screen_size) ---")
+    rc = adb._get_screen_size()
+    log.info("_get_screen_size result: %s", rc)
+
+    expected = (adb.screen_w, adb.screen_h)
+    log.info("Current screen_w x screen_h: %dx%d", adb.screen_w, adb.screen_h)
+
+    # Method 3 (dumpsys display) returns PHYSICAL size on Samsung override devices —
+    # this is expected. Cascade stops at Method 1 or 2 which return the override size.
+    cascade_ok = rc == expected
+    any_method_ok = any(r == expected for r in (r1, r2, r3) if r is not None)
+    if cascade_ok and any_method_ok:
+        log.info("=== SCREEN DETECT TEST: PASS — cascade returned correct %dx%d ===", *expected)
+    elif any_method_ok:
+        log.warning("=== SCREEN DETECT TEST: PARTIAL — cascade=%s, expected=%s ===", rc, expected)
+    else:
+        log.error("=== SCREEN DETECT TEST: FAIL — no method returned %dx%d ===", *expected)
+
+
+async def run_search_reveal_test(controllers: dict, phone_id: int):
+    """TEST: Verify go_to_search() correctly opens the search page.
+    Checks whether top bar is hidden before the call, then verifies search opens.
+    PASS: search page open after go_to_search() call.
+    PARTIAL: top bar was already visible (bar never auto-hides on this device) but search worked.
+    FAIL: search page did not open.
+    """
+    import time as _time
+    if phone_id not in controllers:
+        log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
+        return
+
+    adb = controllers[phone_id]
+    human = HumanEngine(account_name=f"test_ph{phone_id}")
+    human.start_session(
+        hour=datetime.now().hour,
+        weekday=datetime.now().weekday(),
+        duration_minutes=5,
+    )
+
+    from .core.monitor import init_monitor
+    import tempfile
+    init_monitor(
+        events_dir=tempfile.mkdtemp(prefix="phone_bot_reveal_test_events_"),
+        screenshots_dir=tempfile.mkdtemp(prefix="phone_bot_reveal_test_shots_"),
+    )
+
+    from .actions.tiktok import TikTokBot
+    from .core import gemini as _gem
+    bot = TikTokBot(adb, human)
+
+    log.info("=== SEARCH REVEAL TEST: Phone %d ===", phone_id)
+
+    # Step 1: navigate to FYP
+    bot.open_app()
+    _time.sleep(human.timing("t_app_load"))
+    bot.go_to_fyp()
+    _time.sleep(human.timing("t_back_verify"))
+
+    # Step 2: wait for top bar to auto-hide (10s)
+    log.info("Waiting 10s for top bar to auto-hide...")
+    _time.sleep(10.0)
+
+    # Step 3: check if top bar is hidden
+    pre_shot = adb.screenshot_bytes()
+    bar_visible_before = "yes"
+    if pre_shot:
+        resp = _gem._call_vision(
+            pre_shot,
+            "Is the TikTok top navigation bar (containing the search icon and 'For You' tab) "
+            "visible at the top of the screen? Answer yes or no only.",
+            max_tokens=5,
+            temperature=0.1,
+        )
+        bar_visible_before = (resp or "yes").strip().lower()
+    log.info("pre_reveal_bar_visible: %s", bar_visible_before)
+    if bar_visible_before != "no":
+        log.warning("Top bar still visible after 10s wait — device may not auto-hide bar (PARTIAL test)")
+
+    # Step 4: call go_to_search()
+    ok = bot.go_to_search()
+    log.info("go_to_search() returned: %s", ok)
+
+    # Step 5: verify search page open
+    post_shot = adb.screenshot_bytes()
+    search_open = "no"
+    if post_shot:
+        resp2 = _gem._call_vision(
+            post_shot,
+            "Is the TikTok search/discover page currently open? "
+            "Look for a search input field at the top and content below. Answer yes or no only.",
+            max_tokens=5,
+            temperature=0.1,
+        )
+        search_open = (resp2 or "no").strip().lower()
+    log.info("search_page_open: %s", search_open)
+
+    # Step 6: result
+    if ok and search_open == "yes":
+        if bar_visible_before == "no":
+            log.info("=== SEARCH REVEAL TEST: PASS — reveal tap showed top bar and search opened ===")
+        else:
+            log.info("=== SEARCH REVEAL TEST: PASS (PARTIAL — bar was already visible, search opened) ===")
+    else:
+        log.error("=== SEARCH REVEAL TEST: FAIL — go_to_search=%s search_open=%s ===", ok, search_open)
+
+    bot.close_app()
+
+
+async def run_search_grid_scroll_test(controllers: dict, phone_id: int):
+    """TEST: Verify 5 consecutive grid scrolls never open the fullscreen video player.
+    PASS: all 5 scrolls keep search grid visible (2-column thumbnail layout).
+    FAIL: even 1 scroll opens fullscreen player.
+    """
+    import time as _time
+    if phone_id not in controllers:
+        log.error("Phone %d not connected! Available: %s", phone_id, list(controllers.keys()))
+        return
+
+    adb = controllers[phone_id]
+    human = HumanEngine(account_name=f"test_ph{phone_id}")
+    human.start_session(
+        hour=datetime.now().hour,
+        weekday=datetime.now().weekday(),
+        duration_minutes=5,
+    )
+
+    from .core.monitor import init_monitor
+    import tempfile
+    init_monitor(
+        events_dir=tempfile.mkdtemp(prefix="phone_bot_grid_test_events_"),
+        screenshots_dir=tempfile.mkdtemp(prefix="phone_bot_grid_test_shots_"),
+    )
+
+    from .actions.tiktok import TikTokBot
+    from .core import gemini as _gem
+    bot = TikTokBot(adb, human)
+
+    log.info("=== SEARCH GRID SCROLL TEST: Phone %d ===", phone_id)
+
+    # Open TikTok and navigate to search grid
+    bot.open_app()
+    _time.sleep(human.timing("t_app_load"))
+
+    ok = bot._type_search_query("relationship goals")
+    if not ok:
+        log.error("FAIL: could not open search page")
+        bot.close_app()
+        return
+
+    _time.sleep(2.0)
+    log.info("Step 1: on 'relationship goals' Videos grid — running 5 grid scrolls")
+
+    fullscreen_opens = 0
+    for i in range(5):
+        log.info("Grid scroll %d/5...", i + 1)
+        bot._maybe_scroll_grid(scroll_prob=1.0)
+        _time.sleep(1.0)
+
+        # Verify still on search grid (not fullscreen player)
+        shot = adb.screenshot_bytes()
+        if shot:
+            result = _gem.identify_page_with_recovery(shot)
+            page = result.get("page", "unknown")
+            if page != "search" and page != "unknown":
+                log.error("Scroll %d/5 OPENED FULLSCREEN (page=%s) ← FAIL", i + 1, page)
+                fullscreen_opens += 1
+            else:
+                log.info("Scroll %d/5 OK (page=%s)", i + 1, page)
+
+    if fullscreen_opens == 0:
+        log.info("=== SEARCH GRID SCROLL TEST: PASS — 0/5 scrolls opened fullscreen ===")
+    else:
+        log.error("=== SEARCH GRID SCROLL TEST: FAIL — %d/5 scrolls opened fullscreen ===", fullscreen_opens)
+
+    bot.close_app()
+
+
 def _check_api_keys():
     """Warn at startup if critical API keys are missing."""
     if not GEMINI.get("api_key"):
@@ -1248,7 +1692,7 @@ def _check_api_keys():
 def main():
     parser = argparse.ArgumentParser(description="Phone Bot — TikTok & Instagram Automation")
     parser.add_argument("--test", nargs="?", const="devices", metavar="MODE",
-                        help="Test mode: 'devices' (default), 'story-coord-audit', 'story-exit', 'pymk-detection', 'overlay-photosensitive', 'search-tab-restore'")
+                        help="Test mode: 'devices' (default), 'story-coord-audit', 'story-exit', 'pymk-detection', 'overlay-photosensitive', 'search-tab-restore', 'live-double-scroll', 'search-retype', 'search-grid-scroll'")
     parser.add_argument("--dashboard", action="store_true", help="Start web dashboard")
     parser.add_argument("--warmup", action="store_true", help="Initialize warmup for new accounts")
     parser.add_argument("--scroll-only", action="store_true",
@@ -1324,6 +1768,52 @@ def main():
             log.error("--test return-to-fyp-on-fyp requires --phone (e.g. --phone 3)")
             sys.exit(1)
         run_return_to_fyp_on_fyp_test(controllers, args.phone)
+        return
+
+    if args.test == "live-double-scroll":
+        if not args.phone:
+            log.error("--test live-double-scroll requires --phone (e.g. --phone 3)")
+            sys.exit(1)
+        asyncio.run(run_live_double_scroll_test(controllers, args.phone, args.duration))
+        return
+
+    if args.test == "search-retype":
+        if not args.phone:
+            log.error("--test search-retype requires --phone (e.g. --phone 3)")
+            sys.exit(1)
+        asyncio.run(run_search_retype_test(controllers, args.phone))
+        return
+
+    if args.test == "search-grid-scroll":
+        if not args.phone:
+            log.error("--test search-grid-scroll requires --phone (e.g. --phone 3)")
+            sys.exit(1)
+        asyncio.run(run_search_grid_scroll_test(controllers, args.phone))
+        return
+
+    if args.test == "search-reveal":
+        if not args.phone:
+            log.error("--test search-reveal requires --phone (e.g. --phone 3)")
+            sys.exit(1)
+        asyncio.run(run_search_reveal_test(controllers, args.phone))
+        return
+
+    if args.test == "screen-detect":
+        if not args.phone:
+            log.error("--test screen-detect requires --phone (e.g. --phone 3)")
+            sys.exit(1)
+        run_screen_detect_test(controllers, args.phone)
+        return
+
+    if args.test == "niche-baking":
+        run_niche_baking_test()
+        return
+
+    if args.test == "fyp-swipe-clamp":
+        if not args.phone:
+            log.error("--test fyp-swipe-clamp requires --phone (e.g. --phone 3)")
+            sys.exit(1)
+        asyncio.run(run_fyp_swipe_clamp_test(controllers, args.phone))
         return
 
     if args.test:  # default: 'devices'

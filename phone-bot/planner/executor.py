@@ -451,19 +451,93 @@ class SessionExecutor:
         await bot.browse_session(duration_minutes=duration_min, should_post=False,
                                  niche_keywords=session_keywords)
 
+    async def _post_with_retry(
+        self,
+        bot,
+        adb: ADBController,
+        platform: str,
+        video_path: str,
+        caption: str,
+        phone_id: int,
+        record_id: str,
+        dry_run: bool = False,
+    ) -> str:
+        """Try to post, reset app and retry once on retryable failure, fall back to draft.
+
+        Returns one of: "posted" | "draft" | "failed" | "failed_permanent"
+
+        Retry flow:
+            Attempt 1: post_video/post_reel
+              -> "success":     mark_posted, return "posted"
+              -> "retryable":   force-stop app, wait 3s, reopen app, wait for load
+              -> "banned":      return "failed_permanent" (no retry, no draft)
+              -> "media_error": return "failed_permanent" (no retry, no draft)
+            Attempt 2: post_video/post_reel
+              -> "success":     mark_posted, return "posted"
+              -> any failure:   fall through to draft save
+            Draft save: bot.save_as_draft
+              -> True:   mark_draft in Airtable, return "draft"
+              -> False:  send critical Telegram alert, return "failed"
+
+        DeviceLostError propagates up (not caught here).
+        """
+        from ..actions.tiktok import TIKTOK_PKG
+        from ..actions.instagram import INSTAGRAM_PKG
+
+        pkg = TIKTOK_PKG if platform == "tiktok" else INSTAGRAM_PKG
+        post_fn = bot.post_video if platform == "tiktok" else bot.post_reel
+
+        for attempt in range(2):
+            result = post_fn(video_path, caption)
+            log.info("Post attempt %d/%d: %s (platform=%s, phone=%d)",
+                     attempt + 1, 2, result, platform, phone_id)
+
+            if result == "success":
+                if not dry_run and mark_posted:
+                    mark_posted(record_id, platform)
+                return "posted"
+
+            if result in ("banned", "media_error"):
+                log.error("Permanent post failure: %s — no retry", result)
+                return "failed_permanent"
+
+            # "retryable" — app-reset before next attempt
+            if attempt == 0:
+                log.warning("Post retryable — resetting app before retry")
+                adb.shell(f"am force-stop {pkg}")
+                await asyncio.sleep(3.0)
+                bot.open_app()
+                await asyncio.sleep(bot.human.timing("t_app_load"))
+
+        # Both attempts failed — try saving as draft
+        log.warning("Post failed after 2 attempts — trying save_as_draft")
+        draft_ok = bot.save_as_draft(video_path, caption)
+        if draft_ok:
+            if not dry_run and mark_draft:
+                mark_draft(record_id, platform)
+            return "draft"
+
+        # Draft also failed — critical alert
+        log.critical("BOTH post AND draft failed (phone=%d, platform=%s)", phone_id, platform)
+        account = getattr(self, '_current_account', '')
+        tg_alert(phone_id, account,
+                 f"CRITICAL: Post AND draft both failed for {platform}")
+        return "failed"
+
     async def _execute_normal(self, adb: ADBController, human: HumanEngine,
                                platform: str, duration_min: float,
                                should_post: bool, post_outcome: str,
                                pre_minutes: float, post_minutes: float,
                                phone_id: int):
-        """Normal/extended session: scroll → post → scroll."""
+        """Normal/extended session: scroll -> post -> scroll."""
         video_path = ""
         caption = ""
+        record_id = None
         self._pending_record = None  # reset per session
 
         if should_post and post_outcome == "posted":
             # Fetch video from Content Library via delivery module
-            video_info = get_next_video(phone_id, platform)
+            video_info = get_next_video(phone_id, platform) if get_next_video else None
             if video_info:
                 # Download with timeout to prevent session stall
                 try:
@@ -475,7 +549,8 @@ class SessionExecutor:
                 if local_path:
                     video_path = local_path
                     caption = video_info.get("caption", "")
-                    self._pending_record = video_info["record_id"]
+                    record_id = video_info["record_id"]
+                    self._pending_record = record_id
                 else:
                     log.warning("Failed to download video, will skip post")
                     should_post = False
@@ -484,17 +559,19 @@ class SessionExecutor:
                 should_post = False
 
         elif should_post and post_outcome == "draft":
-            video_info = get_next_video(phone_id, platform)
+            video_info = get_next_video(phone_id, platform) if get_next_video else None
             if video_info:
                 self._pending_record = video_info["record_id"]
-                mark_draft(video_info["record_id"], platform)
+                if mark_draft:
+                    mark_draft(video_info["record_id"], platform)
             should_post = False
 
         elif should_post and post_outcome == "skipped":
-            video_info = get_next_video(phone_id, platform)
+            video_info = get_next_video(phone_id, platform) if get_next_video else None
             if video_info:
                 self._pending_record = video_info["record_id"]
-                mark_skipped(video_info["record_id"], platform)
+                if mark_skipped:
+                    mark_skipped(video_info["record_id"], platform)
             should_post = False
 
         session_keywords = random.sample(
@@ -504,19 +581,35 @@ class SessionExecutor:
 
         account = getattr(self, '_current_account', '')
         bot = self._create_bot(platform, adb, human, account_name=account)
+
+        # Pre-scroll phase
         await bot.browse_session(
-            duration_minutes=duration_min,
-            should_post=should_post,
-            video_path=video_path,
-            caption=caption,
-            pre_scroll_minutes=pre_minutes,
-            post_scroll_minutes=post_minutes,
+            duration_minutes=pre_minutes if should_post else duration_min,
+            should_post=False,
             niche_keywords=session_keywords,
         )
 
-        # Mark video as posted in Airtable
-        if should_post and video_path and self._pending_record:
-            mark_posted(self._pending_record, platform)
+        # Post phase with retry (if applicable)
+        if should_post and video_path and record_id:
+            post_result = await self._post_with_retry(
+                bot, adb, platform, video_path, caption,
+                phone_id, record_id,
+            )
+            log.info("Post result: %s (phone=%d, platform=%s)", post_result, phone_id, platform)
+
+            # Return to main feed after posting
+            if platform == "tiktok":
+                bot.go_to_fyp()
+            else:
+                bot.go_to_reels()
+
+            # Post-scroll phase
+            if post_minutes > 0:
+                await bot.browse_session(
+                    duration_minutes=post_minutes,
+                    should_post=False,
+                    niche_keywords=session_keywords,
+                )
 
     # --- Warmup Session Execution ------------------------------------------
 
@@ -717,12 +810,13 @@ class SessionExecutor:
                 if session.get("use_camera_trick"):
                     await self._tiktok_camera_trick_post(adb, human, bot, session)
                 else:
-                    video_info = get_next_video(session["phone_id"], "tiktok")
+                    video_info = get_next_video(session["phone_id"], "tiktok") if get_next_video else None
                     if video_info:
-                        local_path = download_video(video_info["video_url"])
+                        local_path = download_video(video_info["video_url"]) if download_video else None
                         if local_path:
-                            bot.post_video(local_path, video_info.get("caption", ""))
-                            mark_posted(video_info["record_id"], "tiktok")
+                            result = bot.post_video(local_path, video_info.get("caption", ""))
+                            if result == "success" and mark_posted:
+                                mark_posted(video_info["record_id"], "tiktok")
             except Exception as e:
                 log.error("Warmup TikTok post failed: %s", e, exc_info=True)
 
@@ -908,12 +1002,13 @@ class SessionExecutor:
         # Post on last day
         if session.get("can_post"):
             try:
-                video_info = get_next_video(session["phone_id"], "instagram")
+                video_info = get_next_video(session["phone_id"], "instagram") if get_next_video else None
                 if video_info:
-                    local_path = download_video(video_info["video_url"])
+                    local_path = download_video(video_info["video_url"]) if download_video else None
                     if local_path:
-                        bot.post_reel(local_path, video_info.get("caption", ""))
-                        mark_posted(video_info["record_id"], "instagram")
+                        result = bot.post_reel(local_path, video_info.get("caption", ""))
+                        if result == "success" and mark_posted:
+                            mark_posted(video_info["record_id"], "instagram")
             except Exception as e:
                 log.error("Warmup Instagram post failed: %s", e, exc_info=True)
 

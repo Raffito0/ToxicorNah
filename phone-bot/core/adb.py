@@ -76,21 +76,13 @@ class ADBController:
         self.serial = serial
         self.phone = phone_config
         self._consecutive_timeouts = 0
+        self._device_lost = False  # must be set before any _run() call
 
-        # --- Screen size detection (ADB > config > abort) ---
+        # --- Screen size detection (ADB cascade > config > abort) ---
         config_w = phone_config.get("screen_w")
         config_h = phone_config.get("screen_h")
 
-        detected_size = None
-        try:
-            size_output = self._run(["shell", "wm", "size"], timeout=5)
-            parsed = _parse_wm_size(size_output)
-            if parsed:
-                w, h = parsed
-                if 200 <= w <= 4000 and 200 <= h <= 8000:
-                    detected_size = (w, h)
-        except Exception:
-            pass
+        detected_size = self._get_screen_size()
 
         if detected_size:
             self.screen_w, self.screen_h = detected_size
@@ -106,11 +98,11 @@ class ADBController:
                          self.screen_w, self.screen_h)
         elif config_w is not None and config_h is not None:
             self.screen_w, self.screen_h = config_w, config_h
-            log.info("ADB: wm size failed, using config values %dx%d", config_w, config_h)
+            log.info("ADB: all wm/dumpsys methods failed, using config %dx%d", config_w, config_h)
         else:
             raise DeviceConfigError(
                 f"Cannot determine screen size for {serial}: "
-                f"ADB wm size failed and config has no screen dimensions"
+                f"all ADB methods failed and config has no screen dimensions"
             )
 
         # --- Density detection (ADB > config > default 280) ---
@@ -138,6 +130,7 @@ class ADBController:
         self._touch_port: int | None = None
         self._touch_server_pid: int | None = None
         self._touch_reconnect_attempted: bool = False
+        self._touch_server_proc: "subprocess.Popen | None" = None
         # Pressure params set by HumanEngine before each tap/swipe
         self._last_pressure: float = 0.55
         self._last_area: int = 45
@@ -229,6 +222,76 @@ class ADBController:
         """Run a shell command on the device."""
         return self._run(["shell", command], timeout=timeout)
 
+    def _detect_size_wm(self) -> "tuple[int, int] | None":
+        """Method 1: wm size. Logs raw output at DEBUG for diagnostics."""
+        try:
+            raw = self._run(["shell", "wm", "size"], timeout=5)
+            log.debug("wm size raw output: %r", raw)
+            parsed = _parse_wm_size(raw)
+            if parsed:
+                w, h = parsed
+                if 200 <= w <= 4000 and 200 <= h <= 8000:
+                    return (w, h)
+            log.debug("wm size: parsed=%r, validity check failed or None", parsed)
+        except Exception as e:
+            log.debug("wm size exception: %s", e)
+        return None
+
+    def _detect_size_dumpsys_window(self) -> "tuple[int, int] | None":
+        """Method 2: dumpsys window. Looks for DisplayFrames w=W h=H."""
+        import re as _re
+        try:
+            raw = self._run(["shell", "dumpsys", "window"], timeout=8)
+            log.debug("dumpsys window raw (first 200 chars): %r", raw[:200])
+            m = _re.search(r"DisplayFrames\s+w=(\d+)\s+h=(\d+)", raw)
+            if m:
+                w, h = int(m.group(1)), int(m.group(2))
+                if 200 <= w <= 4000 and 200 <= h <= 8000:
+                    return (w, h)
+            log.debug("dumpsys window: no DisplayFrames match")
+        except Exception as e:
+            log.debug("dumpsys window exception: %s", e)
+        return None
+
+    def _detect_size_dumpsys_display(self) -> "tuple[int, int] | None":
+        """Method 3: dumpsys display. Looks for mBaseDisplayInfo real WxH."""
+        import re as _re
+        try:
+            raw = self._run(["shell", "dumpsys", "display"], timeout=5)
+            log.debug("dumpsys display raw (first 200 chars): %r", raw[:200])
+            for line in raw.splitlines():
+                if "mBaseDisplayInfo" in line:
+                    m = _re.search(r"real\s+(\d+)\s+x\s+(\d+)", line)
+                    if m:
+                        w, h = int(m.group(1)), int(m.group(2))
+                        if 200 <= w <= 4000 and 200 <= h <= 8000:
+                            return (w, h)
+            log.debug("dumpsys display: no mBaseDisplayInfo+real match")
+        except Exception as e:
+            log.debug("dumpsys display exception: %s", e)
+        return None
+
+    def _get_screen_size(self) -> "tuple[int, int] | None":
+        """Cascading ADB fallback: wm size → dumpsys window → dumpsys display.
+        Returns (width, height) or None if all methods fail.
+        """
+        result = self._detect_size_wm()
+        if result:
+            log.debug("Screen size from wm size: %dx%d", *result)
+            return result
+        log.info("ADB: wm size failed, trying dumpsys window...")
+        result = self._detect_size_dumpsys_window()
+        if result:
+            log.info("ADB: screen %dx%d (dumpsys window)", *result)
+            return result
+        log.info("ADB: dumpsys window failed, trying dumpsys display...")
+        result = self._detect_size_dumpsys_display()
+        if result:
+            log.info("ADB: screen %dx%d (dumpsys display)", *result)
+            return result
+        log.warning("ADB: all three screen size detection methods failed")
+        return None
+
     # --- Device info -------------------------------------------------------
 
     def is_connected(self) -> bool:
@@ -304,6 +367,7 @@ class ADBController:
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
             self._touch_server_pid = proc.pid
+            self._touch_server_proc = proc  # retain handle for cleanup
         except Exception as e:
             log.error("UHID: failed to launch server: %s", e)
             return False
@@ -317,11 +381,13 @@ class ADBController:
             port_str = output.strip()
             if not port_str.isdigit():
                 log.error("UHID: unexpected forward output: %r", port_str)
+                self._kill_touch_server_proc()
                 return False
             self._touch_port = int(port_str)
             log.info("UHID: forwarded to localhost:%d", self._touch_port)
         except Exception as e:
             log.error("UHID: port forward failed: %s", e)
+            self._kill_touch_server_proc()
             return False
 
         # 5. Connect TCP socket
@@ -332,6 +398,7 @@ class ADBController:
         except Exception as e:
             log.error("UHID: socket connect failed: %s", e)
             self._touch_socket = None
+            self._kill_touch_server_proc()
             return False
 
         # 6. Health check
@@ -339,9 +406,11 @@ class ADBController:
             resp = self._touch_send("PING", timeout_s=2.0)
             if resp.strip() != "PONG":
                 log.error("UHID: PING got unexpected response: %r", resp)
+                self._kill_touch_server_proc()
                 return False
         except Exception as e:
             log.error("UHID: health check failed: %s", e)
+            self._kill_touch_server_proc()
             return False
 
         self._touch_connected = True
@@ -393,11 +462,30 @@ class ADBController:
                 if not chunk:
                     raise ConnectionError("UHID socket closed by server")
                 data += chunk
+            # Flush any leftover data to prevent desync on next call
+            self._touch_socket.setblocking(False)
+            try:
+                self._touch_socket.recv(4096)
+            except (BlockingIOError, OSError):
+                pass
+            self._touch_socket.setblocking(True)
             return data.decode("ascii").strip()
         except socket.timeout:
             raise ConnectionError(f"UHID timeout after {timeout_s}s for: {command}")
         except OSError as e:
             raise ConnectionError(f"UHID socket error: {e}")
+
+    def _kill_touch_server_proc(self):
+        """Kill the UHID touch server subprocess if it's still running."""
+        proc = getattr(self, "_touch_server_proc", None)
+        if proc:
+            try:
+                proc.kill()
+                proc.wait(timeout=3)
+                log.info("UHID: killed orphan server process (pid=%d)", proc.pid)
+            except Exception:
+                pass
+            self._touch_server_proc = None
 
     def _touch_health_check(self) -> bool:
         """Send PING, expect PONG within 1 second."""
@@ -432,6 +520,21 @@ class ADBController:
 
     # --- Input actions (tap, swipe, type) ----------------------------------
 
+    def _rand_tap_params(self) -> tuple[float, int, int]:
+        """Generate randomized pressure/area/hold for a tap.
+
+        Uses same distributions as HumanEngine.get_tap_pressure() but without
+        requiring a HumanEngine reference (adb.py has no access to it).
+        Returns (pressure, area, hold_ms).
+        """
+        pressure = random.gauss(0.55, 0.12)
+        pressure = max(0.25, min(0.85, pressure))
+        area = int(30 + pressure * 40)  # 30-72 range
+        ramp_up = int(max(15, min(50, random.gauss(30, 8))))
+        ramp_down = int(max(10, min(40, random.gauss(20, 6))))
+        hold_ms = ramp_up + ramp_down + random.randint(20, 55)
+        return pressure, area, hold_ms
+
     def tap(self, x: int, y: int):
         """Tap at exact coordinates (human jitter added by HumanEngine)."""
         x = max(0, min(x, self.screen_w))
@@ -442,24 +545,31 @@ class ADBController:
                  caller.filename.split("/")[-1].split("\\")[-1], caller.lineno, caller.name)
         if self._touch_connected:
             try:
-                timeout = self._last_hold_ms / 1000.0 + 2.0
+                pressure, area, hold_ms = self._rand_tap_params()
+                timeout = hold_ms / 1000.0 + 2.0
                 self._touch_send(
-                    f"TAP {x} {y} {self._last_pressure:.2f} {self._last_area} {self._last_hold_ms}",
+                    f"TAP {x} {y} {pressure:.2f} {area} {hold_ms}",
                     timeout_s=timeout)
                 return
             except ConnectionError:
                 self._handle_touch_failure()
         self.shell(f"input tap {x} {y}")
 
-    def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300):
+    def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300,
+              pressure: Optional[float] = None):
         """Single swipe. All spatial drift handled by humanize_swipe() in Python.
-        One command = one gesture = no double-skip on any screen size."""
+        One command = one gesture = no double-skip on any screen size.
+
+        pressure: optional override from humanize_swipe(). If None, auto-randomized.
+        """
         log.info("SWIPE (%d,%d)->(%d,%d) %dms", x1, y1, x2, y2, duration_ms)
         if self._touch_connected:
             try:
+                if pressure is None:
+                    pressure = max(0.30, min(0.80, random.gauss(0.55, 0.10)))
                 timeout = duration_ms / 1000.0 + 2.0
                 self._touch_send(
-                    f"SWIPE {x1} {y1} {x2} {y2} {duration_ms} {self._last_pressure:.2f}",
+                    f"SWIPE {x1} {y1} {x2} {y2} {duration_ms} {pressure:.2f}",
                     timeout_s=timeout)
                 return
             except ConnectionError:
@@ -473,9 +583,12 @@ class ADBController:
         log.info("LONG_PRESS (%d, %d) %dms", x, y, duration_ms)
         if self._touch_connected:
             try:
+                # Long press: slightly heavier touch than a tap
+                pressure = max(0.40, min(0.90, random.gauss(0.65, 0.10)))
+                area = int(35 + pressure * 45)
                 timeout = duration_ms / 1000.0 + 2.0
                 self._touch_send(
-                    f"TAP {x} {y} {self._last_pressure:.2f} {self._last_area} {duration_ms}",
+                    f"TAP {x} {y} {pressure:.2f} {area} {duration_ms}",
                     timeout_s=timeout)
                 return
             except ConnectionError:
@@ -798,8 +911,11 @@ class ADBController:
                         from datetime import datetime
                         fname = f"frame_{frame_num:05d}_{datetime.now().strftime('%H%M%S_%f')[:10]}.jpg"
                         img.save(os.path.join(output_dir, fname), "JPEG", quality=70)
-                except Exception:
-                    pass
+                except DeviceLostError:
+                    log.warning("RECORDER: device lost, stopping recorder thread")
+                    break
+                except Exception as e:
+                    log.debug("RECORDER: frame capture error: %s", e)
                 elapsed = time.time() - t0
                 sleep_time = max(0, interval - elapsed)
                 if sleep_time > 0:

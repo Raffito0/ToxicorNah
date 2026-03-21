@@ -17,10 +17,11 @@ import threading
 from datetime import datetime
 
 from .. import config
-from ..core.adb import ADBController
+from ..core.adb import ADBController, DeviceLostError
 from ..core.human import HumanEngine
 from ..core import gemini
 from ..core import page_state
+from ..core import ocr as ocr_mod
 from ..core.verify import wait_and_verify
 from ..core.monitor import log_event as monitor_log, BotEvent
 
@@ -950,13 +951,62 @@ class TikTokBot:
         from ..core import gemini as _gem
         return _gem.should_skip_content(screenshot)
 
+    # --- Post-swipe LIVE/PYMK check (Section 06) ---------------------------
+
+    def _post_swipe_live_check(self) -> bool:
+        """Called immediately after scroll_fyp() in browse_session().
+        Waits t_swipe_settle for screen to settle, then checks if the
+        new video is a LIVE preview card (or PYMK/non-standard).
+
+        Returns True if double-scroll was performed (caller should continue).
+        Returns False if normal video confirmed (proceed normally).
+        """
+        try:
+            time.sleep(self.human.timing("t_swipe_settle"))
+
+            # Sidebar scan: LIVE preview has sidebar but NO avatar
+            sidebar, shot = self._get_sidebar_with_shot()
+
+            if sidebar is not None:
+                if sidebar.get("avatar_live"):
+                    log.info("LIVE preview detected (red ring), double-scrolling")
+                    time.sleep(self.human.timing("t_live_skip_pause"))
+                    self.scroll_fyp()
+                    return True
+
+                if sidebar.get("avatar") is None:
+                    if self._should_skip_content(shot):
+                        log.info("LIVE/non-standard detected (sidebar, no avatar, Gemini=SKIP), double-scrolling")
+                        time.sleep(self.human.timing("t_live_skip_pause"))
+                        self.scroll_fyp()
+                        return True
+
+            if sidebar is None:
+                if self._should_skip_content(shot):
+                    log.info("non-standard post-swipe content (no sidebar), double-scrolling")
+                    time.sleep(self.human.timing("t_live_skip_pause"))
+                    self.scroll_fyp()
+                    return True
+
+            return False
+        except DeviceLostError:
+            raise  # propagate to browse_session handler
+        except Exception as e:
+            log.warning("_post_swipe_live_check error (assuming normal video): %s", e)
+            return False
+
     # --- Health check during non-FYP tab scroll ----------------------------
 
     def _health_check_during_scroll(self, target_tab: str = "following") -> bool:
         """Periodic health check during video scrolling in non-FYP tabs.
         Verifies we're still on a video feed (not kicked to profile, inbox, etc).
         Uses page_state pixel detection (zero Gemini, <5ms).
-        Returns True if OK, False if wrong page detected."""
+        Also checks for CAPTCHA (F3: mid-session detection in all browse modes).
+        Returns True if OK, False if wrong page or CAPTCHA detected."""
+        # CAPTCHA check (F3: covers Following/Explore/Shop sessions too)
+        if self._detect_captcha():
+            return False
+
         screenshot = self.adb.screenshot_bytes()
         if not screenshot:
             return True  # can't check, assume OK
@@ -981,9 +1031,17 @@ class TikTokBot:
 
     # --- Bbox-first tap (find element THEN tap) ----------------------------
 
+    def _screenshot_bgr(self, screenshot_bytes: bytes):
+        """Convert screenshot bytes → BGR numpy array for OCR."""
+        import numpy as np
+        import cv2
+        arr = np.frombuffer(screenshot_bytes, np.uint8)
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
     def _find_and_tap(self, description: str, fallback_coord: str = None,
                       y_max_pct: float = None, x_min_pct: float = None,
-                      tap_y_bias: float = 0.0) -> bool:
+                      tap_y_bias: float = 0.0,
+                      ocr_text: str = None, ocr_region: tuple = None) -> bool:
         """Find a UI element via Gemini bounding box, then tap its center.
         This is the definitive solution for elements whose position varies
         per video (avatar, comment icon, etc).
@@ -1005,8 +1063,26 @@ class TikTokBot:
 
         Returns True if element found and tapped, False if not found.
         """
+        # OCR fast-path: try OCR first if caller provides target text (~300ms vs 3-8s Gemini)
+        _ocr_shot = None
+        if ocr_text:
+            _ocr_shot = self.adb.screenshot_bytes()
+            if _ocr_shot:
+                region = ocr_region or (0.0, 0.0, 1.0, 1.0)
+                bgr = self._screenshot_bgr(_ocr_shot)
+                result = ocr_mod.find_text_coord(bgr, ocr_text, region)
+                if result:
+                    cx, cy = result
+                    cx, cy = self.human.jitter_tap(cx, cy)
+                    self.adb.tap(cx, cy)
+                    log.info("FIND_TAP_OCR: found '%s' at (%d,%d)", ocr_text, cx, cy)
+                    return True
+                log.debug("FIND_TAP_OCR: '%s' not found, falling back to Gemini", ocr_text)
+
         for attempt in range(2):
-            screenshot = self.adb.screenshot_bytes()
+            # Reuse the OCR screenshot on first attempt to avoid a redundant ADB round-trip
+            screenshot = _ocr_shot if (attempt == 0 and _ocr_shot) else self.adb.screenshot_bytes()
+            _ocr_shot = None  # only reuse once
             if not screenshot:
                 if fallback_coord:
                     log.warning("FIND_TAP: no screenshot, using fallback '%s'", fallback_coord)
@@ -1641,6 +1717,10 @@ class TikTokBot:
             if not self.adb._touch_health_check():
                 log.warning("UHID health check failed")
 
+        # CAPTCHA mid-session detection (F3: check during health, not just on restart)
+        if self._detect_captcha():
+            return False
+
         # Pixel overlay check (free, <5ms)
         screenshot, fp = self.guardian.take_fingerprint()
         if fp and self.guardian._last_clean_fp:
@@ -1906,12 +1986,21 @@ class TikTokBot:
         return False
 
     def scroll_fyp(self):
-        """Scroll to the next video on FYP (swipe up)."""
+        """Scroll to the next video on FYP (swipe up).
+        end_y is clamped to screen_h * 0.88 to avoid the 'Search · username'
+        suggestion bar injected at y=92-95% after profile visits.
+        """
         log.debug("SCROLL_FYP")
         sw = self.human.humanize_swipe(
             self.adb.screen_w // 2, self.adb.screen_h * 3 // 4,
             self.adb.screen_w // 2, self.adb.screen_h // 4,
         )
+        # FYP-specific guard: clamp end_y below suggestion bar zone (y=92-95%)
+        end_y_max = int(self.adb.screen_h * 0.88)
+        original_y2 = sw["y2"]
+        sw["y2"] = min(sw["y2"], end_y_max)
+        if sw["y2"] < original_y2:
+            log.debug("scroll_fyp: end_y clamped %d -> %d", original_y2, sw["y2"])
         if sw.get("hand_switched"):
             time.sleep(sw["hand_switch_pause"])
         self.adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
@@ -2761,6 +2850,21 @@ JSON only, no markdown."""
         """Ask Gemini: is the Follow or Following button visible on this profile?
         Uses bounding box mode for accurate coordinates.
         Returns {"status": "follow"|"following"|"not_visible", "x": int|None, "y": int|None}"""
+        # OCR fast-path: check Follow/Following button in profile button area.
+        # IMPORTANT: uses exact word matching (not fuzzy) to avoid "Follow" matching "Following".
+        region = (0.05, 0.25, 0.95, 0.48)
+        bgr = self._screenshot_bgr(screenshot_bytes)
+        ocr_status = ocr_mod.find_follow_status(bgr, region)
+        if ocr_status == "following":
+            log.info("FOLLOW_CHECK_OCR: status=following")
+            return {"status": "following", "x": None, "y": None}
+        if ocr_status == "follow":
+            coords = ocr_mod.find_text_coord(bgr, "Follow", region)
+            if coords:
+                cx, cy = coords
+                log.info("FOLLOW_CHECK_OCR: status=follow at (%d,%d)", cx, cy)
+                return {"status": "follow", "x": cx, "y": cy}
+
         import re
 
         prompt = """Look at this TikTok profile screenshot.
@@ -3455,8 +3559,12 @@ JSON only, no markdown."""
         if shot:
             result = gemini.identify_page_with_recovery(shot)
             page = result.get("page", "unknown")
-            if page != "profile":
-                log.warning("Grid scroll opened fullscreen player (%s), pressing BACK", page)
+            # Press BACK only if we left the search grid (opened fullscreen, popup, etc.)
+            # "search" = still on grid (correct) — do NOT press BACK (EP-03 fix)
+            # "profile" = navigated to profile — acceptable, no BACK needed
+            # "unknown" = can't tell — conservative, no BACK
+            if page not in ("search", "profile", "unknown"):
+                log.warning("Grid scroll left search grid (%s), pressing BACK", page)
                 self.adb.press_back()
                 time.sleep(self.human.timing("t_nav_settle"))
         return True
@@ -3485,7 +3593,12 @@ JSON only, no markdown."""
             y_top = 0.42    # top of comment sheet
             y_bottom = 0.88  # bottom of comment sheet (above input field)
             max_dist = 0.30  # max scroll distance within sheet
-        else:  # grid (search results, profile)
+        elif context == "grid":
+            y_top = 0.15
+            y_bottom = 0.85
+            max_dist = 0.20  # was 0.55 — large swipes open fullscreen on small thumbnails (section-08)
+        else:
+            # shop_grid, shop_product, or future contexts
             y_top = 0.15
             y_bottom = 0.85
             max_dist = 0.55
@@ -3521,7 +3634,9 @@ JSON only, no markdown."""
             dist = max(0.08, min(max_dist, random.gauss(base_dist, 0.10)))
 
             # Speed: patient = slow, impatient = fast flick
-            if patience > 1.0:
+            if context == "grid":
+                duration = int(self.human.timing("t_grid_scroll_duration") * 1000)  # section-08: slower scroll for small thumbnails
+            elif patience > 1.0:
                 duration = random.randint(350, 550)  # slow careful scroll
             elif fatigue > 0.4:
                 duration = random.randint(250, 350)  # tired fast flick
@@ -3683,6 +3798,38 @@ JSON only, no markdown."""
         time.sleep(self.human.timing("t_nav_settle"))
         self._verify_page("fyp")
 
+    def _thumbnails_loaded(self, screenshot: bytes) -> bool:
+        """Check if search grid thumbnails are loaded (not showing spinner).
+
+        Samples pixel brightness at 6 positions across the 2-column grid area.
+        Thumbnails have high color variance (stdev > 30 across sample points).
+        Spinner is uniform gray/white (stdev < 30).
+        Same approach as page_state.detect_bottom_bar() — avoids false positives
+        that a brightness-only check would produce (spinner can also be bright).
+        """
+        try:
+            from PIL import Image
+            import io
+            img = Image.open(io.BytesIO(screenshot)).convert("L")
+            w, h = img.size
+            # Sample 6 positions in the grid area (below tab bar ~20%, above nav ~90%)
+            # Left column ~25%, right column ~75%, rows at 40%, 55%, 70% of screen
+            sample_xs = [int(w * 0.25), int(w * 0.75)]
+            sample_ys = [int(h * 0.40), int(h * 0.55), int(h * 0.70)]
+            brightness = []
+            for x in sample_xs:
+                for y in sample_ys:
+                    brightness.append(img.getpixel((x, y)))
+            mean = sum(brightness) / len(brightness)
+            stdev = (sum((b - mean) ** 2 for b in brightness) / len(brightness)) ** 0.5
+            loaded = stdev > 30
+            log.debug("THUMBNAILS_LOADED: stdev=%.1f values=%s -> %s",
+                      stdev, brightness, "loaded" if loaded else "spinner")
+            return loaded
+        except Exception as e:
+            log.warning("THUMBNAILS_LOADED: error %s, assuming loaded", e)
+            return True  # fail-safe: proceed rather than block forever
+
     def _type_search_query(self, keyword: str) -> bool:
         """Navigate to search, type keyword, hit enter. Returns False if search failed."""
         log.info("SEARCH: typing '%s'", keyword)
@@ -3707,39 +3854,57 @@ JSON only, no markdown."""
         # Tap "Videos" tab to get the video grid we can actually browse.
         self._find_and_tap(
             'the "Videos" tab text in the horizontal filter bar (Top/Videos/Users/Sounds)',
-            y_max_pct=0.20)
-        # Wait for Videos grid to load (shows spinner for 1-3s)
-        time.sleep(self.human.timing("t_tab_switch"))
-        time.sleep(self.human.timing("t_feed_refresh"))  # extra wait for grid thumbnails
+            y_max_pct=0.20,
+            ocr_text="Videos", ocr_region=(0.0, 0.10, 1.0, 0.22))
+        # Wait for Videos grid thumbnails to load (shows spinner 1-3s on slow connections).
+        # Use stdev pixel check instead of fixed wait: thumbnails have high color variance,
+        # spinner is uniform gray (low stdev). Same approach as detect_bottom_bar().
+        from ..core.verify import wait_and_verify
+        wait_and_verify(
+            adb=self.adb, human=self.human,
+            verify_fn=self._thumbnails_loaded,
+            action_name="search_videos_tab_load",
+            first_wait="t_tab_switch",
+            retry_wait="t_feed_refresh",
+            max_attempts=4,
+        )
         return True
 
     def _clear_and_retype(self, keyword: str):
         """Clear search bar and type new keyword.
 
-        Strategy: triple-tap search bar to select all text (universal Android
-        gesture), then typing overwrites the selection. If that fails, fall
-        back to X button tap, then to back+reopen as last resort.
+        Strategy: tap the × clear button in the TikTok search bar (always
+        present when text exists), then type new keyword.
+        Triple-tap and CTRL_A both fail on TikTok's React Native TextInput.
+        The × button is a reliable UI-level clear that works on all Android versions.
         """
         log.info("SEARCH_RETYPE: clearing, new='%s'", keyword)
 
-        # Strategy 1: Tap search bar, triple-tap to select all, then type
-        # (typing with text selected overwrites it — no need for DEL)
-        x, y = self.adb.get_coord("tiktok", "search_bar")
-        x, y = self.human.jitter_tap(x, y)
-        self.adb.tap(x, y)
-        time.sleep(0.3)
-        # Triple-tap: select all text in the field
-        # Each tap has slight position drift + variable timing (human finger)
-        for i in range(3):
-            tx = x + random.randint(-4, 4)
-            ty = y + random.randint(-3, 3)
-            self.adb.tap(tx, ty)
-            if i < 2:
-                time.sleep(random.uniform(0.05, 0.14))  # fast but not identical
-        time.sleep(random.uniform(0.2, 0.5))
+        # Tap the × (clear) button at the right side of the search bar.
+        # This button appears in TikTok's search bar whenever text is present.
+        # Using _find_and_tap for universality (no hardcoded coords).
+        tapped = self._find_and_tap(
+            'the X or circle-X clear/cancel button at the RIGHT side of the search input bar '
+            'at the TOP of the screen. It clears the search text. '
+            'Do NOT select the back arrow on the left.',
+            y_max_pct=0.12,
+            x_min_pct=0.60,
+        )
+        if not tapped:
+            # Fallback: tap search bar, then send KEYCODE_MOVE_END + hold-shift-MOVE_HOME,
+            # then delete. Less reliable but recoverable.
+            log.warning("SEARCH_RETYPE: X button not found, using fallback DPAD_MOVE_END + DEL")
+            x, y = self.adb.get_coord("tiktok", "search_bar")
+            self.adb.tap(x, y)
+            time.sleep(self.human.timing("t_tap_gap"))
+            self.adb.shell("input keyevent KEYCODE_MOVE_END")
+            time.sleep(0.1)
+            # Send enough DEL keyevents to clear typical search text (up to 40 chars)
+            for _ in range(40):
+                self.adb.shell("input keyevent KEYCODE_DEL")
+        time.sleep(self.human.timing("t_tap_gap"))
 
-        # Now type — if text was selected, this overwrites it.
-        # If not selected, it appends (we'll detect via search results later)
+        # Type new keyword
         time.sleep(self.human.timing("t_thinking"))
         self.human.type_with_errors(self.adb, keyword)
         time.sleep(self.human.timing("micro_pause"))
@@ -3749,8 +3914,17 @@ JSON only, no markdown."""
         # Tap "Videos" tab (BACK from video returns to "Top" tab)
         self._find_and_tap(
             'the "Videos" tab text in the horizontal filter bar (Top/Videos/Users/Sounds)',
-            y_max_pct=0.20)
-        time.sleep(self.human.timing("t_tab_switch"))
+            y_max_pct=0.20,
+            ocr_text="Videos", ocr_region=(0.0, 0.10, 1.0, 0.22))
+        from ..core.verify import wait_and_verify
+        wait_and_verify(
+            adb=self.adb, human=self.human,
+            verify_fn=self._thumbnails_loaded,
+            action_name="search_videos_tab_load",
+            first_wait="t_tab_switch",
+            retry_wait="t_feed_refresh",
+            max_attempts=4,
+        )
 
     def _ensure_search_tab(self, target_tab: str) -> bool:
         """Verify the specified search results tab is active (underlined/bold).
@@ -3783,7 +3957,8 @@ JSON only, no markdown."""
         self._find_and_tap(
             'the "%s" tab text in the horizontal search filter bar '
             '(Top/Videos/Users/Live)' % target_tab,
-            y_max_pct=0.20)
+            y_max_pct=0.20,
+            ocr_text=target_tab, ocr_region=(0.0, 0.10, 1.0, 0.22))
         time.sleep(self.human.timing("t_tab_switch"))
 
         # Verify
@@ -4194,16 +4369,21 @@ JSON only, no markdown."""
 
     # --- Video Posting -----------------------------------------------------
 
-    def post_video(self, video_path: str, caption: str = "") -> bool:
+    def post_video(self, video_path: str, caption: str = "") -> str:
         """Upload and post a video to TikTok.
-        Returns True if successful.
+
+        Returns one of: "success" | "retryable" | "banned" | "media_error"
         """
         # Step 1: Push video to /sdcard/Download/ (not DCIM -- no EXIF = suspicious there)
         now = datetime.now()
         vid_name = f"video_{now.strftime('%Y%m%d%H%M%S')}_{random.randint(100, 999)}.mp4"
         device_path = f"/sdcard/Download/{vid_name}"
         log.info("Pushing video to device: %s", device_path)
-        self.adb.push_file(video_path, device_path)
+        try:
+            self.adb.push_file(video_path, device_path)
+        except Exception as e:
+            log.error("Failed to push video to device: %s", e)
+            return "media_error"
         time.sleep(self.human.timing("t_file_push"))
 
         # Trigger media scan
@@ -4276,9 +4456,98 @@ JSON only, no markdown."""
         if current and TIKTOK_PKG in current:
             log.info("Video posted on TikTok!")
             self.adb.shell(f'rm "{device_path}"')
-            return True
+            return "success"
         else:
             log.warning("Post may have failed (current app: %s), keeping video on device", current)
+            return "retryable"
+
+    def save_as_draft(self, video_path: str, caption: str = "") -> bool:
+        """Open the post screen, fill caption, tap Save Draft instead of Post.
+
+        Returns True if draft was saved, False if draft save failed.
+        Called by executor after all post retries are exhausted.
+        """
+        now = datetime.now()
+        vid_name = f"video_{now.strftime('%Y%m%d%H%M%S')}_{random.randint(100, 999)}.mp4"
+        device_path = f"/sdcard/Download/{vid_name}"
+        log.info("Saving as draft — pushing video to device: %s", device_path)
+        try:
+            self.adb.push_file(video_path, device_path)
+        except Exception as e:
+            log.error("Failed to push video for draft: %s", e)
+            return False
+        time.sleep(self.human.timing("t_file_push"))
+
+        # Trigger media scan
+        self.adb.shell(
+            f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE '
+            f'-d "file://{device_path}"'
+        )
+        time.sleep(self.human.timing("t_file_push"))
+
+        # Tap + (create) button
+        self.guardian.handle_if_popup()
+        x, y = self.adb.get_coord("tiktok", "nav_create")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_upload_load"))
+
+        # Tap "Upload" tab
+        self.guardian.handle_if_popup()
+        x, y = self.adb.get_coord("tiktok", "upload_tab")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Select most recent video (top-left of gallery)
+        self.guardian.handle_if_popup()
+        x, y = self.adb.get_coord("tiktok", "gallery_first")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Tap Next (top-right)
+        self.guardian.handle_if_popup()
+        x, y = self.adb.get_coord("tiktok", "upload_next_btn")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Tap Next again (editing screen)
+        self.guardian.handle_if_popup()
+        x, y = self.adb.get_coord("tiktok", "edit_next_btn")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Add caption if provided
+        if caption:
+            x, y = self.adb.get_coord("tiktok", "upload_caption")
+            x, y = self.human.jitter_tap(x, y)
+            self.adb.tap(x, y)
+            time.sleep(self.human.timing("t_caption_input"))
+
+            self.adb.shell("input keyevent --longpress KEYCODE_DEL")
+            time.sleep(self.human.timing("t_key_settle"))
+
+            self.human.type_with_errors(self.adb, caption)
+            time.sleep(self.human.timing("t_post_typing"))
+
+        # Tap Save Draft (instead of Post)
+        self.guardian.pre_chain_check()
+        x, y = self.adb.get_coord("tiktok", "upload_save_draft_btn")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Verify: check we're still in TikTok
+        current = self.adb.get_current_app()
+        if current and TIKTOK_PKG in current:
+            log.info("Video saved as draft on TikTok")
+            self.adb.shell(f'rm "{device_path}"')
+            return True
+        else:
+            log.warning("Draft save may have failed (current app: %s)", current)
             return False
 
     # --- High-Level Session Actions ----------------------------------------
@@ -4661,7 +4930,8 @@ JSON only, no markdown."""
         view_all_drive = curiosity * 0.35 + social * 0.15 - fatigue * 0.1
         if random.random() < max(0.08, min(0.35, view_all_drive)):
             log.info("NEW_FOLLOWERS: tapping 'View all'")
-            found_va = self._find_and_tap("View all", y_max_pct=0.60)
+            found_va = self._find_and_tap("View all", y_max_pct=0.60,
+                                          ocr_text="View all", ocr_region=(0.0, 0.30, 0.65, 0.65))
             if found_va:
                 time.sleep(self.human.timing("t_tab_switch"))
                 items_seen += 2
@@ -4735,7 +5005,8 @@ JSON only, no markdown."""
             found = self._find_and_tap(
                 'the "Profile views" notification row with a blue/purple people icon. '
                 'NOT bulletin board invites. NOT "liked your comment".',
-                y_max_pct=0.55
+                y_max_pct=0.55,
+                ocr_text="Profile views", ocr_region=(0.0, 0.15, 1.0, 0.60)
             )
             if found:
                 log.info("ACTIVITY: opened Profile views")
@@ -4752,7 +5023,8 @@ JSON only, no markdown."""
             va_drive = curiosity * 0.3 + social * 0.12 - fatigue * 0.08
             if random.random() < max(0.06, min(0.25, va_drive)):
                 log.info("ACTIVITY: tapping 'View all'")
-                found_va = self._find_and_tap("View all", y_max_pct=0.55)
+                found_va = self._find_and_tap("View all", y_max_pct=0.55,
+                                              ocr_text="View all", ocr_region=(0.0, 0.25, 0.65, 0.60))
                 if found_va:
                     time.sleep(self.human.timing("t_tab_switch"))
 
@@ -4836,7 +5108,8 @@ JSON only, no markdown."""
             return False
 
         for attempt in range(2):
-            found = self._find_and_tap(row_desc, y_max_pct=0.55)
+            found = self._find_and_tap(row_desc, y_max_pct=0.55,
+                                       ocr_text=label, ocr_region=(0.0, 0.15, 1.0, 0.75))
             if not found:
                 log.warning("INBOX: %s not found on screen (attempt %d)", label, attempt + 1)
                 if attempt == 0:
@@ -4996,6 +5269,7 @@ JSON only, no markdown."""
             self.guardian._last_clean_fp = init_fp
 
         while (time.time() - start) < total_seconds:
+          try:
             elapsed = time.time() - start
 
             # Hard ceiling: prevent runaway sessions (Gemini slow, API hangs)
@@ -5010,14 +5284,17 @@ JSON only, no markdown."""
             # Periodic health check (randomized interval)
             action_count += 1
             if action_count % health_interval == 0:
-                self._check_health()
+                if not self._check_health():
+                    log.warning("SESSION: health check failed (CAPTCHA/attention needed), ending session")
+                    break
 
             # --- Post video at the right time ---
             if should_post and not post_done and elapsed >= post_after:
                 if video_path:
-                    success = self.post_video(video_path, caption)
+                    result = self.post_video(video_path, caption)
                     post_done = True
-                    if success:
+                    self._last_post_result = result
+                    if result == "success":
                         self.go_to_fyp()
                         time.sleep(self.human.timing("t_nav_settle"))
                     continue
@@ -5139,6 +5416,10 @@ JSON only, no markdown."""
                     await asyncio.sleep(self.human.watch_duration())
                 else:
                     self.scroll_fyp()
+
+                    # Section 06: immediate LIVE/PYMK check after swipe
+                    if self._post_swipe_live_check():
+                        continue  # double-scrolled past LIVE/PYMK, restart loop
 
                     # --- PopupGuardian: fingerprint AFTER swipe, check stall ---
                     _post_shot, _post_fp = self.guardian.take_fingerprint()
@@ -5328,6 +5609,13 @@ JSON only, no markdown."""
                 if _shot:
                     self.human._inbox_badge_detected = page_state.detect_inbox_badge(
                         _shot, self.adb.screen_w, self.adb.screen_h)
+
+          except DeviceLostError:
+            log.error("SESSION: device disconnected during browse_session, ending gracefully")
+            break
+          except Exception as e:
+            log.error("SESSION: unexpected error in main loop: %s", e, exc_info=True)
+            break
 
         # --- Session end ---
         self.guardian.log_stats()

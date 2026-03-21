@@ -92,6 +92,8 @@ class InstagramBot:
             self.adb.screen_w // 2, self.adb.screen_h * 3 // 4,
             self.adb.screen_w // 2, self.adb.screen_h // 4,
         )
+        if sw.get("hand_switched"):
+            time.sleep(sw["hand_switch_pause"])
         self.adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
 
     def scroll_reels(self):
@@ -121,9 +123,50 @@ class InstagramBot:
         x, y = self.adb.get_coord("instagram", "comment_icon")
         x, y = self.human.jitter_tap(x, y)
         self.adb.tap(x, y)
-        time.sleep(self.human.timing("t_nav_settle"))
+        time.sleep(self.human.timing("t_comment_load"))
+
+    def _scroll_comments(self):
+        """Scroll within the comments sheet. Distance varies by state."""
+        w, h = self.adb.screen_w, self.adb.screen_h
+        dist_frac = self.human.comment_scroll_distance()
+        start_y = int(h * 0.75)
+        end_y = int(h * (0.75 - dist_frac))
+        end_y = max(int(h * 0.15), end_y)
+
+        sw = self.human.humanize_swipe(w // 2, start_y, w // 2, end_y)
+        if sw.get("hand_switched"):
+            time.sleep(sw["hand_switch_pause"])
+        self.adb.swipe(sw["x1"], sw["y1"], sw["x2"], sw["y2"], sw["duration"])
+
+    async def browse_comments(self) -> list[bytes]:
+        """Browse comments section with variable scrolls. Returns screenshots taken."""
+        plan = self.human.browse_comments_plan()
+        scroll_count = plan["scroll_count"]
+        timing_key = plan["read_timing_key"]
+        screenshots = []
+
+        if plan["is_deep_dive"]:
+            log.debug("IG comment deep dive: %d scrolls", scroll_count)
+        else:
+            log.debug("IG browsing comments: %d scrolls", scroll_count)
+
+        for i in range(scroll_count):
+            await asyncio.sleep(self.human.timing(timing_key))
+
+            if i == 0 or random.random() < 0.5:
+                shot = self.adb.screenshot_bytes()
+                if shot:
+                    screenshots.append(shot)
+
+            if i < scroll_count - 1:
+                self._scroll_comments()
+
+        return screenshots
 
     def write_comment(self, text: str):
+        # Pause before tapping input (deciding to write)
+        time.sleep(self.human.timing("t_comment_before_write"))
+
         # Tap comment input
         x, y = self.adb.get_coord("instagram", "comment_input")
         x, y = self.human.jitter_tap(x, y)
@@ -142,19 +185,61 @@ class InstagramBot:
         log.debug("Posted comment on IG: %s", text[:30])
 
     async def comment_with_ai(self):
-        screenshot = self.adb.screenshot_bytes()
-        if not screenshot:
+        """Generate a contextual comment using multi-frame video understanding."""
+        # --- Step 1: Capture 3 video frames ---
+        video_frames = []
+
+        frame1 = self.adb.screenshot_bytes()
+        if not frame1:
             return
+        video_frames.append(frame1)
 
-        await asyncio.sleep(self.human.reading_delay())
+        await asyncio.sleep(self.human.timing("t_frame_capture_gap"))
+        frame2 = self.adb.screenshot_bytes()
+        if frame2:
+            video_frames.append(frame2)
 
-        comment = gemini.generate_comment(screenshot, platform="instagram")
-        if not comment or len(comment) < 3:
-            return
+        await asyncio.sleep(self.human.timing("t_frame_capture_gap"))
+        frame3 = self.adb.screenshot_bytes()
+        if frame3:
+            video_frames.append(frame3)
 
+        log.debug("Captured %d video frames for IG comment", len(video_frames))
+
+        # --- Step 2: Open and browse comments ---
         self.open_comments()
+        comment_frames = await self.browse_comments()
+
+        if not comment_frames:
+            shot = self.adb.screenshot_bytes()
+            if shot:
+                comment_frames = [shot]
+
+        log.debug("Captured %d IG comment screenshots", len(comment_frames))
+
+        # --- Step 3: Generate comment with multi-frame AI ---
+        style = self.human.personality.comment_style if self.human.personality else "reactor"
+        comment = gemini.generate_comment_v2(
+            video_frames=video_frames,
+            comment_frames=comment_frames,
+            platform="instagram",
+            style=style,
+        )
+
+        # Fallback to single-frame if multi-frame fails
+        if not comment or len(comment) < 3:
+            log.warning("Multi-frame IG comment failed, trying single-frame fallback")
+            comment = gemini.generate_comment(video_frames[0], platform="instagram")
+
+        if not comment or len(comment) < 3:
+            log.warning("IG comment generation failed entirely, closing comments")
+            self.adb.press_back()
+            return
+
+        # --- Step 4: Write the comment ---
         self.write_comment(comment)
         self.human.memory.session_comments += 1
+        log.info("[IG Comment] style=%s text='%s'", style, comment[:40])
 
     def follow_user(self):
         """Follow creator -- tap avatar with + overlay in Reels view."""
@@ -449,7 +534,7 @@ class InstagramBot:
                 "New profile photo or Choose from library button"
             )
             if coords:
-                x, y = self.human.jitter_tap(*coords)
+                x, y = self.human.jitter_tap(coords[0], coords[1])
                 self.adb.tap(x, y)
                 time.sleep(self.human.timing("t_nav_settle"))
 
@@ -462,7 +547,7 @@ class InstagramBot:
             # Confirm -- Vision for Done/Next button
             coords = self.adb.wait_for_screen("Done or Next button", timeout=5)
             if coords:
-                x, y = self.human.jitter_tap(*coords)
+                x, y = self.human.jitter_tap(coords[0], coords[1])
                 self.adb.tap(x, y)
                 time.sleep(self.human.timing("t_confirm_save"))
 
@@ -509,14 +594,21 @@ class InstagramBot:
 
     # --- Video Posting (Reels) ---------------------------------------------
 
-    def post_reel(self, video_path: str, caption: str = "") -> bool:
-        """Upload and post a Reel to Instagram."""
+    def post_reel(self, video_path: str, caption: str = "") -> str:
+        """Upload and post a Reel to Instagram.
+
+        Returns one of: "success" | "retryable" | "banned" | "media_error"
+        """
         # Push video to /sdcard/Download/ (not DCIM -- no EXIF = suspicious there)
         now = datetime.now()
         vid_name = f"video_{now.strftime('%Y%m%d%H%M%S')}_{random.randint(100, 999)}.mp4"
         device_path = f"/sdcard/Download/{vid_name}"
         log.info("Pushing reel to device: %s", device_path)
-        self.adb.push_file(video_path, device_path)
+        try:
+            self.adb.push_file(video_path, device_path)
+        except Exception as e:
+            log.error("Failed to push reel to device: %s", e)
+            return "media_error"
         time.sleep(self.human.timing("t_file_push"))
 
         self.adb.shell(
@@ -578,9 +670,92 @@ class InstagramBot:
         if current and INSTAGRAM_PKG in current:
             log.info("Reel posted on Instagram!")
             self.adb.shell(f'rm "{device_path}"')
-            return True
+            return "success"
         else:
             log.warning("Post may have failed (current app: %s), keeping video on device", current)
+            return "retryable"
+
+    def save_as_draft(self, video_path: str, caption: str = "") -> bool:
+        """Open the reel upload screen, fill caption, save as draft.
+
+        Returns True if draft was saved, False if draft save failed.
+        Instagram draft: navigate to share screen, tap Back, confirm 'Save Draft'.
+        """
+        now = datetime.now()
+        vid_name = f"video_{now.strftime('%Y%m%d%H%M%S')}_{random.randint(100, 999)}.mp4"
+        device_path = f"/sdcard/Download/{vid_name}"
+        log.info("Saving as draft — pushing reel to device: %s", device_path)
+        try:
+            self.adb.push_file(video_path, device_path)
+        except Exception as e:
+            log.error("Failed to push reel for draft: %s", e)
+            return False
+        time.sleep(self.human.timing("t_file_push"))
+
+        self.adb.shell(
+            f'am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE '
+            f'-d "file://{device_path}"'
+        )
+        time.sleep(self.human.timing("t_file_push"))
+
+        # Tap + (create) button
+        x, y = self.adb.get_coord("instagram", "nav_create")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_upload_load"))
+
+        # Switch to REEL tab
+        x, y = self.adb.get_coord("instagram", "reel_tab")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Select video from gallery
+        x, y = self.adb.get_coord("instagram", "gallery_first")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Tap Next (top-right)
+        x, y = self.adb.get_coord("instagram", "upload_next_btn")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Skip editing, tap Next again
+        x, y = self.adb.get_coord("instagram", "upload_next_btn")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Add caption if provided
+        if caption:
+            x, y = self.adb.get_coord("instagram", "upload_caption")
+            x, y = self.human.jitter_tap(x, y)
+            self.adb.tap(x, y)
+            time.sleep(self.human.timing("t_caption_input"))
+
+            self.human.type_with_errors(self.adb, caption)
+            time.sleep(self.human.timing("t_post_typing"))
+
+        # Instagram draft: press Back to trigger "Save Draft?" dialog
+        self.adb.press_back()
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Tap "Save Draft" in the confirmation dialog
+        x, y = self.adb.get_coord("instagram", "save_draft_confirm")
+        x, y = self.human.jitter_tap(x, y)
+        self.adb.tap(x, y)
+        time.sleep(self.human.timing("t_nav_settle"))
+
+        # Verify: check we're still in Instagram
+        current = self.adb.get_current_app()
+        if current and INSTAGRAM_PKG in current:
+            log.info("Reel saved as draft on Instagram")
+            self.adb.shell(f'rm "{device_path}"')
+            return True
+        else:
+            log.warning("Draft save may have failed (current app: %s)", current)
             return False
 
     # --- High-Level Session ------------------------------------------------
@@ -643,9 +818,10 @@ class InstagramBot:
 
             if should_post and not post_done and elapsed >= post_after:
                 if video_path:
-                    success = self.post_reel(video_path, caption)
+                    result = self.post_reel(video_path, caption)
                     post_done = True
-                    if success:
+                    self._last_post_result = result
+                    if result == "success":
                         self.go_to_reels()
                         current_view = "reels"
                         time.sleep(self.human.timing("t_nav_settle"))
@@ -739,6 +915,12 @@ class InstagramBot:
                         await asyncio.sleep(self.human.timing("t_double_open_2"))
                     await self.comment_with_ai()
                     self.human.on_engage()
+                elif self.human.should_browse_comments():
+                    # Just browse comments without writing (reading mode)
+                    self.open_comments()
+                    await self.browse_comments()
+                    self.adb.press_back()
+                    log.debug("Browsed IG comments (read-only)")
 
             elif action == "follow":
                 if self.human.should_follow():

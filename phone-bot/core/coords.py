@@ -122,6 +122,7 @@ TIKTOK = {
     "record_btn":       lambda w, h: (int(w * 0.50), int(h * 0.946)),
     "upload_next_btn":  lambda w, h: (int(w * 0.944), int(h * 0.023)),
     "upload_post_btn":  lambda w, h: (int(w * 0.944), int(h * 0.023)),
+    "upload_save_draft_btn": lambda w, h: (int(w * 0.20), int(h * 0.97)),
     "upload_caption":   lambda w, h: (int(w * 0.50), int(h * 0.15)),
 
     # --- Edit Screen (after recording/selecting) ---
@@ -182,6 +183,7 @@ INSTAGRAM = {
     "upload_next_btn":  lambda w, h: (int(w * 0.944), int(h * 0.023)),
     "upload_share_btn": lambda w, h: (int(w * 0.944), int(h * 0.023)),
     "upload_caption":   lambda w, h: (int(w * 0.50), int(h * 0.15)),
+    "save_draft_confirm": lambda w, h: (int(w * 0.50), int(h * 0.44)),
 
     # --- Profile / Edit Profile ---
     "edit_profile_btn": lambda w, h: (int(w * 0.50), int(h * 0.22)),

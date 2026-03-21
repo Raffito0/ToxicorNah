@@ -18,7 +18,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Optional
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from .. import config
 
@@ -26,6 +27,8 @@ log = logging.getLogger(__name__)
 
 # --- Shared executor for hard timeouts on generate_content() calls ---
 _executor = ThreadPoolExecutor(max_workers=3)
+import atexit as _atexit
+_atexit.register(lambda: _executor.shutdown(wait=False))
 
 # --- Circuit breaker state ---
 _timeout_timestamps: collections.deque = collections.deque(maxlen=10)
@@ -82,14 +85,15 @@ _last_call_time = 0
 _MIN_INTERVAL = 0.5  # seconds between API calls (paid tier, minimal delay)
 _rate_lock = threading.Lock()  # thread-safe rate limiting for prefetch threads
 _initialized = False
+_client: Optional[genai.Client] = None
 
 
 def _init():
-    global _initialized
+    global _initialized, _client
     if _initialized:
         return
     if config.GEMINI["api_key"]:
-        genai.configure(api_key=config.GEMINI["api_key"])
+        _client = genai.Client(api_key=config.GEMINI["api_key"])
         _initialized = True
 
 
@@ -125,6 +129,20 @@ def _compress_image(image_bytes: bytes) -> tuple:
         return image_bytes, "image/png"
 
 
+def _extract_json(raw: str) -> str:
+    """Extract the JSON object/array from a response that may have preamble or reasoning.
+
+    Gemini 2.5 Flash can include reasoning text before the actual JSON.
+    Finds the first '{' and last '}' to isolate the JSON portion.
+    """
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        return raw[start:end + 1]
+    return raw
+
+
 def _call_vision(image_bytes: bytes, prompt: str, max_tokens: int = 256,
                   urgent: bool = False, temperature: float = 0.7,
                   response_mime_type: str = None,
@@ -143,23 +161,21 @@ def _call_vision(image_bytes: bytes, prompt: str, max_tokens: int = 256,
         _rate_limit()
 
     compressed, mime = image_bytes, "image/png"
-    model = genai.GenerativeModel(config.GEMINI["model"])
-    image_part = {
-        "mime_type": mime,
-        "data": compressed,
-    }
-
-    gen_config = {"max_output_tokens": max_tokens, "temperature": temperature}
+    img_part = types.Part.from_bytes(data=compressed, mime_type=mime)
+    cfg = types.GenerateContentConfig(max_output_tokens=max_tokens, temperature=temperature)
     if response_mime_type:
-        gen_config["response_mime_type"] = response_mime_type
+        cfg = types.GenerateContentConfig(
+            max_output_tokens=max_tokens, temperature=temperature,
+            response_mime_type=response_mime_type,
+        )
 
     for attempt in range(2):
         try:
             future = _executor.submit(
-                model.generate_content,
-                [prompt, image_part],
-                generation_config=gen_config,
-                request_options={"timeout": timeout},
+                _client.models.generate_content,
+                model=config.GEMINI["model"],
+                contents=[img_part, prompt],
+                config=cfg,
             )
             response = future.result(timeout=timeout)
             _record_success()
@@ -195,19 +211,18 @@ def _call_multi_vision(images: list[bytes], prompt: str, max_tokens: int = 256,
         return ""
     _rate_limit()
 
-    model = genai.GenerativeModel(config.GEMINI["model"])
     parts = [prompt]
     for img_bytes in images:
         compressed, mime = _compress_image(img_bytes)
-        parts.append({"mime_type": mime, "data": compressed})
+        parts.append(types.Part.from_bytes(data=compressed, mime_type=mime))
 
     for attempt in range(2):
         try:
             future = _executor.submit(
-                model.generate_content,
-                parts,
-                generation_config={"max_output_tokens": max_tokens, "temperature": temperature},
-                request_options={"timeout": timeout},
+                _client.models.generate_content,
+                model=config.GEMINI["model"],
+                contents=parts,
+                config=types.GenerateContentConfig(max_output_tokens=max_tokens, temperature=temperature),
             )
             response = future.result(timeout=timeout)
             _record_success()
@@ -240,14 +255,13 @@ def _call_text(prompt: str, max_tokens: int = 256, timeout: float = 10.0) -> str
         return ""
     _rate_limit()
 
-    model = genai.GenerativeModel(config.GEMINI["model"])
     for attempt in range(2):
         try:
             future = _executor.submit(
-                model.generate_content,
-                prompt,
-                generation_config={"max_output_tokens": max_tokens, "temperature": 0.8},
-                request_options={"timeout": timeout},
+                _client.models.generate_content,
+                model=config.GEMINI["model"],
+                contents=prompt,
+                config=types.GenerateContentConfig(max_output_tokens=max_tokens, temperature=0.8),
             )
             response = future.result(timeout=timeout)
             _record_success()
@@ -291,9 +305,7 @@ JSON only, no markdown."""
 
     result = _call_vision(screenshot_bytes, prompt)
     try:
-        # Clean markdown fences if present
-        result = result.replace("```json", "").replace("```", "").strip()
-        data = json.loads(result)
+        data = json.loads(_extract_json(result))
         log.info("CATEGORIZE_VIDEO: %s - %s (engage=%s mood=%s)",
                  data.get("category"), data.get("description", "")[:30],
                  data.get("engagement_worthy"), data.get("mood"))
@@ -430,8 +442,7 @@ JSON only, no markdown."""
 
     result = _call_vision(screenshot_bytes, prompt, max_tokens=100)
     try:
-        result = result.replace("```json", "").replace("```", "").strip()
-        data = json.loads(result)
+        data = json.loads(_extract_json(result))
         log.info("SCREEN_STATE: screen=%s app=%s issue=%s",
                  data.get("screen"), data.get("app"), data.get("issue"))
         return data
@@ -467,10 +478,9 @@ Rules:
 - If popup: describe the dismiss button (X, OK, Close, Not Now, etc.)
 JSON only, no markdown."""
 
-    result = _call_vision(screenshot_bytes, prompt, max_tokens=120)
+    result = _call_vision(screenshot_bytes, prompt, max_tokens=500)
     try:
-        result = result.replace("```json", "").replace("```", "").strip()
-        parsed = json.loads(result)
+        parsed = json.loads(_extract_json(result))
         # Normalize page name
         page = parsed.get("page", "unknown").lower().strip()
         if page not in ("fyp", "profile", "search", "comments", "popup", "other"):
@@ -754,8 +764,7 @@ JSON only, no markdown."""
     result = _call_vision(screenshot_bytes, prompt, max_tokens=80, urgent=urgent,
                           timeout=6.0, retry_backoff=0.5, compress=False)
     try:
-        result = result.replace("```json", "").replace("```", "").strip()
-        data = json.loads(result)
+        data = json.loads(_extract_json(result))
         has_popup = bool(data.get("has_popup", False))
         if has_popup:
             dx = data.get("dismiss_x")
@@ -841,8 +850,7 @@ JSON only, no markdown."""
         result = _call_vision(screenshot_bytes, prompt, max_tokens=120,
                               temperature=0.1, timeout=6.0, retry_backoff=0.5,
                               compress=False)
-        result = result.replace("```json", "").replace("```", "").strip()
-        data = json.loads(result)
+        data = json.loads(_extract_json(result))
 
         overlay_type = data.get("type", "unknown")
         valid_types = {"dismissible_safe", "captcha_simple", "captcha_puzzle",
@@ -919,7 +927,6 @@ def find_element_by_vision(screenshot_bytes: bytes, description: str,
     )
 
     try:
-        result = result.replace("```json", "").replace("```", "").strip()
         # Gemini sometimes adds extra fields beyond box_2d, causing truncation.
         # Extract box_2d array even from partial/truncated JSON.
         import re
@@ -928,10 +935,15 @@ def find_element_by_vision(screenshot_bytes: bytes, description: str,
             box = [int(box_match.group(i)) for i in range(1, 5)]
         else:
             try:
-                data = json.loads(result)
+                data = json.loads(_extract_json(result))
                 box = data.get("box_2d")
             except json.JSONDecodeError:
                 box = None
+            # Gemini 2.5 Flash sometimes returns plain numbers: "767 868 800 900"
+            if not box:
+                plain_match = re.search(r'\b(\d{2,3})\s+(\d{2,3})\s+(\d{2,3})\s+(\d{2,3})\b', result)
+                if plain_match:
+                    box = [int(plain_match.group(i)) for i in range(1, 5)]
         if not box or len(box) != 4:
             log.info("Vision could not find '%s' (no box_2d)", description[:50])
             return None
@@ -996,8 +1008,7 @@ JSON only, no markdown."""
 
     result = _call_vision(screenshot_bytes, prompt, max_tokens=120)
     try:
-        result = result.replace("```json", "").replace("```", "").strip()
-        data = json.loads(result)
+        data = json.loads(_extract_json(result))
         data["in_niche"] = bool(data.get("in_niche", False))
         data["confidence"] = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
         data["engagement_worthy"] = bool(data.get("engagement_worthy", False))
@@ -1051,6 +1062,13 @@ def evaluate_niche_fit(screenshot_bytes: bytes,
             "3. NICHE SCORE. Evaluate whether this profile fits the target niche.\n\n"
             f"TARGET NICHE: {niche_description}\n"
             f"Reference keywords: {', '.join(niche_keywords[:12])}\n\n"
+            "CONTENT TYPE RULE: Before scoring, identify the PRIMARY content type shown in "
+            "the thumbnail grid. If the grid shows cooking/food/baking thumbnails, score <= 15 "
+            "regardless of bio text. A cooking creator is NOT in-niche even if their bio "
+            "mentions 'love' or 'love language'. "
+            "A profile is in-niche ONLY IF the content grid primarily shows human relationship "
+            "dynamics OR the bio explicitly mentions the relationship/dating niche. "
+            "Food, fashion, fitness, or gaming thumbnails = out-of-niche.\n\n"
             "SCORING RULES:\n"
             "- 80-100: Clearly in-niche. Bio mentions relationships/dating/love, OR video "
             "thumbnails show couple content, text about red flags, breakups, toxic behavior\n"
@@ -1070,8 +1088,7 @@ def evaluate_niche_fit(screenshot_bytes: bytes,
         )
         result = _call_vision(screenshot_bytes, prompt, max_tokens=100, temperature=0.3, timeout=8.0)
         try:
-            result = result.replace("```json", "").replace("```", "").strip()
-            data = json.loads(result)
+            data = json.loads(_extract_json(result))
             score = max(0, min(100, int(data.get("score", 0))))
             reason = str(data.get("reason", ""))[:80]
             is_profile = bool(data.get("is_profile", False))
@@ -1089,28 +1106,52 @@ def evaluate_niche_fit(screenshot_bytes: bytes,
     else:
         # Video context — simple score only
         prompt = (
-            "You are looking at a TikTok/Instagram VIDEO screenshot. "
-            "Evaluate whether this video content fits the target niche.\n\n"
-            f"TARGET NICHE: {niche_description}\n"
-            f"Reference keywords: {', '.join(niche_keywords[:12])}\n\n"
+            "You are looking at a TikTok/Instagram VIDEO screenshot. Do TWO steps:\n\n"
+            "STEP 1 — CONTENT TYPE:\n"
+            "First identify the PRIMARY content type based ONLY on what is visually shown "
+            "(not what the caption says). Choose the single best match from:\n"
+            "- cooking_baking_food: cooking, baking, food preparation, kitchen scenes, eating\n"
+            "- fashion_beauty: clothing, makeup, hair, styling\n"
+            "- fitness_gym: exercise, working out, gym, sports\n"
+            "- relationship_dating: human relationship dynamics, couple behavior, emotional "
+            "conversations between people, reactions to texts/calls\n"
+            "- comedy_entertainment: sketches, jokes, memes\n"
+            "- dance_music: dancing, singing, music performance\n"
+            "- travel_lifestyle: travel, scenery, daily vlog\n"
+            "- other: anything not listed above\n\n"
+            "STEP 2 — NICHE MATCH:\n"
+            "The video is in-niche ONLY IF the content type is 'relationship_dating' AND "
+            "humans are the primary visual subject AND the content shows relationship dynamics "
+            "(conversation, reactions, emotional behavior between people).\n\n"
+            "EXPLICIT EXCLUSION RULES:\n"
+            "- cooking_baking_food content is NEVER in-niche, even if caption says 'love "
+            "language', 'my love', 'heartbreak', or any relationship word\n"
+            "- A video is in-niche ONLY if humans are the primary subject AND the content "
+            "is about their relationship dynamics, emotions toward each other, or "
+            "communication patterns\n"
+            "- If food, kitchen equipment, or food preparation is the primary visual element, "
+            "return out-of-niche regardless of caption\n\n"
             "SCORING RULES:\n"
-            "- 80-100: Clearly in-niche (relationship/dating content)\n"
-            "- 60-79: Probably in-niche (adjacent content)\n"
+            "- 80-100: Clearly in-niche (relationship/dating content type + human dynamics shown)\n"
+            "- 60-79: Probably in-niche (adjacent: drama storytime, emotional reactions, advice)\n"
             "- 40-59: Ambiguous\n"
             "- 20-39: Probably NOT in niche\n"
-            "- 0-19: Clearly NOT in niche\n\n"
-            "Look at: video content, text overlays, caption, visual context.\n\n"
+            "- 0-19: Clearly NOT in niche (cooking, sports, gaming, fashion, pets, tech, etc.)\n\n"
+            f"TARGET NICHE: {niche_description}\n"
+            f"Reference keywords (context only, NOT the primary classification signal): "
+            f"{', '.join(niche_keywords[:12])}\n\n"
             'Return ONLY JSON:\n'
-            '{"score": 0-100, "reason": "brief 8-word reason"}\n'
+            '{"content_type": "<type from list above>", "score": 0-100, "reason": "brief 8-word reason"}\n'
             "JSON only, no markdown."
         )
-        result = _call_vision(screenshot_bytes, prompt, max_tokens=80, temperature=0.3, timeout=8.0)
+        result = _call_vision(screenshot_bytes, prompt, max_tokens=100, temperature=0.3, timeout=8.0)
         try:
-            result = result.replace("```json", "").replace("```", "").strip()
-            data = json.loads(result)
+            data = json.loads(_extract_json(result))
             score = max(0, min(100, int(data.get("score", 0))))
             reason = str(data.get("reason", ""))[:80]
-            log.info("NICHE_FIT: video score=%d reason=%s", score, reason)
+            content_type = str(data.get("content_type", "unknown"))
+            log.info("NICHE_FIT: video content_type=%s score=%d reason=%s",
+                     content_type, score, reason)
             return {"score": score, "reason": reason,
                     "is_profile": False, "active_tab": "n/a"}
         except (json.JSONDecodeError, ValueError, KeyError):
@@ -1149,8 +1190,7 @@ JSON only, no markdown."""
 
     result = _call_vision(screenshot_bytes, prompt, max_tokens=80)
     try:
-        result = result.replace("```json", "").replace("```", "").strip()
-        data = json.loads(result)
+        data = json.loads(_extract_json(result))
         data["in_niche"] = bool(data.get("in_niche", False))
         data["confidence"] = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
         return data
@@ -1182,8 +1222,7 @@ JSON only, no markdown."""
 
     result = _call_vision(screenshot_bytes, prompt, max_tokens=400, compress=False)
     try:
-        result = result.replace("```json", "").replace("```", "").strip()
-        data = json.loads(result)
+        data = json.loads(_extract_json(result))
         if not isinstance(data, list):
             return []
         valid = []
@@ -1223,8 +1262,7 @@ JSON only, no markdown."""
 
     result = _call_vision(screenshot_bytes, prompt, max_tokens=300, compress=False)
     try:
-        result = result.replace("```json", "").replace("```", "").strip()
-        data = json.loads(result)
+        data = json.loads(_extract_json(result))
         if not isinstance(data, list):
             return []
         valid = []
@@ -1251,8 +1289,7 @@ JSON only."""
 
     result = _call_vision(screenshot_bytes, prompt, max_tokens=80)
     try:
-        result = result.replace("```json", "").replace("```", "").strip()
-        return json.loads(result)
+        return json.loads(_extract_json(result))
     except (json.JSONDecodeError, ValueError):
         return {"like": False, "comment": False, "follow": False, "reason": "parse error"}
 
