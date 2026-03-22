@@ -17,6 +17,20 @@ import urllib.parse
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
+
+# All scheduling uses Eastern Time (proxy is in Florida, phones simulate US users)
+_ET = ZoneInfo("US/Eastern")
+
+
+def _now_et() -> datetime:
+    """Current time in US/Eastern (timezone-aware)."""
+    return datetime.now(_ET)
+
+
+def _today_et() -> date:
+    """Today's date in US/Eastern."""
+    return _now_et().date()
 
 from .. import config  # NOTE: config.py adds delivery module to sys.path
 from ..core.adb import ADBController, DeviceLostError, DeviceConfigError
@@ -34,6 +48,8 @@ try:
 except ImportError:
     get_next_video = download_video = mark_posted = mark_draft = mark_skipped = None
 
+import sqlite3
+
 log = logging.getLogger(__name__)
 
 WARMUP_STATE_FILE = os.path.join(config.DATA_DIR, "warmup_state.json")
@@ -43,6 +59,112 @@ _download_pool = ThreadPoolExecutor(max_workers=1)
 _AIRTABLE_BASE_ID = "appsgjIdkpak2kaXq"
 _CONTENT_LIBRARY_TABLE = "tblx1KX7mlTX5QyGb"
 _LOW_STOCK_THRESHOLD = 14
+
+# Dashboard DB path for plan/warmup/session-log integration
+_DB_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "insta-phone-SAAS-sneder", "app", "user_data", "app.db"
+))
+
+
+def _get_db():
+    """Get SQLite connection to the dashboard DB with WAL mode."""
+    conn = sqlite3.connect(_DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _db_available():
+    """Check if dashboard DB exists and is accessible."""
+    return os.path.exists(_DB_PATH)
+
+
+def _utc_to_eastern(utc_str):
+    """Convert UTC ISO string to Eastern time string (HH:MM).
+
+    Input: '2026-03-22T00:45:00Z'
+    Output: '19:45'
+    """
+    dt = datetime.fromisoformat(utc_str.replace('Z', '+00:00'))
+    et = dt.astimezone(_ET)
+    return et.strftime("%H:%M")
+
+
+def _load_plan_from_db(proxy_id=1):
+    """Load active weekly plan from dashboard DB.
+
+    Returns plan dict or None if not found.
+    """
+    if not _db_available():
+        return None
+
+    today = _today_et()
+    iso_cal = today.isocalendar()
+
+    try:
+        conn = _get_db()
+        row = conn.execute(
+            "SELECT plan_json FROM weekly_plan "
+            "WHERE proxy_id = ? AND week_number = ? AND year = ? AND status = 'active'",
+            (proxy_id, iso_cal[1], iso_cal[0])
+        ).fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        plan_data = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+
+        # Convert UTC times to Eastern for execution
+        for day_str, day_data in plan_data.get("days", {}).items():
+            for session in day_data.get("sessions", []):
+                if "start_time_utc" in session:
+                    session["start_time"] = _utc_to_eastern(session["start_time_utc"])
+                if "end_time_utc" in session:
+                    session["end_time"] = _utc_to_eastern(session["end_time_utc"])
+
+        return plan_data
+    except Exception as e:
+        log.warning(f"Failed to load plan from DB: {e}")
+        return None
+
+
+def _log_session_start_db(session_id, bot_account_id, session_type, dry_run=False):
+    """Write session start to SessionLog in dashboard DB."""
+    if not _db_available():
+        return
+
+    try:
+        conn = _get_db()
+        conn.execute(
+            "INSERT INTO session_log (bot_account_id, session_id, started_at, session_type, status, dry_run) "
+            "VALUES (?, ?, datetime('now'), ?, 'running', ?)",
+            (bot_account_id, session_id, session_type, dry_run)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning(f"Failed to log session start to DB: {e}")
+
+
+def _log_session_end_db(session_id, success, error_message=None, post_outcome=None):
+    """Update SessionLog with completion status in dashboard DB."""
+    if not _db_available():
+        return
+
+    status = "success" if success else "error"
+    try:
+        conn = _get_db()
+        conn.execute(
+            "UPDATE session_log SET ended_at = datetime('now'), status = ?, "
+            "error_message = ?, post_outcome = ? WHERE session_id = ?",
+            (status, error_message, post_outcome, session_id)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning(f"Failed to log session end to DB: {e}")
 
 
 def check_content_stock(phones: list[int]) -> dict[int, int]:
@@ -132,7 +254,7 @@ class SessionExecutor:
             account_name=account_name,
             platform=platform,
             phone_id=phone_id,
-            start_date=date.today().isoformat(),
+            start_date=_today_et().isoformat(),
             current_day=1,
             niche_keywords=niche_keywords or [
                 "toxic relationship", "red flags", "situationship",
@@ -223,7 +345,7 @@ class SessionExecutor:
         week_iso: e.g. '2026-W09'. If None, uses current week.
         """
         if not week_iso:
-            today = date.today()
+            today = _today_et()
             week_iso = f"{today.year}-W{today.isocalendar()[1]:02d}"
 
         filename = f"weekly_plan_{week_iso}.json"
@@ -243,12 +365,58 @@ class SessionExecutor:
                 log.info("Loaded plan: %s", path)
                 return plan
 
-        log.error("No plan found for %s", week_iso)
+        # No plan found — auto-generate it
+        log.info("No plan found for %s — generating automatically...", week_iso)
+        plan = self._auto_generate_plan()
+        if plan:
+            return plan
+
+        log.error("Failed to generate plan for %s", week_iso)
         return None
+
+    def _auto_generate_plan(self) -> dict | None:
+        """Auto-generate the weekly plan using the planner module."""
+        try:
+            import sys
+            # Add Weekly & Daily Plan to sys.path so planner can be imported
+            planner_parent = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "Weekly & Daily Plan",
+            )
+            if planner_parent not in sys.path:
+                sys.path.insert(0, planner_parent)
+
+            import importlib
+            scheduler_mod = importlib.import_module("planner.scheduler")
+            formatter_mod = importlib.import_module("planner.formatter")
+            generate_weekly_plan = scheduler_mod.generate_weekly_plan
+            save_weekly_json = formatter_mod.save_weekly_json
+
+            today = _today_et()
+            plan = generate_weekly_plan(today)
+            json_path = save_weekly_json(plan)
+            log.info("Auto-generated weekly plan: %s", json_path)
+
+            # Read back the written file (includes generated_at metadata)
+            with open(json_path, "r", encoding="utf-8") as f:
+                plan_data = json.load(f)
+
+            # Copy to PLANS_DIR so executor finds it next time
+            filename = os.path.basename(json_path)
+            local_path = os.path.join(config.PLANS_DIR, filename)
+            os.makedirs(config.PLANS_DIR, exist_ok=True)
+            import shutil
+            shutil.copy2(json_path, local_path)
+            log.info("Plan copied to: %s", local_path)
+
+            return plan_data
+        except Exception as e:
+            log.error("Auto-generate plan failed: %s", e, exc_info=True)
+            return None
 
     def get_today_sessions(self, plan: dict) -> list[dict]:
         """Extract today's sessions from the weekly plan."""
-        today = date.today().isoformat()
+        today = _today_et().isoformat()
         daily = plan.get("daily_plans", {})
 
         if today in daily:
@@ -364,12 +532,12 @@ class SessionExecutor:
         human = self._get_human(account)
 
         # Start the human engine for this session (with duration for phase tracking)
-        now = datetime.now()
+        now = _now_et()
         human.start_session(hour=now.hour, weekday=now.weekday(),
                             duration_minutes=total_duration)
 
         # --- UHID Touch Server Start ---
-        phone_name = config.PHONES.get(phone_id, {}).get("name", f"Phone {phone_id}")
+        phone_name = next((p.get("name", f"Phone {phone_id}") for p in config.PHONES if p["id"] == phone_id), f"Phone {phone_id}")
         uhid_started = False
         try:
             uhid_ok = adb.start_touch_server()
@@ -784,7 +952,7 @@ class SessionExecutor:
 
         adb = self.controllers[phone_id]
         human = self._get_human(account)
-        now = datetime.now()
+        now = _now_et()
         human.start_session(hour=now.hour, weekday=now.weekday(),
                             duration_minutes=duration)
 
@@ -1193,7 +1361,7 @@ class SessionExecutor:
         if not local_path:
             return
 
-        now = datetime.now()
+        now = _now_et()
         vid_name = f"video_{now.strftime('%Y%m%d%H%M%S')}_{random.randint(100, 999)}.mp4"
         device_video_path = f"/sdcard/Download/{vid_name}"
         adb.push_file(local_path, device_video_path)
@@ -1306,7 +1474,7 @@ class SessionExecutor:
 
         # --- UHID JAR deployment check (once per day, before any sessions) ---
         for pid, adb in self.controllers.items():
-            phone_name = config.PHONES.get(pid, {}).get("name", f"Phone {pid}")
+            phone_name = next((p.get("name", f"Phone {pid}") for p in config.PHONES if p["id"] == pid), f"Phone {pid}")
             try:
                 jar_check = adb.shell("ls /data/local/tmp/touchserver.jar").strip()
                 if "/data/local/tmp/touchserver.jar" not in jar_check:
@@ -1335,6 +1503,9 @@ class SessionExecutor:
                     break
 
                 phone_id = state.phone_id
+                if phone_id not in self.controllers:
+                    log.debug("Skipping warmup for %s — Phone %d not connected", name, phone_id)
+                    continue
                 if phone_id in dead_phones:
                     log.warning("Skipping warmup for %s — Phone %d lost connection", name, phone_id)
                     continue
@@ -1459,7 +1630,7 @@ class SessionExecutor:
         """Wait until a specific time (HH:MM format)."""
         target_h, target_m = map(int, time_str.split(":"))
         while True:
-            now = datetime.now()
+            now = _now_et()
             if now.hour > target_h or (now.hour == target_h and now.minute >= target_m):
                 return
             remaining = (target_h * 60 + target_m) - (now.hour * 60 + now.minute)
