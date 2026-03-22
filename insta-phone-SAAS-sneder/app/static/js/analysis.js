@@ -157,6 +157,7 @@ class AnalyticsDashboard {
         this.updateFollowSuccessChart();
         this.loadTikTokAnalytics();
         this.loadGeminiAnalytics();
+        this.loadContentStock();
     }
 
     updateDailyActivityChart() {
@@ -650,6 +651,96 @@ class AnalyticsDashboard {
             ? byType.reduce((a, b) => b.count > a.count ? b : a).type
             : '-';
         document.getElementById('geminiTopType').textContent = topType;
+    }
+
+    // ── Content Stock ──────────────────────────────────────────
+    async loadContentStock() {
+        try {
+            const response = await fetch('/api/content/stock');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Content stock failed');
+            this.renderContentStockGrid(data);
+        } catch (err) {
+            console.error('Content stock error:', err);
+            document.getElementById('contentStockGrid').innerHTML =
+                '<p style="color: var(--text-muted);">No content data</p>';
+        }
+    }
+
+    _escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    renderContentStockGrid(data) {
+        const grid = document.getElementById('contentStockGrid');
+        const phones = data.phones || [];
+
+        if (phones.length === 0) {
+            grid.innerHTML = '<p style="color: var(--text-muted);">No content data</p>';
+            return;
+        }
+
+        const colorClass = (days) => {
+            if (days === null || days === undefined) return '';
+            if (days < 7) return 'stock-red';
+            if (days < 14) return 'stock-yellow';
+            return 'stock-green';
+        };
+
+        const cellContent = (pending, days) => {
+            const daysText = (days !== null && days !== undefined) ? days.toFixed(1) : 'N/A';
+            return `<strong>${parseInt(pending) || 0}</strong> <span class="stock-days">(${this._escapeHtml(daysText)} days)</span>`;
+        };
+
+        let html = '<div class="stock-grid-header">' +
+            '<div class="stock-col-phone">Phone</div>' +
+            '<div class="stock-col-platform">TikTok</div>' +
+            '<div class="stock-col-platform">Instagram</div>' +
+            '</div>';
+
+        phones.forEach(p => {
+            html += '<div class="stock-grid-row">' +
+                `<div class="stock-col-phone">${this._escapeHtml(p.name)}</div>` +
+                `<div class="stock-cell ${colorClass(p.tiktok_days)}">${cellContent(p.tiktok_pending, p.tiktok_days)}</div>` +
+                `<div class="stock-cell ${colorClass(p.instagram_days)}">${cellContent(p.instagram_pending, p.instagram_days)}</div>` +
+                '</div>';
+        });
+
+        grid.innerHTML = html;
+
+        // Stale warning
+        const staleEl = document.getElementById('stockStaleWarning');
+        staleEl.style.display = data.cache_stale ? 'block' : 'none';
+
+        // Timestamp
+        const tsEl = document.getElementById('stockTimestamp');
+        if (data.last_refresh) {
+            const d = new Date(data.last_refresh);
+            tsEl.textContent = 'Last refresh: ' + d.toLocaleTimeString();
+        }
+    }
+
+    async refreshContentStock() {
+        const btn = document.getElementById('refreshStockBtn');
+        const icon = btn.querySelector('i');
+        btn.disabled = true;
+        icon.classList.add('fa-spin');
+
+        try {
+            const response = await fetch('/api/content/stock/refresh', { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Refresh failed');
+            this.renderContentStockGrid(data);
+        } catch (err) {
+            console.error('Content stock refresh error:', err);
+            const staleEl = document.getElementById('stockStaleWarning');
+            if (staleEl) staleEl.style.display = 'block';
+        } finally {
+            btn.disabled = false;
+            icon.classList.remove('fa-spin');
+        }
     }
 
     // ── Canvas empty state helper ────────────────────────────

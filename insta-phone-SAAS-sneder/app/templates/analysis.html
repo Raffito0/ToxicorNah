@@ -200,6 +200,28 @@
                     </div>
                 </div>
 
+                <!-- Content Stock Card -->
+                <div class="content-stock-row">
+                    <div class="chart-container">
+                        <div class="chart-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3><i class="fas fa-box-open"></i> Content Stock</h3>
+                                <p>Pending videos per phone and platform</p>
+                            </div>
+                            <button id="refreshStockBtn" class="btn btn-sm" onclick="window.dashboard.refreshContentStock()" title="Refresh from Airtable">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                        <div id="contentStockGrid" class="content-stock-grid">
+                            <p style="color: var(--text-muted);">Loading...</p>
+                        </div>
+                        <div id="stockStaleWarning" class="stock-stale-warning" style="display: none;">
+                            <i class="fas fa-exclamation-triangle"></i> Showing cached data — Airtable unavailable
+                        </div>
+                        <div id="stockTimestamp" class="stock-timestamp"></div>
+                    </div>
+                </div>
+
                 <!-- Gemini Usage Row -->
                 <div class="gemini-stats-row">
                     <div class="chart-container" style="flex: 2;">

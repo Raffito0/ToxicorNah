@@ -424,6 +424,109 @@ body {
     color: #d62976;
 }
 
+/* Content Stock Card */
+.content-stock-row {
+    margin-bottom: 30px;
+}
+
+.content-stock-grid {
+    margin-top: 8px;
+}
+
+.stock-grid-header,
+.stock-grid-row {
+    display: grid;
+    grid-template-columns: 200px 1fr 1fr;
+    gap: 8px;
+    align-items: center;
+}
+
+.stock-grid-header {
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-light);
+}
+
+.stock-grid-row {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.stock-col-phone {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.stock-cell {
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.stock-cell strong {
+    font-size: 1.1rem;
+}
+
+.stock-days {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.stock-red {
+    background: rgba(239,68,68,0.15);
+    border-left: 3px solid #ef4444;
+}
+
+.stock-yellow {
+    background: rgba(245,158,11,0.15);
+    border-left: 3px solid #f59e0b;
+}
+
+.stock-green {
+    background: rgba(34,197,94,0.15);
+    border-left: 3px solid #22c55e;
+}
+
+.stock-stale-warning {
+    margin-top: 12px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: rgba(245,158,11,0.12);
+    color: #f59e0b;
+    font-size: 0.85rem;
+}
+
+.stock-timestamp {
+    margin-top: 8px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+#refreshStockBtn {
+    padding: 6px 10px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+#refreshStockBtn:hover {
+    background: rgba(255,255,255,0.1);
+    color: var(--text-primary);
+}
+
+#refreshStockBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* Sidebar alignment fix for analytics page */
 .sidebar {
     padding-bottom: 24px;
@@ -455,6 +558,11 @@ body {
     .gemini-stat-boxes {
         flex-direction: row;
     }
+
+    .stock-grid-header,
+    .stock-grid-row {
+        grid-template-columns: 140px 1fr 1fr;
+    }
 }
 
 @media (max-width: 768px) {
@@ -479,6 +587,13 @@ body {
     
     .stats-row {
         grid-template-columns: repeat(2, 1fr);
+    }
+
+    .stock-grid-header,
+    .stock-grid-row {
+        grid-template-columns: 100px 1fr 1fr;
+        gap: 4px;
+        font-size: 0.82rem;
     }
     
     .performance-table {
