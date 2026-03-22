@@ -84,6 +84,21 @@ def create_app():
         db.create_all()
         ensure_columns(db)
 
+    # Add Weekly & Daily Plan to Python path for planner imports
+    planner_parent = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', 'Weekly & Daily Plan'))
+    if os.path.isdir(planner_parent) and planner_parent not in sys.path:
+        sys.path.insert(0, planner_parent)
+
+    # Enable SQLite WAL mode for concurrent reads
+    from sqlalchemy import text
+    with app.app_context():
+        try:
+            db.session.execute(text("PRAGMA journal_mode=WAL"))
+            db.session.commit()
+        except Exception:
+            pass
+
     # Add phone-bot to Python path for TikTok engine imports
     # phone-bot/ uses relative imports (from .. import config), so the PARENT
     # directory must be in sys.path and phone-bot must be importable as a package.
@@ -116,9 +131,11 @@ def create_app():
     from .routes import auth
     from .analysis_routes import analysis
     from .proxy_routes import proxy_bp
+    from .planner_routes import planner_bp
     app.register_blueprint(auth)
     app.register_blueprint(analysis)
     app.register_blueprint(proxy_bp)
+    app.register_blueprint(planner_bp)
 
     # Start proxy health-check thread (skip in tests)
     if not app.config.get('TESTING'):
