@@ -1,6 +1,7 @@
 """Main scheduling engine -- orchestrates all rules to generate plans."""
 import random
 from datetime import date, time, timedelta
+from typing import Optional
 
 from . import config
 from .models import Session, ProxyRotation, DailyPlan, WeeklyPlan, AccountWeekSummary
@@ -105,7 +106,67 @@ def _assign_weekly_special_days(state, week_dates, accounts, phones):
 # --- Daily Plan: Generate Sessions ---
 def _build_session(account, personality, session_num, has_post, is_rest_day,
                    slot, is_weekend, account_state, force_abort=False):
-    """Build a single session dict with all rule-based randomness."""
+    """Build a single session dict with all rule-based randomness.
+
+    If the account has an active warmup (warmup_state in account dict),
+    produces warmup/warmup_lazy sessions with engagement caps.
+    Dead warmup days return None (account skipped).
+    """
+    # --- Warmup handling (before regular logic) ---
+    warmup_state = account.get("warmup_state")
+    if warmup_state and not warmup_state.get("completed", True):
+        warmup_plan = warmup_state.get("warmup_plan", {})
+        current_day = warmup_state.get("current_day", 0)
+        if current_day == 0:
+            current_day = 1
+        total_days = warmup_state.get("total_days", 7)
+
+        # Safety: if past warmup duration, treat as regular
+        if current_day > total_days:
+            pass  # fall through to regular logic below
+        else:
+            day_plan = warmup_plan.get(str(current_day)) or warmup_plan.get(current_day, {})
+            day_type = day_plan.get("type", "normal")
+
+            if day_type == "dead":
+                return None
+
+            # Build engagement caps from warmup plan
+            caps = {
+                "scroll_only": (day_plan.get("likes", 0) == 0
+                                and day_plan.get("comments", 0) == 0
+                                and day_plan.get("follows", 0) == 0
+                                and day_plan.get("searches", 0) == 0),
+                "likes": day_plan.get("likes", 0),
+                "comments": day_plan.get("comments", 0),
+                "follows": day_plan.get("follows", 0),
+                "searches": day_plan.get("searches", 0),
+                "can_post": day_plan.get("can_post", False),
+                "duration_range": day_plan.get("duration_range", [5, 10]),
+            }
+
+            duration_range = caps["duration_range"]
+            duration = random.randint(duration_range[0], duration_range[1])
+            session_type = "warmup_lazy" if day_type == "lazy" else "warmup"
+
+            post_scheduled = caps.get("can_post", False) and has_post
+            post_outcome = rules.apply_post_error(personality) if post_scheduled else None
+
+            return {
+                "account_name": account["name"],
+                "phone_id": account["phone_id"],
+                "platform": account["platform"],
+                "session_number": session_num,
+                "session_type": session_type,
+                "post_scheduled": post_scheduled,
+                "post_outcome": post_outcome,
+                "pre_activity_minutes": duration,
+                "post_activity_minutes": 0,
+                "total_duration_minutes": duration,
+                "slot": slot,
+                "engagement_caps": caps,
+            }
+
     # R12: Aborted session?
     if force_abort:
         duration = rules.aborted_session_duration()
@@ -192,6 +253,7 @@ def generate_daily_plan(day_date, state, weekly_assignments, accounts, phones):
     """
     is_weekend = day_date.weekday() >= 5
     slots = rules.get_slots_for_date(day_date)
+    accounts_by_name = {a["name"]: a for a in accounts}
 
     # R1: Randomize phone order
     phone_order = rules.randomize_phone_order(accounts=accounts, phones=phones)
@@ -208,6 +270,33 @@ def generate_daily_plan(day_date, state, weekly_assignments, accounts, phones):
             # Two-day break: completely inactive
             if asgn["two_day_break"] and day_date in asgn["two_day_break"]:
                 account_plans[acc_name] = {"active": False}
+                continue
+
+            # Warmup handling: check if account has active warmup
+            warmup_state = account.get("warmup_state")
+            if warmup_state and not warmup_state.get("completed", True):
+                warmup_plan = warmup_state.get("warmup_plan", {})
+                current_day = warmup_state.get("current_day", 0)
+                if current_day == 0:
+                    current_day = 1
+                day_plan = warmup_plan.get(str(current_day)) or warmup_plan.get(current_day, {})
+                day_type = day_plan.get("type", "normal")
+
+                if day_type == "dead":
+                    account_plans[acc_name] = {"active": False}
+                    continue
+
+                # Warmup: always 1 session, post only if warmup plan allows
+                can_post = day_plan.get("can_post", False)
+                account_plans[acc_name] = {
+                    "active": True,
+                    "account": account,
+                    "personality": personality,
+                    "acc_state": acc_state,
+                    "is_rest_day": False,
+                    "session_count": 1,
+                    "post_count": 1 if can_post else 0,
+                }
                 continue
 
             is_rest_day = (asgn["rest_day"] == day_date)
@@ -227,9 +316,19 @@ def generate_daily_plan(day_date, state, weekly_assignments, accounts, phones):
             }
 
     # Step 1b: Synchronize session counts per phone
+    # Warmup accounts are locked to 1 session -- don't override them
     for phone_id, acc_names in phone_order:
         active_accs = [n for n in acc_names if account_plans[n].get("active")]
         if len(active_accs) == 2:
+            # Check if either account is in warmup (locked session count)
+            has_warmup = any(
+                accounts_by_name.get(n, {}).get("warmup_state", {}).get("completed", True) is False
+                for n in active_accs
+                if accounts_by_name.get(n, {}).get("warmup_state")
+            )
+            if has_warmup:
+                continue  # Don't sync -- warmup account stays at 1
+
             sc1 = account_plans[active_accs[0]]["session_count"]
             sc2 = account_plans[active_accs[1]]["session_count"]
             if sc1 != sc2:
