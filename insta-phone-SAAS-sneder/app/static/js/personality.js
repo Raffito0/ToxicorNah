@@ -239,3 +239,94 @@ async function resetPersonality() {
         console.error('Failed to reset:', e);
     }
 }
+
+
+// ── Niche Config (section-05) ────────────────────────────────
+
+let _nicheKeywords = [];
+
+async function loadNiche(accountId) {
+    const section = document.getElementById('nicheSection');
+    if (!section) return;
+    try {
+        const resp = await fetch(`/api/accounts/${accountId}/niche`);
+        if (!resp.ok) { section.style.display = 'none'; return; }
+        const data = await resp.json();
+        section.style.display = '';
+
+        document.getElementById('nicheDescription').value = data.description || '';
+        _nicheKeywords = data.keywords || [];
+        renderKeywordTags();
+
+        const thresh = document.getElementById('nicheThreshold');
+        thresh.value = data.follow_threshold;
+        document.getElementById('nicheThresholdVal').textContent = data.follow_threshold;
+        thresh.oninput = () => {
+            document.getElementById('nicheThresholdVal').textContent = thresh.value;
+        };
+
+        const kwCount = document.getElementById('nicheKeywordsCount');
+        kwCount.value = data.session_keywords_count;
+        document.getElementById('nicheKeywordsCountVal').textContent = data.session_keywords_count;
+        kwCount.oninput = () => {
+            document.getElementById('nicheKeywordsCountVal').textContent = kwCount.value;
+        };
+
+        // Keyword input handler
+        const input = document.getElementById('nicheKeywordInput');
+        input.onkeydown = (e) => {
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                addKeyword(input.value.trim().replace(',', ''));
+                input.value = '';
+            }
+        };
+    } catch (e) {
+        console.error('Failed to load niche:', e);
+        section.style.display = 'none';
+    }
+}
+
+
+function renderKeywordTags() {
+    const container = document.getElementById('nicheKeywordsContainer');
+    if (!container) return;
+    container.innerHTML = _nicheKeywords.map(kw => `
+        <span style="background:#d62976; color:#fff; padding:2px 8px; border-radius:12px; font-size:0.78rem; display:flex; align-items:center; gap:4px;">
+            ${kw}
+            <span style="cursor:pointer; font-weight:bold;" onclick="removeKeyword('${kw}')">&times;</span>
+        </span>
+    `).join('');
+}
+
+
+function addKeyword(kw) {
+    if (!kw || _nicheKeywords.includes(kw)) return;
+    _nicheKeywords.push(kw);
+    renderKeywordTags();
+}
+
+
+function removeKeyword(kw) {
+    _nicheKeywords = _nicheKeywords.filter(k => k !== kw);
+    renderKeywordTags();
+}
+
+
+async function saveNiche() {
+    if (!_personalityAccountId) return;
+    try {
+        await fetch(`/api/accounts/${_personalityAccountId}/niche`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                description: document.getElementById('nicheDescription').value,
+                keywords: _nicheKeywords,
+                follow_threshold: parseInt(document.getElementById('nicheThreshold').value),
+                session_keywords_count: parseInt(document.getElementById('nicheKeywordsCount').value),
+            }),
+        });
+    } catch (e) {
+        console.error('Failed to save niche:', e);
+    }
+}

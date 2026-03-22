@@ -170,6 +170,37 @@
                             <canvas id="personalityChart"></canvas>
                         </div>
 
+                        <!-- Niche Config Section -->
+                        <div id="nicheSection" class="personality-settings-section" style="display: none;">
+                            <h5 style="font-size: 0.95rem; margin-bottom: 12px;">
+                                <i class="fas fa-bullseye me-2"></i>Niche Configuration
+                            </h5>
+                            <div style="margin-bottom: 10px;">
+                                <label style="font-size: 0.82rem; color: #999;">Description</label>
+                                <textarea id="nicheDescription" rows="3"
+                                    style="width:100%; background:#2a2a2a; border:1px solid #444; color:#ddd; border-radius:6px; padding:8px; font-size:0.82rem; resize:vertical;"></textarea>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label style="font-size: 0.82rem; color: #999;">Keywords</label>
+                                <div id="nicheKeywordsContainer" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;"></div>
+                                <input id="nicheKeywordInput" type="text" placeholder="Add keyword (Enter/comma)"
+                                    style="background:#2a2a2a; border:1px solid #444; color:#ddd; border-radius:4px; padding:4px 8px; font-size:0.82rem; width:200px;">
+                            </div>
+                            <div class="personality-slider-row">
+                                <span class="personality-label">Follow Threshold</span>
+                                <input type="range" id="nicheThreshold" class="personality-slider" min="40" max="70" step="1" value="55">
+                                <span class="personality-value" id="nicheThresholdVal">55</span>
+                            </div>
+                            <div class="personality-slider-row">
+                                <span class="personality-label">Keywords/Session</span>
+                                <input type="range" id="nicheKeywordsCount" class="personality-slider" min="4" max="12" step="1" value="8">
+                                <span class="personality-value" id="nicheKeywordsCountVal">8</span>
+                            </div>
+                            <button class="btn btn-sm btn-outline-success mt-2" onclick="saveNiche()">
+                                <i class="fas fa-save me-1"></i>Save Niche
+                            </button>
+                        </div>
+
                         <form id="settingsForm">
                             <div class="settings-grid">
                                 <div class="settings-group">

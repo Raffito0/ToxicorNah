@@ -198,3 +198,63 @@ def toggle_lock(account_id):
     db.session.commit()
 
     return jsonify({'locked_traits': current_locked})
+
+
+# ── Niche Config (section-05) ────────────────────────────────
+
+DEFAULT_NICHE = {
+    'description': '',
+    'keywords': [],
+    'follow_threshold': 55,
+    'session_keywords_count': 8,
+}
+
+
+def _get_niche(account):
+    """Get niche config, falling back to defaults."""
+    if account.niche_json and isinstance(account.niche_json, dict):
+        result = dict(DEFAULT_NICHE)
+        result.update(account.niche_json)
+        return result
+    return dict(DEFAULT_NICHE)
+
+
+@personality_bp.route('/api/accounts/<int:account_id>/niche', methods=['GET'])
+@login_required
+def get_niche(account_id):
+    account, err = _get_account_or_404(account_id)
+    if err:
+        return err
+    return jsonify(_get_niche(account))
+
+
+@personality_bp.route('/api/accounts/<int:account_id>/niche', methods=['PUT'])
+@login_required
+def update_niche(account_id):
+    account, err = _get_account_or_404(account_id)
+    if err:
+        return err
+
+    data = request.get_json(silent=True) or {}
+    current = _get_niche(account)
+
+    # Validate keywords
+    if 'keywords' in data:
+        if not isinstance(data['keywords'], list):
+            return jsonify({'error': 'keywords must be an array'}), 400
+        current['keywords'] = [str(k) for k in data['keywords']]
+
+    if 'description' in data:
+        current['description'] = str(data['description'])
+
+    if 'follow_threshold' in data:
+        current['follow_threshold'] = max(40, min(70, int(data['follow_threshold'])))
+
+    if 'session_keywords_count' in data:
+        current['session_keywords_count'] = max(4, min(12, int(data['session_keywords_count'])))
+
+    account.niche_json = current
+    flag_modified(account, 'niche_json')
+    db.session.commit()
+
+    return jsonify(current)

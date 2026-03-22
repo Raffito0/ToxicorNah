@@ -58,6 +58,11 @@ async function openBotSettings(botId) {
                 loadPersonalityPanel(currentBotAccounts[0].id);
             }
 
+            // Load niche config for first account (if available)
+            if (currentBotAccounts.length > 0 && typeof loadNiche === 'function') {
+                loadNiche(currentBotAccounts[0].id);
+            }
+
             // Show calendar with all accounts
             if (currentBotAccounts.length > 0) {
                 await showMultiAccountCalendar(botId, currentBotAccounts);
