@@ -53,6 +53,11 @@ async function openBotSettings(botId) {
                 loadWarmupPanel(firstAccount.username || firstAccount.name || firstAccount.clone_id);
             }
 
+            // Load personality panel for first account (if available)
+            if (currentBotAccounts.length > 0 && typeof loadPersonalityPanel === 'function') {
+                loadPersonalityPanel(currentBotAccounts[0].id);
+            }
+
             // Show calendar with all accounts
             if (currentBotAccounts.length > 0) {
                 await showMultiAccountCalendar(botId, currentBotAccounts);

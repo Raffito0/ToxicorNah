@@ -14,7 +14,66 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/calendar-schedule.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/weekly-plan.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        /* Personality Panel Styles */
+        .personality-settings-section {
+            margin-top: 16px;
+            padding: 16px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        .personality-slider-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 0;
+            border-bottom: 1px solid #2a2a2a;
+        }
+        .personality-slider-row:last-child { border-bottom: none; }
+        .personality-label {
+            width: 140px;
+            font-size: 0.82rem;
+            color: #ccc;
+            flex-shrink: 0;
+        }
+        .personality-slider {
+            flex: 1;
+            accent-color: #d62976;
+            height: 4px;
+        }
+        .personality-value {
+            width: 42px;
+            text-align: right;
+            font-size: 0.8rem;
+            color: #aaa;
+            font-family: monospace;
+        }
+        .personality-lock-btn {
+            background: none;
+            border: 1px solid #444;
+            color: #888;
+            border-radius: 4px;
+            padding: 3px 6px;
+            cursor: pointer;
+            font-size: 0.75rem;
+        }
+        .personality-lock-btn.locked {
+            color: #d62976;
+            border-color: #d62976;
+        }
+        .personality-lock-btn:hover { opacity: 0.8; }
+        .personality-actions {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+        }
+        #personalityChart {
+            max-height: 200px;
+            margin-top: 12px;
+        }
+    </style>
 </head>
 <body>
     <div class="sidebar">
@@ -92,6 +151,23 @@
                                     <i class="fas fa-check me-1"></i>Mark Complete
                                 </button>
                             </div>
+                        </div>
+
+                        <!-- Personality Section -->
+                        <div id="personalitySection" class="personality-settings-section" style="display: none;">
+                            <h5 style="font-size: 0.95rem; margin-bottom: 12px;">
+                                <i class="fas fa-brain me-2"></i>Personality Traits
+                            </h5>
+                            <div id="personalitySlidersContainer"></div>
+                            <div class="personality-actions">
+                                <button class="btn btn-sm btn-outline-info" onclick="randomizePersonality()">
+                                    <i class="fas fa-dice me-1"></i>Randomize
+                                </button>
+                                <button class="btn btn-sm btn-outline-warning" onclick="resetPersonality()">
+                                    <i class="fas fa-undo me-1"></i>Reset
+                                </button>
+                            </div>
+                            <canvas id="personalityChart"></canvas>
                         </div>
 
                         <form id="settingsForm">
@@ -215,6 +291,7 @@
         </div>
     </div>
 <script src="{{ url_for('static', filename='js/warmup-panel.js') }}"></script>
+<script src="{{ url_for('static', filename='js/personality.js') }}"></script>
 <script type="module" src="{{ url_for('static', filename='js/phone-settings-main.js') }}"></script>
 <script type="module" src="{{ url_for('static', filename='js/phone-settings-calendar.js') }}"></script>
 <script type="module" src="{{ url_for('static', filename='js/after_login_scripts.js') }}"></script>
