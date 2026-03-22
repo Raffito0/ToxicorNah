@@ -44,6 +44,8 @@ def ensure_columns(db):
         # BotAccount table new columns (section-02)
         "ALTER TABLE bot_account ADD COLUMN platform VARCHAR(20) DEFAULT 'instagram'",
         "ALTER TABLE bot_account ADD COLUMN personality_json JSON",
+        "ALTER TABLE bot_account ADD COLUMN personality_history_json JSON",
+        "ALTER TABLE bot_account ADD COLUMN personality_locked_traits JSON",
         "ALTER TABLE bot_account ADD COLUMN warmup_json JSON",
         "ALTER TABLE bot_account ADD COLUMN niche_json JSON",
         "ALTER TABLE bot_account ADD COLUMN notify_before_post BOOLEAN DEFAULT 1",
@@ -132,10 +134,12 @@ def create_app():
     from .analysis_routes import analysis
     from .proxy_routes import proxy_bp
     from .planner_routes import planner_bp
+    from .personality_routes import personality_bp
     app.register_blueprint(auth)
     app.register_blueprint(analysis)
     app.register_blueprint(proxy_bp)
     app.register_blueprint(planner_bp)
+    app.register_blueprint(personality_bp)
 
     # Start proxy health-check thread (skip in tests)
     if not app.config.get('TESTING'):

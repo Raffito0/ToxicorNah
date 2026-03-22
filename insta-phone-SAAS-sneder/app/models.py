@@ -267,6 +267,8 @@ class BotAccount(db.Model):
     # ─── New fields (section-02) ───────────────────────────────────
     platform = db.Column(db.String(20), default='instagram')
     personality_json = db.Column(db.JSON, nullable=True)
+    personality_history_json = db.Column(db.JSON, nullable=True)
+    personality_locked_traits = db.Column(db.JSON, nullable=True)
     warmup_json = db.Column(db.JSON, nullable=True)
     niche_json = db.Column(db.JSON, nullable=True)
     notify_before_post = db.Column(db.Boolean, default=True)
