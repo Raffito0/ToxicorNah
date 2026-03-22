@@ -1,0 +1,654 @@
+{# main page #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet"  href="{{ url_for('static', filename='css/after_login_styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/message-format.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/notfication-panel.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/confirm-model.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/leads-history-tables.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/phone-settings-sub.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/calendar-schedule.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-icon active" title="Phones" data-tab="bots-management">
+            <i class="fas fa-mobile-alt"></i>
+        </div>
+        <div class="sidebar-icon" title="Messages" data-tab="message-format">
+            <i class="fas fa-paper-plane"></i>
+        </div>
+        <div class="sidebar-icon" title="Users" data-tab="leads-format">
+            <i class="fas fa-users"></i>
+        </div>
+        <div class="sidebar-icon" title="History" data-tab="history-format">
+            <i class="fas fa-history"></i>
+        </div>
+        <div class="sidebar-icon" title="Weekly Plan" onclick="window.location.href='/weekly-plan'">
+            <i class="fas fa-calendar-week"></i>
+        </div>
+        <div class="sidebar-icon" title="Analytics" onclick="window.location.href='/analysis'">
+            <i class="fas fa-chart-bar"></i>
+        </div>
+        <div class="sidebar-icon logout-icon" title="Logout">
+            <a href="{{ url_for('auth.logout') }}"><i class="fas fa-sign-out-alt logout-icon"></i></a>
+        </div>
+    </div>
+    <div class="main-content">
+        <div id="bots-management">
+            <div class="top-bar">
+                <label for="phone-id">Phone ID:</label>
+                <input type="text" id="phone-id" placeholder="Enter phone ID">
+                <button class="btn btn-primary" id="add-bot-btn">Add Bot</button>
+            </div>
+    
+            <div id="message-container"></div>
+    
+            <div class="main-card">
+                <div class="table-responsive mt-3">
+                    <table class="dashboard-table ">
+                        <thead>
+                            <tr>
+                                <th>Phone</th>
+                                <th>Status</th>
+                                <th>Run/Stop</th>
+                                <th>Settings</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bots-table-body">
+                            <tr>
+                                <td colspan="4" class="loading">Loading bots...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div id="message-format" style="display: none;">
+            <div class='main-card'>
+            <div class="dm-grid">
+                <div class="center-copy-btn">
+                    <button type="button" id="copy-reciver-name" class="copy-btn">{reciver name}</button>
+                    <button type="button" id="copy-sender-name" class="copy-btn">{sender name}</button>
+                </div>
+                
+                <div class="container-message-parts">
+                    <div class="part card">
+                        <div class='card-header'> Intros</div>
+                        <div class="list" id="start-list"></div>
+                        <div class="input-container">
+                            <textarea id="start-input" placeholder="Enter intro part..."></textarea>
+                            <button onclick="addPart('start')" class='btn-primary'>Add Start Part</button>
+                        </div>
+                    </div>
+                    <div class="part card">
+                        <div class='card-header'>Bodies</div>
+                        <div class="list" id="body-list"></div>
+                        <div class="input-container">
+                            <textarea id="body-input" placeholder="Enter body part..."></textarea>
+                            <button onclick="addPart('body')" class="btn-primary">Add Body Part</button>
+                        </div>
+                    </div>
+                    <div class="part card">
+                        <div class='card-header'>Outros</div>
+                        <div class="list" id="end-list"></div>
+                        <div class="input-container">
+                            <textarea id="end-input" placeholder="Enter outro part..."></textarea>
+                            <button onclick="addPart('end')" class="btn-primary">Add End Part</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+        <div id="leads-format" style="display: none;">
+            <div class='main-card'>
+                <div class="leads-grid">
+                    <div class="to-message-panel">
+                        {# <h3>To Message List</h3> #}
+                        <div class="to-message-controls">
+                            <button id="add-usernames" class="btn btn-primary">
+                                <i class="fas fa-user-plus"></i> Add Usernames
+                            </button>
+                            <div class="bot-filter-container">
+                                <label for="bot-filter">Filter by Bot:</label>
+                                <select id="bot-filter" class="form-control">
+                                    <option value="all">All Bots</option>
+                                </select>
+                            </div>
+                            <span id="username-count" class="badge badge-primary">0</span>
+                            <button id="delete-all-usernames" class="btn btn-danger">
+                                ✕ Delete All
+                            </button>
+                        </div>
+                        <div class="table-responsive mt-3">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 100% !important;" class="table-column-username">Username</th>
+                                        <th style="width: 100% !important;" class="table-column-name">First Name</th>
+                                        <th style="width: 100% !important;" class="table-column-bot">Bot</th>
+                                        <th style="width: 100% !important;" class="table-column-actions">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="usernames-table-body">
+                                    <!-- Usernames will be loaded here -->
+                                </tbody>
+                            </table>
+                            <div id="loading-spinner" style="display: none;">
+                                Loading more data...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bot Selection Modal for Leads -->
+        <div id="botSelectionModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4>Select Bot for Leads</h4>
+                    <span class="close" onclick="closeBotSelectionModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="bot-selection-options">
+                        <div class="option-group">
+                            <input type="radio" id="distribute-all" name="bot_selection" value="all" checked>
+                            <label for="distribute-all">Distribute equally across all bots</label>
+                        </div>
+                        <div class="option-group">
+                            <input type="radio" id="select-specific" name="bot_selection" value="specific">
+                            <label for="select-specific">Select specific bot</label>
+                        </div>
+                    </div>
+                    <div id="bot-dropdown-container" style="display: none;">
+                        <label for="bot-select">Choose Bot:</label>
+                        <select id="bot-select" class="form-control">
+                            <option value="">Select a bot...</option>
+                        </select>
+                    </div>
+                    <div class="file-upload-section">
+                        <label for="leads-file">Upload CSV File:</label>
+                        <input type="file" id="leads-file" accept=".csv" class="form-control">
+                        <small class="form-text text-muted">CSV should have username in first column and first name in second column</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeBotSelectionModal()">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="uploadLeadsWithBotSelection()">Upload Leads</button>
+                </div>
+            </div>
+        </div>
+        <div id="history-format" style="display: none;">
+            <div class='main-card'>
+                <div class="history-grid">
+                    <div class="history-panel">
+                        {# <h3>History Data</h3> #}
+                        <div class="history-controls">
+                            <button id="add-history-data" class="btn btn-primary">
+                                <i class="fas fa-file-upload"></i> Add History Data
+                            </button>
+                            <div class="bot-filter-container">
+                                <label for="history-bot-filter">Filter by Bot:</label>
+                                <select id="history-bot-filter" class="form-control">
+                                    <option value="all">All Bots</option>
+                                </select>
+                            </div>
+                            <span id="history-data-count" class="badge badge-primary">0</span>
+                            <button id="delete-all-history" class="btn btn-danger">
+                                ✕ Delete All
+                            </button>
+                        </div>
+                        <div class="table-responsive mt-3">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 60%">Username</th>
+                                        <th style="width: 20%">Bot</th>
+                                        <th style="width: 20%">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="history-data-table-body">
+                                    <!-- History data will be loaded here -->
+                                </tbody>
+                            </table>
+                            <div id="history-loading-spinner" style="display: none;">
+                                Loading more data...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bot Selection Modal for History -->
+        <div id="historyBotSelectionModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4>Select Bot for History Data</h4>
+                    <span class="close" onclick="closeHistoryBotSelectionModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="bot-selection-options">
+                        <div class="option-group">
+                            <input type="radio" id="history-distribute-all" name="history_bot_selection" value="all" checked>
+                            <label for="history-distribute-all">Distribute equally across all bots</label>
+                        </div>
+                        <div class="option-group">
+                            <input type="radio" id="history-select-specific" name="history_bot_selection" value="specific">
+                            <label for="history-select-specific">Select specific bot</label>
+                        </div>
+                    </div>
+                    <div id="history-bot-dropdown-container" style="display: none;">
+                        <label for="history-bot-select">Choose Bot:</label>
+                        <select id="history-bot-select" class="form-control">
+                            <option value="">Select a bot...</option>
+                        </select>
+                    </div>
+                    <div class="file-upload-section">
+                        <label for="history-file">Upload CSV File:</label>
+                        <input type="file" id="history-file" accept=".csv" class="form-control">
+                        <small class="form-text text-muted">CSV should have username in first column</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeHistoryBotSelectionModal()">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="uploadHistoryWithBotSelection()">Upload History</button>
+                </div>
+            </div>
+        </div>
+        <div id="botSettingsModal" class="settings-modal" style="display: none;">
+            <div class="settings-modal-content">
+                
+                <div class="modal-header">
+                    <h4 id="botName">Bot Name</h4>
+                    <p><strong>Phone ID:</strong> <span id="botPhoneId">-</span></p>
+                    <button class="btn btn-danger" onclick="closeBotSettingsModal()">&times;</button>
+                </div>
+    
+                <div class="top-bar">
+                    <label for="clone-id">Account Clone ID:</label>
+                    <input type="text" id="clone-id" placeholder="Enter clone ID">
+                    <button class="btn btn-primary" id="add-clone-btn">Add Account</button>
+                </div>
+    
+                <div class="ig-tabs">
+                    <!-- Tabs will be dynamically populated -->
+                </div>
+    
+                <div class="settings-card">
+                    <div id="settingsLoading" class="loading">
+                        <p>Loading bot settings...</p>
+                    </div>
+                    
+                    <div id="settingsContent" style="display: none;">                        
+                        <div id="accountDetails">
+                            <!-- Account details will be shown here when an account is selected -->
+                        </div>
+                        
+                        <form id="settingsForm">
+                            <div class="settings-grid">
+                                <div class="settings-group">
+                                    <div class="settings-label">Start Execution Between</div>
+                                    <div class="settings-inputs-time">
+                                        <input type="time" name="start_exec_from" id="start_exec_from">
+                                        <input type="time" name="start_exec_to" id="start_exec_to">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Stop Execution Between</div>
+                                    <div class="settings-inputs-time">
+                                        <input type="time" name="stop_exec_from" id="stop_exec_from">
+                                        <input type="time" name="stop_exec_to" id="stop_exec_to">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Wait Between Same Account Sessions (Hours)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="same_account_wait_min" id="same_account_wait_min" min="1" max="24">
+                                        <input type="number" name="same_account_wait_max" id="same_account_wait_max" min="1" max="24">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Wait Between Different Account Sessions (Min)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="diff_account_wait_min" id="diff_account_wait_min" min="1">
+                                        <input type="number" name="diff_account_wait_max" id="diff_account_wait_max" min="1">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Number of Sessions per Same Account (Daily)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="sessions_per_account_min" id="sessions_per_account_min" min="1">
+                                        <input type="number" name="sessions_per_account_max" id="sessions_per_account_max" min="1">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Session Duration (Min)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="session_duration_min" id="session_duration_min" min="1">
+                                        <input type="number" name="session_duration_max" id="session_duration_max" min="1">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Random Pause During Each Session (Min)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="pause_during_session_min" id="pause_during_session_min" min="1">
+                                        <input type="number" name="pause_during_session_max" id="pause_during_session_max" min="1">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Pause Probability (%)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="pause_probability_min" id="pause_probability_min" min="0" max="100">
+                                        <input type="number" name="pause_probability_max" id="pause_probability_max" min="0" max="100">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Pauses per Session</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="pauses_per_session_min" id="pauses_per_session_min" min="0">
+                                        <input type="number" name="pauses_per_session_max" id="pauses_per_session_max" min="0">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Browse IG when a Session Starts (Seconds)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="browse_ig_start_min" id="browse_ig_start_min" min="0">
+                                        <input type="number" name="browse_ig_start_max" id="browse_ig_start_max" min="0">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Browse IG Between Major Actions (Seconds)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="browse_ig_action_min" id="browse_ig_action_min" min="0">
+                                        <input type="number" name="browse_ig_action_max" id="browse_ig_action_max" min="0">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Browse IG Between Major Actions Probability (%)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="browse_ig_action_probability_min" id="browse_ig_action_probability_min" min="0" max="100">
+                                        <input type="number" name="browse_ig_action_probability_max" id="browse_ig_action_probability_max" min="0" max="100">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Typing Speed (chars/second)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="typing_speed_min" id="typing_speed_min" min="1">
+                                        <input type="number" name="typing_speed_max" id="typing_speed_max" min="1">
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                </div>
+
+                <div id="accountSettingsContainer" style="display: none;">
+                    <div class="account-info">
+                        <p><strong>Clone ID:</strong> <span id="accountCloneId">-</span></p>
+                        <div class="account-actions" style="margin-top: 10px;">
+                            <button type="button" class="btn btn-sm btn-warning" onclick="changeCloneId()">Change Clone ID</button>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="deleteCurrentAccount()">Delete Account</button>
+                        </div>
+                    </div>
+                
+                    <form id="accountSettingsForm">
+                        <div class="settings-card">
+                            <div class="section-title">Follow</div>
+                            <div class="settings-grid">
+                                <div class="settings-group">
+                                    <div class="settings-label">Follow per Session Limit</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="follow_per_session_min" id="follow_per_session_min">
+                                        <input type="number" name="follow_per_session_max" id="follow_per_session_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Follow per Hour Limit</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="follow_per_hour_min" id="follow_per_hour_min">
+                                        <input type="number" name="follow_per_hour_max" id="follow_per_hour_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Follow per Day Limit</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="follow_per_day_min" id="follow_per_day_min">
+                                        <input type="number" name="follow_per_day_max" id="follow_per_day_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Delay Between Follows (Seconds)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="follow_delay_min" id="follow_delay_min">
+                                        <input type="number" name="follow_delay_max" id="follow_delay_max">
+                                    </div>
+                                </div>
+                            </div>
+                
+                            <div class="section-title">Likes</div>
+                            <div class="settings-grid">
+                                <div class="settings-group">
+                                    <div class="settings-label">Likes per Session Limit</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="likes_per_session_min" id="likes_per_session_min">
+                                        <input type="number" name="likes_per_session_max" id="likes_per_session_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Likes per Hour Limit</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="likes_per_hour_min" id="likes_per_hour_min">
+                                        <input type="number" name="likes_per_hour_max" id="likes_per_hour_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Likes per Day Limit</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="likes_per_day_min" id="likes_per_day_min">
+                                        <input type="number" name="likes_per_day_max" id="likes_per_day_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Likes per Target Profile</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="likes_per_target_profile_min" id="likes_per_target_profile_min">
+                                        <input type="number" name="likes_per_target_profile_max" id="likes_per_target_profile_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Liking Target Profile Posts Probability</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="liking_target_profile_posts_probability_min" id="liking_target_profile_posts_probability_min">
+                                        <input type="number" name="liking_target_profile_posts_probability_max" id="liking_target_profile_posts_probability_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Delay Between Target Profile Posts Likes (Seconds)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="delay_between_target_profile_posts_likes_min" id="delay_between_target_profile_posts_likes_min">
+                                        <input type="number" name="delay_between_target_profile_posts_likes_max" id="delay_between_target_profile_posts_likes_max">
+                                    </div>
+                                </div>
+                            </div>
+                
+                            <div class="section-title">DMs</div>
+                            <div class="settings-grid">
+                                <div class="settings-group">
+                                    <div class="settings-label">DMs per Session Limit</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="dms_per_session_min" id="dms_per_session_min">
+                                        <input type="number" name="dms_per_session_max" id="dms_per_session_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">DMs per Hour Limit</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="dms_per_hour_min" id="dms_per_hour_min">
+                                        <input type="number" name="dms_per_hour_max" id="dms_per_hour_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">DMs per Day Limit</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="dms_per_day_min" id="dms_per_day_min">
+                                        <input type="number" name="dms_per_day_max" id="dms_per_day_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Delay Between DMs (Seconds)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="dms_delay_min" id="dms_delay_min">
+                                        <input type="number" name="dms_delay_max" id="dms_delay_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">DM Only Followers</div>
+                                    <div class="settings-inputs">
+                                        <input type="checkbox" name="dm_only_followers" id="dm_only_followers" style="width: 20px; height: 20px;">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Profile to Take Highlight From</div>
+                                    <div class="settings-inputs">
+                                        <input type="text" name="profile_to_take_highlight_from" id="profile_to_take_highlight_from" placeholder="Enter username or link">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Highlight Number</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="highlight_number" id="highlight_number">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Change Highlight Number</div>
+                                    <div class="settings-inputs">
+                                        <input type="checkbox" name="changehighlightnumber" id="changehighlightnumber" style="width: 20px; height: 20px;">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Text DM Sent Probability (After Highlight)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="text_dm_sent_probability_min" id="text_dm_sent_probability_min">
+                                        <input type="number" name="text_dm_sent_probability_max" id="text_dm_sent_probability_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Long-Term Delay Between Highlight and Text DM (Hours)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="long_term_delay_highlight_text_dm_min" id="long_term_delay_highlight_text_dm_min">
+                                        <input type="number" name="long_term_delay_highlight_text_dm_max" id="long_term_delay_highlight_text_dm_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Short-Term Delay Probability (After Highlight)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="short_term_delay_probability_min" id="short_term_delay_probability_min">
+                                        <input type="number" name="short_term_delay_probability_max" id="short_term_delay_probability_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Short-Term Delay Between Highlight and Text DM (Seconds)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="short_term_delay_highlight_text_dm_min" id="short_term_delay_highlight_text_dm_min">
+                                        <input type="number" name="short_term_delay_highlight_text_dm_max" id="short_term_delay_highlight_text_dm_max">
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-label">Long-Term Delay Probability (After Highlight)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="long_term_delay_probability_min" id="long_term_delay_probability_min">
+                                        <input type="number" name="long_term_delay_probability_max" id="long_term_delay_probability_max">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="browse-card">
+                                <div class="section-title">Browse IG Actions</div>
+                                <div class="settings-grid">
+                                    <div class="settings-group">
+                                        <div class="settings-label">Watch Stories Probability</div>
+                                        <div class="settings-inputs">
+                                            <input type="number" name="watch_stories_probability_min" id="watch_stories_probability_min">
+                                            <input type="number" name="watch_stories_probability_max" id="watch_stories_probability_max">
+                                        </div>
+                                    </div>
+                                    <div class="settings-group">
+                                        <div class="settings-label">Watch Reels Probability</div>
+                                        <div class="settings-inputs">
+                                            <input type="number" name="watch_reels_probability_min" id="watch_reels_probability_min">
+                                            <input type="number" name="watch_reels_probability_max" id="watch_reels_probability_max">
+                                        </div>
+                                    </div>
+                                    <div class="settings-group">
+                                        <div class="settings-label">Scroll Feed Probability</div>
+                                        <div class="settings-inputs">
+                                            <input type="number" name="scroll_feed_probability_min" id="scroll_feed_probability_min">
+                                            <input type="number" name="scroll_feed_probability_max" id="scroll_feed_probability_max">
+                                        </div>
+                                    </div>
+                                    <div class="settings-group">
+                                        <div class="settings-label">Scroll Explore Page Probability</div>
+                                        <div class="settings-inputs">
+                                            <input type="number" name="scroll_explore_page_probability_min" id="scroll_explore_page_probability_min">
+                                            <input type="number" name="scroll_explore_page_probability_max" id="scroll_explore_page_probability_max">
+                                        </div>
+                                    </div>
+                                    <div class="settings-group">
+                                        <div class="settings-label">Like Probability during Browse IG Actions</div>
+                                        <div class="settings-inputs">
+                                            <input type="number" name="like_probability_during_browse_min" id="like_probability_during_browse_min">
+                                            <input type="number" name="like_probability_during_browse_max" id="like_probability_during_browse_max">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div> <!-- End of settings-card -->
+                    </form>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-danger" onclick="deleteBotConfirm()">Delete Bot</button>
+                    <div>
+                        <button type="button" class="btn btn-secondary" onclick="closeBotSettingsModal()">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="saveBotSettings()">Save Settings</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+<script type="module"  src="{{ url_for('static', filename='js/after_login_scripts.js') }}"></script>
+<div id="toaster-container" class="toaster-container"></div>
+<div class="custom-confirm-modal" id="confirmModal" style="display: none;">
+    <div class="confirm-content">
+        <h4 class="confirm-title">Confirm Action</h4>
+        <p id="confirmMessage"></p>
+        <div class="confirm-buttons">
+            <button class="btn-cancel" id="cancelButton">Cancel</button>
+            <button class="btn-confirm" id="confirmButton">Confirm</button>
+        </div>
+    </div>
+</div>
+</body>
+</html> 

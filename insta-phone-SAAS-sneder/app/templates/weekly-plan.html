@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weekly Plan</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/after_login_styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/weekly-plan.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-icon" title="Phones" onclick="window.location.href='/'">
+            <i class="fas fa-mobile-alt"></i>
+        </div>
+        <div class="sidebar-icon" title="Messages" onclick="window.location.href='/'">
+            <i class="fas fa-paper-plane"></i>
+        </div>
+        <div class="sidebar-icon active" title="Weekly Plan">
+            <i class="fas fa-calendar-week"></i>
+        </div>
+        <div class="sidebar-icon" title="Analytics" onclick="window.location.href='/analysis'">
+            <i class="fas fa-chart-bar"></i>
+        </div>
+        <div class="sidebar-icon logout-icon" title="Logout">
+            <a href="{{ url_for('auth.logout') }}"><i class="fas fa-sign-out-alt logout-icon"></i></a>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <!-- Top bar -->
+        <div class="plan-top-bar">
+            <div class="d-flex align-items-center gap-3">
+                <select id="proxySelector" class="form-select form-select-sm" style="width: 180px;">
+                    <option value="1">Proxy Group 1</option>
+                </select>
+                <div class="week-nav">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="navigateWeek(-1)">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <span id="weekLabel" class="mx-2">Week 12, 2026</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="navigateWeek(1)">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-primary" onclick="generatePlan()">
+                    <i class="fas fa-magic me-1"></i>Generate
+                </button>
+                <button class="btn btn-sm btn-outline-warning" onclick="regeneratePlan()">
+                    <i class="fas fa-redo me-1"></i>Regen from Today
+                </button>
+                <button class="btn btn-sm btn-outline-info" onclick="downloadJSON()">
+                    <i class="fas fa-download me-1"></i>JSON
+                </button>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <ul class="nav nav-tabs mb-3" role="tablist">
+            <li class="nav-item">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#todayTab">Today</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#weekTab">Week Overview</button>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+            <!-- Today's Timeline -->
+            <div class="tab-pane fade show active" id="todayTab">
+                <div class="timeline-layout">
+                    <div class="timeline-container">
+                        <div class="hour-labels" id="hourLabels"></div>
+                        <div class="timeline-track" id="timelineTrack">
+                            <div class="time-marker" id="timeMarker"></div>
+                        </div>
+                    </div>
+                    <!-- Warmup summary panel -->
+                    <div id="warmup-summary-panel" class="warmup-summary-panel" style="display: none;">
+                        <h6 class="text-muted mb-3">WARMUP STATUS</h6>
+                        <div id="warmup-cards-container"></div>
+                    </div>
+                </div>
+                <!-- Empty state -->
+                <div id="emptyState" class="empty-state" style="display: none;">
+                    <i class="fas fa-calendar-times fa-3x mb-3"></i>
+                    <p>No plan for this week</p>
+                    <button class="btn btn-primary" onclick="generatePlan()">Generate This Week</button>
+                </div>
+            </div>
+
+            <!-- Week Overview -->
+            <div class="tab-pane fade" id="weekTab">
+                <div class="week-grid" id="weekGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session Detail Modal -->
+    <div class="modal fade" id="sessionDetailModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">Session Details</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="modalBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/weekly-plan.js') }}"></script>
+</body>
+</html>
