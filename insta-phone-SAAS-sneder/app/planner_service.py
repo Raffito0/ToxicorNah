@@ -14,14 +14,25 @@ from .models import WeeklyPlan, SessionLog, BotAccount, Bot, Phone
 
 logger = logging.getLogger(__name__)
 
-# Planner imports (available after sys.path setup in __init__.py)
-try:
-    from planner.scheduler import generate_weekly_plan as planner_generate
-    from planner.personality import get_account_state
-    PLANNER_AVAILABLE = True
-except ImportError:
-    PLANNER_AVAILABLE = False
-    logger.warning("Planner module not available -- check sys.path setup")
+# Planner imports are lazy -- sys.path is set during create_app()
+_planner_generate = None
+_planner_get_account_state = None
+
+
+def _ensure_planner_imports():
+    """Lazy import of planner module (sys.path set during create_app)."""
+    global _planner_generate, _planner_get_account_state
+    if _planner_generate is not None:
+        return True
+    try:
+        from planner.scheduler import generate_weekly_plan as pg
+        from planner.personality import get_account_state as gas
+        _planner_generate = pg
+        _planner_get_account_state = gas
+        return True
+    except ImportError:
+        logger.warning("Planner module not available -- check sys.path setup")
+        return False
 
 EASTERN = ZoneInfo("US/Eastern")
 UTC = ZoneInfo("UTC")
@@ -122,7 +133,7 @@ def generate_weekly_plan(proxy_id, week_date=None):
         proxy_id: Proxy group ID
         week_date: Any date in the target week (defaults to today)
     """
-    if not PLANNER_AVAILABLE:
+    if not _ensure_planner_imports():
         raise ValueError("Planner module not available")
 
     accounts = _get_accounts_for_proxy(proxy_id)
@@ -136,7 +147,7 @@ def generate_weekly_plan(proxy_id, week_date=None):
             state[acc["name"]] = acc["personality_state"]
 
     # Generate plan
-    plan = planner_generate(accounts=accounts, start_date=week_date, state=state)
+    plan = _planner_generate(accounts=accounts, start_date=week_date, state=state)
     plan_dict = plan.to_dict()
 
     # Translate field names in all sessions
@@ -320,7 +331,11 @@ def update_warmup(account_name, action, **kwargs):
     else:
         raise ValueError(f"Unknown warmup action: {action}")
 
-    ba.warmup_json = ws
+    # Force SQLAlchemy to detect the change (JSON column mutation)
+    import copy
+    ba.warmup_json = copy.deepcopy(ws)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(ba, "warmup_json")
     db.session.commit()
 
     return get_warmup_status(account_name)
