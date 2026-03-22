@@ -1,0 +1,29 @@
+{
+  "plugin_root": "C:\\Users\\rafca\\.claude\\plugins\\cache\\piercelamb-plugins\\deep-implement\\0.2.1",
+  "sections_dir": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\docs\\unified-dashboard\\04-unified-planner-warmup\\sections",
+  "target_dir": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\insta-phone-SAAS-sneder",
+  "state_dir": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\docs\\unified-dashboard\\04-unified-planner-warmup\\implementation",
+  "git_root": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah",
+  "commit_style": "conventional",
+  "test_command": "uv run pytest",
+  "sections": [
+    "section-01-planner-parameterization",
+    "section-02-warmup-interleaving",
+    "section-03-planner-service",
+    "section-04-api-routes",
+    "section-05-timeline-frontend",
+    "section-06-warmup-panel",
+    "section-07-executor-db-integration",
+    "section-08-status-polling"
+  ],
+  "sections_state": {},
+  "pre_commit": {
+    "present": false,
+    "type": "none",
+    "config_file": null,
+    "native_hook": null,
+    "may_modify_files": false,
+    "detected_formatters": []
+  },
+  "created_at": "2026-03-22T04:22:47.978291+00:00"
+}
