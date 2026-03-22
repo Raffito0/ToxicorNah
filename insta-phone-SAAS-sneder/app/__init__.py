@@ -135,11 +135,13 @@ def create_app():
     from .proxy_routes import proxy_bp
     from .planner_routes import planner_bp
     from .personality_routes import personality_bp
+    from .timing_routes import timing_bp_api
     app.register_blueprint(auth)
     app.register_blueprint(analysis)
     app.register_blueprint(proxy_bp)
     app.register_blueprint(planner_bp)
     app.register_blueprint(personality_bp)
+    app.register_blueprint(timing_bp_api)
 
     # Start proxy health-check thread (skip in tests)
     if not app.config.get('TESTING'):
