@@ -433,3 +433,20 @@ def get_gemini_analytics():
     except Exception as e:
         print(f"Gemini analytics error: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# ─── Worker Live State (section-06 of 06-analytics) ────────
+
+@analysis.route('/api/bots/<int:bot_id>/live-state', methods=['GET'])
+@login_required
+def get_live_state(bot_id):
+    """Return live worker state for a bot, or 404 if no active session."""
+    bot = Bot.query.get_or_404(bot_id)
+    if bot.user_id != current_user.id:
+        abort(403)
+
+    from .tiktok_worker import get_worker_status
+    status = get_worker_status(bot_id)  # drains events internally
+    if status is None:
+        return jsonify({"error": "No active session"}), 404
+    return jsonify(status)

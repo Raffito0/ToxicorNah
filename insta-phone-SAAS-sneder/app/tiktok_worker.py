@@ -5,10 +5,13 @@ context, loads config from DB, monkey-patches phone-bot config, and executes
 a TikTok browse session.
 """
 import asyncio
+import copy
 import logging
+import queue
 import threading
 import time
 import traceback
+from collections import deque
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -17,11 +20,66 @@ logger = logging.getLogger(__name__)
 _worker_status = {}
 _status_lock = threading.Lock()
 
+# Event queues per bot — non-blocking producer, drained into status deque
+_event_queues = {}
+
+
+def _clamp(value, lo, hi):
+    """Clamp a value between lo and hi."""
+    return max(lo, min(hi, value))
+
+
+def push_event(bot_id, event_type, detail):
+    """Non-blocking push of an event. Creates queue if needed."""
+    q = _event_queues.setdefault(bot_id, queue.Queue(maxsize=50))
+    try:
+        q.put_nowait({
+            "type": event_type,
+            "detail": detail,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        })
+    except queue.Full:
+        pass  # drop oldest-ish — queue is bounded
+
+
+def _drain_events(bot_id):
+    """Move queued events into the status deque (maxlen=20)."""
+    q = _event_queues.get(bot_id)
+    if not q:
+        return
+    # Drain queue outside lock
+    items = []
+    while not q.empty():
+        try:
+            items.append(q.get_nowait())
+        except queue.Empty:
+            break
+    if not items:
+        return
+    with _status_lock:
+        status = _worker_status.get(bot_id)
+        if not status:
+            return
+        events = status.get("_events_deque")
+        if events is None:
+            events = deque(maxlen=20)
+            status["_events_deque"] = events
+        for item in items:
+            events.append(item)
+        status["recent_events"] = list(events)
+
 
 def get_worker_status(bot_id):
-    """Thread-safe read of worker status. Returns None if bot not running."""
+    """Thread-safe read of worker status. Returns deep copy or None."""
+    _drain_events(bot_id)
     with _status_lock:
-        return _worker_status.get(bot_id)
+        status = _worker_status.get(bot_id)
+        if status is None:
+            return None
+        result = copy.deepcopy(status)
+    # Remove internal deque (not serializable)
+    result.pop("_events_deque", None)
+    return result
 
 
 def _update_status(bot_id, **kwargs):
@@ -33,9 +91,62 @@ def _update_status(bot_id, **kwargs):
 
 
 def _clear_status(bot_id):
-    """Remove bot from status dict on exit."""
+    """Remove bot from status dict and event queue on exit."""
     with _status_lock:
         _worker_status.pop(bot_id, None)
+        _event_queues.pop(bot_id, None)
+
+
+# ── Gauge Polling Timer ──────────────────────────────────────
+
+_gauge_stop_events = {}  # bot_id → threading.Event
+
+
+def _start_gauge_poller(bot_id, human):
+    """Start background thread that reads HumanEngine state every 5s."""
+    stop_event = threading.Event()
+    _gauge_stop_events[bot_id] = stop_event
+
+    def _poll():
+        phase_start = time.time()
+        while not stop_event.wait(5.0):
+            try:
+                boredom = _clamp(getattr(getattr(human, 'boredom', None), 'level', 0.0), 0.0, 1.0)
+                fatigue = _clamp(getattr(getattr(human, 'fatigue', None), 'fatigue_level', 0.0), 0.0, 1.0)
+                mood = getattr(human, 'mood', None)
+                mood_dict = {}
+                if mood:
+                    mood_dict = {
+                        'energy_mult': getattr(mood, 'energy', 1.0),
+                        'social_mult': getattr(mood, 'social', 1.0),
+                        'patience_mult': getattr(mood, 'patience', 1.0),
+                    }
+                energy_val = 0.6
+                if mood:
+                    energy_val += getattr(mood, 'energy', 0.0) * 0.4 + getattr(mood, 'patience', 0.0) * 0.2
+                energy = _clamp(energy_val, 0.0, 1.0)
+
+                _update_status(
+                    bot_id,
+                    boredom=boredom,
+                    fatigue=fatigue,
+                    energy=energy,
+                    mood=mood_dict,
+                    phase_elapsed=int(time.time() - phase_start),
+                )
+                _drain_events(bot_id)
+            except Exception:
+                pass  # poller must not crash
+
+    t = threading.Thread(target=_poll, daemon=True)
+    t.start()
+
+
+def _stop_gauge_poller(bot_id):
+    """Stop the gauge polling thread for a bot."""
+    stop_event = _gauge_stop_events.pop(bot_id, None)
+    if stop_event:
+        stop_event.set()
 
 
 def tiktok_worker(bot_id, user_id):
@@ -131,6 +242,9 @@ def tiktok_worker(bot_id, user_id):
             human = HumanEngine(account_name)
             tiktok_bot = TikTokBot(adb, human)
 
+            # Start gauge poller for live state
+            _start_gauge_poller(bot_id, human)
+
             # Check should_stop before starting session
             db.session.refresh(bot)
             if bot.should_stop:
@@ -192,6 +306,9 @@ def tiktok_worker(bot_id, user_id):
             _update_status(bot_id, phase='Error', error=error_msg)
 
         finally:
+            # Stop gauge poller
+            _stop_gauge_poller(bot_id)
+
             # Always try to close app
             try:
                 if 'tiktok_bot' in locals():
