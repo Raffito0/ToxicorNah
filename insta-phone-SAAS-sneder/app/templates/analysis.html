@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics Dashboard</title>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/after_login_styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/analysis.css') }}">
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-icon" title="Phones" onclick="window.location.href='/'">
+            <i class="fas fa-mobile-alt"></i>
+        </div>
+        <div class="sidebar-icon" title="Messages" onclick="window.location.href='/'">
+            <i class="fas fa-paper-plane"></i>
+        </div>
+        <div class="sidebar-icon" title="Users" onclick="window.location.href='/'">
+            <i class="fas fa-users"></i>
+        </div>
+        <div class="sidebar-icon" title="History" onclick="window.location.href='/'">
+            <i class="fas fa-history"></i>
+        </div>
+        <div class="sidebar-icon active" title="Analytics">
+            <i class="fas fa-chart-bar"></i>
+        </div>
+        <div class="sidebar-icon logout-icon" title="Logout">
+            <a href="{{ url_for('auth.logout') }}"><i class="fas fa-sign-out-alt logout-icon"></i></a>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-left">
+                    <h1><i class="fas fa-chart-bar"></i> Analytics Dashboard</h1>
+                    <p>Monitor your bot performance and engagement metrics</p>
+                </div>
+                
+                <div class="header-right">
+                    <div class="filter-controls">
+                        <select id="botFilter" class="form-select">
+                            <option value="all">All Bots</option>
+                        </select>
+                        
+                        <select id="timeFilter" class="form-select">
+                            <option value="7">Last 7 Days</option>
+                            <option value="14">Last 14 Days</option>
+                            <option value="30">Last 30 Days</option>
+                            <option value="90">Last 90 Days</option>
+                        </select>
+                        
+                        <button id="refreshBtn" class="btn btn-primary">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loading Spinner -->
+            <div id="loadingSpinner" class="loading-spinner">
+                <div class="spinner"></div>
+                <p>Loading analytics data...</p>
+            </div>
+
+            <!-- Analytics Content -->
+            <div id="analyticsContent" class="analytics-content" style="display: none;">
+                
+                <!-- Overview Cards -->
+                <div class="overview-cards">
+                    <div class="overview-card">
+                        <div class="card-icon blue">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3 id="totalBots">-</h3>
+                            <p>Total Bots</p>
+                            <small id="activeBots">- active</small>
+                        </div>
+                    </div>
+                    
+                    <div class="overview-card">
+                        <div class="card-icon green">
+                            <i class="fas fa-user-friends"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3 id="totalAccounts">-</h3>
+                            <p>Bot Accounts</p>
+                            <small id="accountsStatus">Loading...</small>
+                        </div>
+                    </div>
+                    
+                    <div class="overview-card">
+                        <div class="card-icon orange">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3 id="totalLeads">-</h3>
+                            <p>Total Leads</p>
+                            <small id="conversionRate">- conversion</small>
+                        </div>
+                    </div>
+                    
+                    <div class="overview-card">
+                        <div class="card-icon purple">
+                            <i class="fas fa-eye"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3 id="totalHighlights">-</h3>
+                            <p>Highlights Sent</p>
+                            <small id="highlightSuccess">- highlight views</small>
+                        </div>
+                    </div>
+                    
+                    <div class="overview-card">
+                        <div class="card-icon red">
+                            <i class="fas fa-comment"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3 id="totalTextMessages">-</h3>
+                            <p>Text Messages</p>
+                            <small id="messageSuccess">- success rate</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Row -->
+                <div class="charts-row">
+                    <!-- Daily Activity Chart -->
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-line"></i> Daily Activity</h3>
+                            <p>Messages and follows over time</p>
+                        </div>
+                        <canvas id="dailyActivityChart"></canvas>
+                    </div>
+                    
+                    <!-- Follow Success Chart -->
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-pie"></i> Follow Success Rate</h3>
+                            <p>Follow request outcomes</p>
+                        </div>
+                        <canvas id="followSuccessChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- TikTok Analytics Row -->
+                <div class="tiktok-charts-row">
+                    <!-- Engagement Chart -->
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <h3><i class="fab fa-tiktok"></i> TikTok Engagement</h3>
+                            <p>Likes, comments, follows, profile visits, searches</p>
+                        </div>
+                        <canvas id="engagementChart"></canvas>
+                    </div>
+
+                    <!-- Videos Posted Chart -->
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-video"></i> Videos Posted</h3>
+                            <p>Post outcomes by day</p>
+                        </div>
+                        <canvas id="videosPostedChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Phase + Follow-Back Row -->
+                <div class="tiktok-charts-row">
+                    <!-- Phase Distribution -->
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-layer-group"></i> Session Phase Distribution</h3>
+                            <p>Time spent per phase by account</p>
+                        </div>
+                        <canvas id="phaseDistributionChart"></canvas>
+                    </div>
+
+                    <!-- Follow-Back Histogram -->
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-user-plus"></i> Follow-Back Scores</h3>
+                            <p>Niche score distribution of evaluated profiles</p>
+                        </div>
+                        <canvas id="followBackChart"></canvas>
+                        <div id="followBackStats" class="stat-pills"></div>
+                    </div>
+                </div>
+
+                <!-- Gemini Usage Row -->
+                <div class="gemini-stats-row">
+                    <div class="chart-container" style="flex: 2;">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-brain"></i> Gemini API Usage</h3>
+                            <p>Daily calls, errors, and cost</p>
+                        </div>
+                        <canvas id="geminiUsageChart"></canvas>
+                    </div>
+                    <div class="gemini-stat-boxes">
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fas fa-dollar-sign"></i></div>
+                            <div class="stat-content">
+                                <h4 id="geminiTotalCost">$0</h4>
+                                <p>Total Cost</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: linear-gradient(135deg, #ef4444, #dc2626);"><i class="fas fa-exclamation-triangle"></i></div>
+                            <div class="stat-content">
+                                <h4 id="geminiErrorRate">0%</h4>
+                                <p>Error Rate</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);"><i class="fas fa-star"></i></div>
+                            <div class="stat-content">
+                                <h4 id="geminiTopType">-</h4>
+                                <p>Top Call Type</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance Tables Row -->
+                <div class="tables-row">
+                    <!-- Top Performing Accounts -->
+                    <div class="table-container">
+                        <div class="table-header">
+                            <h3><i class="fas fa-trophy"></i> Top Performing Accounts</h3>
+                            <p>Most active bot accounts</p>
+                        </div>
+                        <div class="table-wrapper">
+                            <table id="topAccountsTable" class="performance-table">
+                                <thead>
+                                    <tr>
+                                        <th>Account</th>
+                                        <th>Bot</th>
+                                        <th>Total Messages</th>
+                                        <th>Daily Messages</th>
+                                        <th>Status</th>
+                                        <th>Last Active</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Populated by JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Bot Performance Comparison -->
+                    <div class="table-container">
+                        <div class="table-header">
+                            <h3><i class="fas fa-robot"></i> Bot Performance</h3>
+                            <p>Performance comparison across bots</p>
+                        </div>
+                        <div class="table-wrapper">
+                            <table id="botPerformanceTable" class="performance-table">
+                                <thead>
+                                    <tr>
+                                        <th>Bot Name</th>
+                                        <th>Status</th>
+                                        <th>Accounts</th>
+                                        <th>Active</th>
+                                        <th>Total Messages</th>
+                                        <th>Leads</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Populated by JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Message Stats Row -->
+                <div class="stats-row">
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-eye"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h4 id="highlightsSent">-</h4>
+                            <p>Highlights Sent</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-comment"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h4 id="textMessagesSent">-</h4>
+                            <p>Text Messages</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h4 id="pendingMessages">-</h4>
+                            <p>Pending Messages</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-percentage"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h4 id="messageConversion">-%</h4>
+                            <p>Conversion Rate</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Error Message -->
+            <div id="errorMessage" class="error-message" style="display: none;">
+                <div class="error-content">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3>Failed to Load Analytics</h3>
+                    <p id="errorText">Unable to fetch analytics data. Please try again.</p>
+                    <button id="retryBtn" class="btn btn-primary">
+                        <i class="fas fa-redo"></i> Retry
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom JavaScript -->
+    <script src="{{ url_for('static', filename='js/analysis.js') }}"></script>
+</body>
+</html>
