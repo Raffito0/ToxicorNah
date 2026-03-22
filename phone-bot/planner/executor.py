@@ -223,7 +223,9 @@ class SessionExecutor:
         self._running = False
         self._pending_record = None
         self._dry_run = False
+        self._account_db_ids = {}  # account_name -> bot_account.id (loaded from DB)
         self._load_warmup_state()
+        self._load_account_db_ids()
 
     # --- Warmup State Persistence ------------------------------------------
 
@@ -243,6 +245,21 @@ class SessionExecutor:
         with open(tmp_path, "w") as f:
             json.dump(data, f, indent=2)
         os.replace(tmp_path, WARMUP_STATE_FILE)
+
+    def _load_account_db_ids(self):
+        """Load account_name -> bot_account.id mapping from dashboard DB."""
+        if not _db_available():
+            return
+        try:
+            conn = _get_db()
+            rows = conn.execute("SELECT id, username FROM bot_account").fetchall()
+            conn.close()
+            for row in rows:
+                self._account_db_ids[row[1]] = row[0]
+            if self._account_db_ids:
+                log.info("Loaded %d account DB IDs for session logging", len(self._account_db_ids))
+        except Exception as e:
+            log.debug("Could not load account DB IDs: %s", e)
 
     def init_warmup(self, account_name: str, platform: str, phone_id: int,
                     niche_keywords: list[str] = None):
@@ -343,18 +360,25 @@ class SessionExecutor:
     def load_weekly_plan(self, week_iso: str = None) -> dict | None:
         """Load the weekly plan JSON for the given week.
         week_iso: e.g. '2026-W09'. If None, uses current week.
+
+        Tries dashboard DB first, then JSON files, then auto-generate.
         """
+        # Try dashboard DB first
+        db_plan = _load_plan_from_db()
+        if db_plan:
+            log.info("Loaded plan from dashboard DB")
+            return db_plan
+
         if not week_iso:
             today = _today_et()
             week_iso = f"{today.year}-W{today.isocalendar()[1]:02d}"
 
         filename = f"weekly_plan_{week_iso}.json"
 
-        # Check multiple locations
+        # Check multiple locations (JSON file fallback)
         search_paths = [
             os.path.join(config.PLANS_DIR, filename),
             os.path.join(config.BASE_DIR, "plans", filename),
-            # Also check the original Weekly Plan output dir
             os.path.join(os.path.expanduser("~"), "Downloads", "Weekly & Daily Plan", "output", filename),
         ]
 
@@ -362,11 +386,11 @@ class SessionExecutor:
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     plan = json.load(f)
-                log.info("Loaded plan: %s", path)
+                log.info("Loaded plan from file: %s", path)
                 return plan
 
-        # No plan found — auto-generate it
-        log.info("No plan found for %s — generating automatically...", week_iso)
+        # No plan found -- auto-generate it
+        log.info("No plan found for %s -- generating automatically...", week_iso)
         plan = self._auto_generate_plan()
         if plan:
             return plan
@@ -491,12 +515,17 @@ class SessionExecutor:
         session_type = session.get("session_type", "normal")
         total_duration = session.get("total_duration_minutes", 15)
 
-        session_id = f"{account}_{uuid.uuid4().hex[:8]}"
+        # Use deterministic session_id from plan if available, else generate
+        session_id = session.get("session_id", f"{account}_{uuid.uuid4().hex[:8]}")
 
         post_scheduled = session.get("post_scheduled", False)
 
         log.info("=== Session: %s | Phone %d | %s | %s | %d min ===",
                  account, phone_id, platform, session_type, total_duration)
+
+        # Log session start to dashboard DB
+        _log_session_start_db(session_id, self._account_db_ids.get(account, 0),
+                              session_type, dry_run=self._dry_run)
 
         # Log session start
         self._monitor_event(phone_id, account, session_id, "session_start",
@@ -609,6 +638,7 @@ class SessionExecutor:
                 )
             except Exception:
                 pass
+            _log_session_end_db(session_id, success=False, error_message="session timeout")
             human.end_session()
             return "timeout"
 
@@ -627,6 +657,7 @@ class SessionExecutor:
                 )
             except Exception:
                 pass
+            _log_session_end_db(session_id, success=False, error_message=f"device lost: {e}")
             human.end_session()
             return "device_lost"
 
@@ -666,6 +697,10 @@ class SessionExecutor:
             )
         except Exception:
             pass
+
+        # Log success to dashboard DB
+        _log_session_end_db(session_id, success=True,
+                            post_outcome=session.get("post_outcome"))
 
         human.end_session()
         log.info("=== Session complete: %s ===", account)
