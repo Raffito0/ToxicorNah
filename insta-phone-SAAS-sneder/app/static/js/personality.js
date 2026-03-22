@@ -330,3 +330,77 @@ async function saveNiche() {
         console.error('Failed to save niche:', e);
     }
 }
+
+
+// ── Session Phase Display (section-06) ────────────────────────
+
+const SESSION_PHASES = {
+    arrival:  { duration: [2, 3],  color: '#4a6fa5', actions: { 'FYP Scroll': 93, 'Like': 3, 'Inbox': 3, 'Other': 1 } },
+    warmup:   { duration: [3, 5],  color: '#e8a838', actions: { 'FYP Scroll': 77, 'Like': 6, 'Comment': 2, 'Search': 4, 'Follow': 1, 'Profile': 3, 'Other': 7 } },
+    peak:     { duration: [7, 12], color: '#e05555', actions: { 'FYP Scroll': 69, 'Like': 6, 'Comment': 4, 'Search': 5, 'Follow': 2, 'Profile': 5, 'Other': 9 } },
+    fatigue:  { duration: [5, 10], color: '#7c6bbf', actions: { 'FYP Scroll': 85, 'Like': 5, 'Comment': 1, 'Search': 2, 'Follow': 0, 'Profile': 2, 'Other': 5 } },
+    exit:     { duration: [2, 3],  color: '#5a8a6a', actions: { 'FYP Scroll': 94, 'Like': 4, 'Comment': 0, 'Search': 0, 'Follow': 0, 'Profile': 1, 'Other': 1 } },
+};
+
+
+function renderSessionPhases() {
+    const bar = document.getElementById('phaseBar');
+    const durations = document.getElementById('phaseDurations');
+    const details = document.getElementById('phaseDetails');
+    if (!bar) return;
+
+    const totalMid = Object.values(SESSION_PHASES).reduce((s, p) => s + (p.duration[0] + p.duration[1]) / 2, 0);
+
+    bar.innerHTML = '';
+    durations.innerHTML = '';
+
+    for (const [name, phase] of Object.entries(SESSION_PHASES)) {
+        const mid = (phase.duration[0] + phase.duration[1]) / 2;
+        const pct = (mid / totalMid * 100).toFixed(1);
+
+        // Bar segment
+        const seg = document.createElement('div');
+        seg.style.cssText = `width:${pct}%; background:${phase.color}; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:opacity 0.2s; font-size:0.7rem; color:#fff; text-transform:capitalize;`;
+        seg.textContent = name;
+        seg.onmouseenter = () => { seg.style.opacity = '0.8'; };
+        seg.onmouseleave = () => { seg.style.opacity = '1'; };
+        seg.onclick = () => showPhaseDetails(name, phase);
+        bar.appendChild(seg);
+
+        // Duration label
+        const label = document.createElement('div');
+        label.style.cssText = `width:${pct}%; text-align:center;`;
+        label.textContent = `${phase.duration[0]}-${phase.duration[1]}m`;
+        durations.appendChild(label);
+    }
+}
+
+
+function showPhaseDetails(name, phase) {
+    const details = document.getElementById('phaseDetails');
+    if (!details) return;
+    details.style.display = '';
+
+    const rows = Object.entries(phase.actions)
+        .filter(([, w]) => w > 0)
+        .sort(([, a], [, b]) => b - a)
+        .map(([action, weight]) => `
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                <span style="width:80px; color:#aaa;">${action}</span>
+                <div style="flex:1; background:#333; border-radius:3px; height:14px;">
+                    <div style="width:${weight}%; background:${SESSION_PHASES[name].color}; height:100%; border-radius:3px; min-width:2px;"></div>
+                </div>
+                <span style="width:30px; text-align:right; color:#888; font-size:0.75rem;">${weight}%</span>
+            </div>
+        `).join('');
+
+    details.innerHTML = `
+        <div style="font-weight:600; margin-bottom:6px; text-transform:capitalize; color:${SESSION_PHASES[name].color};">${name} Phase</div>
+        <div style="font-size:0.78rem; color:#888; margin-bottom:8px;">Duration: ${phase.duration[0]}-${phase.duration[1]} minutes</div>
+        ${rows}
+    `;
+}
+
+
+// Auto-render phases on page load
+document.addEventListener('DOMContentLoaded', renderSessionPhases);
