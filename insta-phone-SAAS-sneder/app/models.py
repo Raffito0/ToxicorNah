@@ -491,3 +491,21 @@ class InterventionLog(db.Model):
     resolved_at = db.Column(db.DateTime, nullable=True)
     resolution = db.Column(db.String(20), nullable=True)
     telegram_message_id = db.Column(db.Integer, nullable=True)
+
+
+# ─── Section 06-01: GeminiUsage ─────────────────────────────
+
+class GeminiUsage(db.Model):
+    __tablename__ = 'gemini_usage'
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_log_id = db.Column(db.Integer, db.ForeignKey('session_log.id'), nullable=True)
+    call_type = db.Column(db.String(50), nullable=False)
+    latency_ms = db.Column(db.Integer, nullable=False)
+    success = db.Column(db.Boolean, default=True)
+    estimated_cost = db.Column(db.Float, default=0.001)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.Index('ix_gemini_usage_date_type', 'created_at', 'call_type'),
+    )
