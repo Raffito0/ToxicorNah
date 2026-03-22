@@ -1,0 +1,233 @@
+{# phone settings page #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet"  href="{{ url_for('static', filename='css/after_login_styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/message-format.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/notfication-panel.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/confirm-model.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/leads-history-tables.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/calendar-schedule.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/weekly-plan.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-icon active" title="Phones" data-tab="bots-management">
+            <i class="fas fa-mobile-alt"></i>
+            <a href="{{ url_for('auth.main') }}" class="sidebar-link">Home</a>
+        </div>
+    </div>
+    <div class="main-content">
+        <div id="botSettingsModal" class="settings-modal">
+            <div class="top-bar">
+                <label for="phone-id">account colne id:</label>
+                <input type="text" id="clone-id" placeholder="Enter clone ID">
+                <button class="btn btn-primary" id="add-bot-btn">Add account</button>
+            </div>
+
+            <div class="settings-title" id="phoneTitleSettings">Phone Settings</div>
+            
+            <!-- Calendar Container -->
+            <div id="calendarScheduleContainer" style="display: none;"></div>
+        
+            <div class="settings-modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title">Bot Settings</h2>
+                    <button class="close-btn" onclick="closeBotSettingsModal()">&times;</button>
+                </div>
+                
+                <div class="modal-body">
+                    <div id="settingsLoading" class="loading">
+                        <p>Loading bot settings...</p>
+                    </div>
+                    
+                    <div id="settingsContent" style="display: none;">
+                        <div class="bot-info">
+                            <h4 id="botName">Bot Name</h4>
+                            <p><strong>Phone ID:</strong> <span id="botPhoneId">-</span></p>
+                            <p><strong>Appium Port:</strong> <span id="botAppiumPort">-</span></p>
+                            <p><strong>Status:</strong> <span id="botStatus">-</span></p>
+                            <p><strong>Accounts:</strong> <span id="botAccountsCount">-</span></p>
+                        </div>
+
+                        <!-- Warmup Status Section -->
+                        <div id="warmupSection" class="warmup-settings-section" style="display: none;">
+                            <h5 style="font-size: 0.95rem; margin-bottom: 12px;">
+                                <i class="fas fa-seedling me-2"></i>Warmup Status
+                            </h5>
+                            <div class="warmup-header">
+                                <span id="warmupDayLabel">Day 0 / 0</span>
+                                <span id="warmupDayBadge" class="badge bg-secondary">-</span>
+                                <span id="warmupCompleteBadge" class="badge bg-success" style="display:none;">Complete</span>
+                            </div>
+                            <div class="progress mb-3" style="height: 8px;">
+                                <div id="warmupProgressBar" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div id="warmupMilestones" class="warmup-milestones mb-3" style="font-size: 0.8rem; color: #999;"></div>
+                            <table id="warmupCapsTable" class="table table-sm table-dark mb-3" style="font-size: 0.8rem;">
+                                <thead><tr><th>Action</th><th>Limit</th></tr></thead>
+                                <tbody id="warmupCapsBody"></tbody>
+                            </table>
+                            <details class="mb-3">
+                                <summary class="text-muted" style="font-size: 0.8rem; cursor: pointer;">Full Warmup Plan</summary>
+                                <table id="warmupPlanTable" class="table table-sm table-dark mt-2" style="font-size: 0.75rem;">
+                                    <thead><tr><th>Day</th><th>Type</th><th>Sessions</th></tr></thead>
+                                    <tbody id="warmupPlanBody"></tbody>
+                                </table>
+                            </details>
+                            <div id="warmupActions" class="warmup-actions">
+                                <button class="btn btn-sm btn-outline-warning" onclick="warmupReset()">
+                                    <i class="fas fa-undo me-1"></i>Reset
+                                </button>
+                                <button class="btn btn-sm btn-outline-info" onclick="warmupSkipPrompt()">
+                                    <i class="fas fa-forward me-1"></i>Skip to Day...
+                                </button>
+                                <button class="btn btn-sm btn-outline-success" onclick="warmupComplete()">
+                                    <i class="fas fa-check me-1"></i>Mark Complete
+                                </button>
+                            </div>
+                        </div>
+
+                        <form id="settingsForm">
+                            <div class="settings-grid">
+                                <div class="settings-group">
+                                    <div class="settings-label">Start Execution Between</div>
+                                    <div class="settings-inputs">
+                                        <input type="time" name="start_exec_from" id="start_exec_from">
+                                        <input type="time" name="start_exec_to" id="start_exec_to">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Stop Execution Between</div>
+                                    <div class="settings-inputs">
+                                        <input type="time" name="stop_exec_from" id="stop_exec_from">
+                                        <input type="time" name="stop_exec_to" id="stop_exec_to">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Wait Between Same Account Sessions (Hours)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="same_account_wait_min" id="same_account_wait_min" min="1" max="24">
+                                        <input type="number" name="same_account_wait_max" id="same_account_wait_max" min="1" max="24">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Wait Between Different Account Sessions (Min)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="diff_account_wait_min" id="diff_account_wait_min" min="1">
+                                        <input type="number" name="diff_account_wait_max" id="diff_account_wait_max" min="1">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Number of Sessions per Same Account (Daily)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="sessions_per_account_min" id="sessions_per_account_min" min="1">
+                                        <input type="number" name="sessions_per_account_max" id="sessions_per_account_max" min="1">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Session Duration (Min)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="session_duration_min" id="session_duration_min" min="1">
+                                        <input type="number" name="session_duration_max" id="session_duration_max" min="1">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Random Pause During Each Session (Min)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="pause_during_session_min" id="pause_during_session_min" min="1">
+                                        <input type="number" name="pause_during_session_max" id="pause_during_session_max" min="1">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Pause Probability (%)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="pause_probability_min" id="pause_probability_min" min="0" max="100">
+                                        <input type="number" name="pause_probability_max" id="pause_probability_max" min="0" max="100">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Pauses per Session</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="pauses_per_session_min" id="pauses_per_session_min" min="0">
+                                        <input type="number" name="pauses_per_session_max" id="pauses_per_session_max" min="0">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Browse IG when a Session Starts (Seconds)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="browse_ig_start_min" id="browse_ig_start_min" min="0">
+                                        <input type="number" name="browse_ig_start_max" id="browse_ig_start_max" min="0">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Browse IG Between Major Actions (Seconds)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="browse_ig_action_min" id="browse_ig_action_min" min="0">
+                                        <input type="number" name="browse_ig_action_max" id="browse_ig_action_max" min="0">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Browse IG Between Major Actions Probability (%)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="browse_ig_action_probability_min" id="browse_ig_action_probability_min" min="0" max="100">
+                                        <input type="number" name="browse_ig_action_probability_max" id="browse_ig_action_probability_max" min="0" max="100">
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-group">
+                                    <div class="settings-label">Typing Speed (chars/second)</div>
+                                    <div class="settings-inputs">
+                                        <input type="number" name="typing_speed_min" id="typing_speed_min" min="1">
+                                        <input type="number" name="typing_speed_max" id="typing_speed_max" min="1">
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-danger" onclick="deleteBotConfirm()">Delete Bot</button>
+                    <div>
+                        <button type="button" class="btn btn-secondary" onclick="closeBotSettingsModal()">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="saveBotSettings()">Save Settings</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+<script src="{{ url_for('static', filename='js/warmup-panel.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/phone-settings-main.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/phone-settings-calendar.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/after_login_scripts.js') }}"></script>
+<div id="toaster-container" class="toaster-container"></div>
+<div class="custom-confirm-modal" id="confirmModal" style="display: none;">
+    <div class="confirm-content">
+        <h4 class="confirm-title">Confirm Action</h4>
+        <p id="confirmMessage"></p>
+        <div class="confirm-buttons">
+            <button class="btn-cancel" id="cancelButton">Cancel</button>
+            <button class="btn-confirm" id="confirmButton">Confirm</button>
+        </div>
+    </div>
+</div>
+</body>
+</html> 
