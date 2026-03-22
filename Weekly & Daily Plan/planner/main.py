@@ -12,6 +12,8 @@ from datetime import date, datetime
 
 from .scheduler import generate_weekly_plan
 from .formatter import save_weekly_json, save_weekly_text, save_daily_json, save_daily_text
+from .personality import get_account_state
+from . import config
 
 
 def main():
@@ -36,7 +38,7 @@ def main():
 
     if args.weekly:
         print(f"Generating weekly plan for week of {target_date.isoformat()}...")
-        plan = generate_weekly_plan(target_date)
+        plan = generate_weekly_plan(accounts=config.ACCOUNTS, start_date=target_date)
 
         json_path = save_weekly_json(plan)
         txt_path = save_weekly_text(plan)
@@ -54,7 +56,7 @@ def main():
     elif args.daily:
         print(f"Generating daily plan for {target_date.isoformat()}...")
         # Generate the weekly plan to get assignments, then extract the daily plan
-        plan = generate_weekly_plan(target_date)
+        plan = generate_weekly_plan(accounts=config.ACCOUNTS, start_date=target_date)
 
         if target_date in plan.daily_plans:
             daily = plan.daily_plans[target_date]

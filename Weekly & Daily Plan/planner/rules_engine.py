@@ -6,16 +6,25 @@ from . import config
 
 
 # ─── R1: Daily Order of Accounts ─────────────────────────────────────────────
-def randomize_phone_order():
+def randomize_phone_order(accounts=None, phones=None):
     """Randomize the order of phones for the day.
     Within each phone, TikTok and Instagram order is also randomized.
-    Returns list of (phone_id, [account_name_1, account_name_2])."""
-    phones = list(config.PHONES)
+    Returns list of (phone_id, [account_name_1, account_name_2]).
+
+    Args:
+        accounts: list of account dicts. Falls back to config.ACCOUNTS if None.
+        phones: list of phone IDs. Falls back to config.PHONES if None.
+    """
+    if accounts is None:
+        accounts = config.ACCOUNTS
+    if phones is None:
+        phones = config.PHONES
+    phones = list(phones)
     random.shuffle(phones)
 
     result = []
     for phone_id in phones:
-        phone_accounts = [a for a in config.ACCOUNTS if a["phone_id"] == phone_id]
+        phone_accounts = [a for a in accounts if a["phone_id"] == phone_id]
         random.shuffle(phone_accounts)
         result.append((phone_id, [a["name"] for a in phone_accounts]))
     return result
@@ -179,11 +188,17 @@ def should_start_two_day_break(account_state, current_date):
     return days_since >= interval
 
 
-def assign_two_day_break(phone_id, week_dates, state, other_phone_breaks):
+def assign_two_day_break(phone_id, week_dates, state, other_phone_breaks, accounts=None):
     """Assign a 2-day break to one random account on this phone.
     Ensures no overlap with breaks on other phones.
-    Returns (account_name, break_day1, break_day2) or None."""
-    phone_accounts = [a for a in config.ACCOUNTS if a["phone_id"] == phone_id]
+    Returns (account_name, break_day1, break_day2) or None.
+
+    Args:
+        accounts: list of account dicts. Falls back to config.ACCOUNTS if None.
+    """
+    if accounts is None:
+        accounts = config.ACCOUNTS
+    phone_accounts = [a for a in accounts if a["phone_id"] == phone_id]
 
     # Find which dates are already taken by other phone breaks
     blocked_dates = set()
@@ -265,12 +280,18 @@ def apply_post_error(personality):
 
 
 # ─── R15: Cross-Phone Coordination ───────────────────────────────────────────
-def validate_cross_phone(day_date, account_activity):
+def validate_cross_phone(day_date, account_activity, accounts=None):
     """Ensure at least 1 account on at least 2 phones is active.
     account_activity: dict {account_name: bool (active or not)}
-    Returns True if valid, False if violated."""
+    Returns True if valid, False if violated.
+
+    Args:
+        accounts: list of account dicts. Falls back to config.ACCOUNTS if None.
+    """
+    if accounts is None:
+        accounts = config.ACCOUNTS
     active_phones = set()
-    for acc in config.ACCOUNTS:
+    for acc in accounts:
         if account_activity.get(acc["name"], True):
             active_phones.add(acc["phone_id"])
     return len(active_phones) >= 2

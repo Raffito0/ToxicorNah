@@ -1,12 +1,13 @@
 """Rule 16: Dynamic Account Personalities.
 
 Each account has a 'personality' that changes slowly over time (every 1-2 weeks).
-This makes behavior realistic — no account has a perfectly stable average.
+This makes behavior realistic -- no account has a perfectly stable average.
+
+Personality state is passed in by the caller (service layer or CLI) and returned
+after modification. No file I/O is performed by this module.
 """
-import json
-import os
 import random
-from datetime import date, timedelta
+from datetime import date
 
 from . import config
 
@@ -45,21 +46,6 @@ def _default_account_state(account_name):
     }
 
 
-def load_state():
-    """Load persisted account state from disk."""
-    if os.path.exists(config.STATE_FILE):
-        with open(config.STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-def save_state(state):
-    """Save account state to disk."""
-    os.makedirs(config.STATE_DIR, exist_ok=True)
-    with open(config.STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
-
-
 def get_account_state(state, account_name):
     """Get or create state for a specific account."""
     if account_name not in state:
@@ -93,9 +79,15 @@ def maybe_refresh_personality(account_state, current_date):
         account_state["personality_last_changed"] = current_date.isoformat()
 
 
-def initialize_all_accounts(state, current_date):
-    """Ensure all accounts have state and refresh personalities if needed."""
-    for acc in config.ACCOUNTS:
-        acc_state = get_account_state(state, acc["name"])
+def initialize_all_accounts(state, current_date, account_names):
+    """Ensure all accounts have state and refresh personalities if needed.
+
+    Args:
+        state: dict of account states (mutated in place)
+        current_date: date for personality refresh check
+        account_names: list of account name strings
+    """
+    for name in account_names:
+        acc_state = get_account_state(state, name)
         maybe_refresh_personality(acc_state, current_date)
     return state

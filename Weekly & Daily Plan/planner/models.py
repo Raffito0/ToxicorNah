@@ -20,6 +20,7 @@ class Session:
     post_activity_minutes: int = 0
     total_duration_minutes: int = 0
     proxy_rotation_before: bool = False
+    engagement_caps: Optional[dict] = None  # None for regular sessions
 
     def to_dict(self):
         return {
@@ -37,6 +38,7 @@ class Session:
             "post_activity_minutes": self.post_activity_minutes,
             "total_duration_minutes": self.total_duration_minutes,
             "proxy_rotation_before": self.proxy_rotation_before,
+            "engagement_caps": self.engagement_caps,
         }
 
 

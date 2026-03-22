@@ -1,10 +1,10 @@
-"""Main scheduling engine — orchestrates all rules to generate plans."""
+"""Main scheduling engine -- orchestrates all rules to generate plans."""
 import random
 from datetime import date, time, timedelta
 
 from . import config
 from .models import Session, ProxyRotation, DailyPlan, WeeklyPlan, AccountWeekSummary
-from .personality import load_state, save_state, initialize_all_accounts, get_account_state
+from .personality import initialize_all_accounts, get_account_state
 from . import rules_engine as rules
 
 
@@ -22,15 +22,20 @@ def _get_week_dates(start_date):
     return [monday + timedelta(days=i) for i in range(7)]
 
 
-# ─── Weekly Plan: Assign Special Days ────────────────────────────────────────
-def _assign_weekly_special_days(state, week_dates):
+# --- Weekly Plan: Assign Special Days ---
+def _assign_weekly_special_days(state, week_dates, accounts, phones):
     """Assign rest days, one-post days, and two-day breaks for the week.
-    Returns dict: {account_name: {rest_day: date|None, one_post_day: date|None,
-                                   two_day_break: [date, date]|None}}"""
+
+    Args:
+        accounts: list of account dicts
+        phones: sorted list of unique phone IDs
+
+    Returns dict: {account_name: {rest_day, one_post_day, two_day_break, ...}}
+    """
     weekly_assignments = {}
     phone_breaks = {}  # phone_id -> list of (account_name, d1, d2)
 
-    for acc in config.ACCOUNTS:
+    for acc in accounts:
         acc_state = get_account_state(state, acc["name"])
         personality = acc_state["personality"]
         assignment = {"rest_day": None, "one_post_day": None,
@@ -43,7 +48,6 @@ def _assign_weekly_special_days(state, week_dates):
             assignment["rest_day"] = rest_date
             assignment["rest_weekday"] = rest_wd
         else:
-            rest_wd = None
             assignment["rest_weekday"] = None
 
         # R8 + R9: One-post day
@@ -59,9 +63,8 @@ def _assign_weekly_special_days(state, week_dates):
         weekly_assignments[acc["name"]] = assignment
 
     # R10: Two-day breaks (per phone)
-    for phone_id in config.PHONES:
-        phone_accs = [a for a in config.ACCOUNTS if a["phone_id"] == phone_id]
-        # Check if any account on this phone needs a break
+    for phone_id in phones:
+        phone_accs = [a for a in accounts if a["phone_id"] == phone_id]
         needs_break = False
         for pa in phone_accs:
             acc_state = get_account_state(state, pa["name"])
@@ -70,7 +73,8 @@ def _assign_weekly_special_days(state, week_dates):
                 break
 
         if needs_break:
-            result = rules.assign_two_day_break(phone_id, week_dates, state, phone_breaks)
+            result = rules.assign_two_day_break(
+                phone_id, week_dates, state, phone_breaks, accounts=accounts)
             if result:
                 acc_name, d1, d2 = result
                 if phone_id not in phone_breaks:
@@ -78,21 +82,18 @@ def _assign_weekly_special_days(state, week_dates):
                 phone_breaks[phone_id].append(result)
                 weekly_assignments[acc_name]["two_day_break"] = [d1, d2]
 
-    # R15: Validate cross-phone — ensure at least 2 phones active each day
+    # R15: Validate cross-phone
     for day_date in week_dates:
         activity = {}
-        for acc in config.ACCOUNTS:
+        for acc in accounts:
             name = acc["name"]
             asgn = weekly_assignments[name]
             is_active = True
-            if asgn["rest_day"] == day_date:
-                is_active = True  # rest day still has sessions (just no posts)
             if asgn["two_day_break"] and day_date in asgn["two_day_break"]:
                 is_active = False
             activity[name] = is_active
 
-        if not rules.validate_cross_phone(day_date, activity):
-            # Fix: remove one two-day break that causes the conflict
+        if not rules.validate_cross_phone(day_date, activity, accounts=accounts):
             for acc_name, asgn in weekly_assignments.items():
                 if asgn["two_day_break"] and day_date in asgn["two_day_break"]:
                     asgn["two_day_break"] = None
@@ -101,10 +102,10 @@ def _assign_weekly_special_days(state, week_dates):
     return weekly_assignments, phone_breaks
 
 
-# ─── Daily Plan: Generate Sessions ───────────────────────────────────────────
+# --- Daily Plan: Generate Sessions ---
 def _build_session(account, personality, session_num, has_post, is_rest_day,
                    slot, is_weekend, account_state, force_abort=False):
-    """Build a single Session object with all rule-based randomness."""
+    """Build a single session dict with all rule-based randomness."""
     # R12: Aborted session?
     if force_abort:
         duration = rules.aborted_session_duration()
@@ -144,7 +145,6 @@ def _build_session(account, personality, session_num, has_post, is_rest_day,
     weekend_bias = rules.apply_weekend_session_bias(personality, is_weekend)
 
     if is_rest_day or not has_post:
-        # Rest or no-post session: just scrolling
         duration = rules.rest_only_session_duration()
         duration = max(1, round(duration * weekend_bias))
         return {
@@ -178,30 +178,29 @@ def _build_session(account, personality, session_num, has_post, is_rest_day,
         "post_outcome": post_outcome,
         "pre_activity_minutes": pre_mins,
         "post_activity_minutes": post_mins,
-        "total_duration_minutes": pre_mins + post_mins + 1,  # +1 for post action
+        "total_duration_minutes": pre_mins + post_mins + 1,
         "slot": slot,
     }
 
 
-def generate_daily_plan(day_date, state, weekly_assignments):
+def generate_daily_plan(day_date, state, weekly_assignments, accounts, phones):
     """Generate a complete daily plan for the given date.
 
-    Key design: sessions are organized in PHONE BLOCKS. Both accounts of the
-    same phone always run consecutively. Each phone block is assigned to a
-    single time slot. If a phone has a second round of sessions, that round
-    goes to a different slot.
+    Args:
+        accounts: list of account dicts
+        phones: sorted list of unique phone IDs
     """
     is_weekend = day_date.weekday() >= 5
     slots = rules.get_slots_for_date(day_date)
 
-    # R1: Randomize phone order (and order of TT/IG within each phone)
-    phone_order = rules.randomize_phone_order()
+    # R1: Randomize phone order
+    phone_order = rules.randomize_phone_order(accounts=accounts, phones=phones)
 
-    # ── Step 1: Determine session/post counts per account ──────────────
-    account_plans = {}  # acc_name -> {session_count, post_count, ...}
+    # Step 1: Determine session/post counts per account
+    account_plans = {}
     for phone_id, acc_names in phone_order:
         for acc_name in acc_names:
-            account = next(a for a in config.ACCOUNTS if a["name"] == acc_name)
+            account = next(a for a in accounts if a["name"] == acc_name)
             acc_state = get_account_state(state, acc_name)
             personality = acc_state["personality"]
             asgn = weekly_assignments[acc_name]
@@ -227,9 +226,7 @@ def generate_daily_plan(day_date, state, weekly_assignments):
                 "post_count": post_count,
             }
 
-    # ── Step 1b: Synchronize session counts per phone ─────────────────
-    # Both accounts on the same phone MUST have the same session_count
-    # so they always appear together in every round.
+    # Step 1b: Synchronize session counts per phone
     for phone_id, acc_names in phone_order:
         active_accs = [n for n in acc_names if account_plans[n].get("active")]
         if len(active_accs) == 2:
@@ -240,10 +237,8 @@ def generate_daily_plan(day_date, state, weekly_assignments):
                 for n in active_accs:
                     account_plans[n]["session_count"] = max_sc
 
-    # ── Step 2: Build phone blocks per round ───────────────────────────
-    # round 1 = first session of each account; round 2 = second session
-    # Both accounts of a phone share the SAME slot within a round
-    phone_blocks = []  # list of {phone_id, round, slot, sessions}
+    # Step 2: Build phone blocks per round
+    phone_blocks = []
 
     max_rounds = max(
         (account_plans[an].get("session_count", 0)
@@ -264,14 +259,11 @@ def generate_daily_plan(day_date, state, weekly_assignments):
                 if ap["session_count"] < round_num:
                     continue
 
-                # Distribute posts: round 1 gets first post, round 2 gets second
                 has_post = False
                 if ap["post_count"] >= round_num:
                     has_post = True
                 any_post_in_block = any_post_in_block or has_post
 
-                # Check abort BEFORE building session.
-                # If aborted AND posting AND there is a next round, reschedule post.
                 personality = ap["personality"]
                 will_abort = rules.maybe_abort_session(personality)
 
@@ -280,7 +272,7 @@ def generate_daily_plan(day_date, state, weekly_assignments):
 
                 session_desc = _build_session(
                     ap["account"], personality, round_num, has_post,
-                    ap["is_rest_day"], None,  # slot assigned below
+                    ap["is_rest_day"], None,
                     is_weekend, ap["acc_state"],
                     force_abort=will_abort,
                 )
@@ -301,9 +293,7 @@ def generate_daily_plan(day_date, state, weekly_assignments):
                     "sessions": block_sessions,
                 })
 
-    # ── Step 3: Ensure round 2 slots are AFTER round 1 slots ──────────
-    # This guarantees the complete phone block (round 1) always appears
-    # before any partial round 2 blocks in the final schedule.
+    # Step 3: Ensure round 2 slots are AFTER round 1 slots
     phone_round1_slots = {}
     for pb in phone_blocks:
         if pb["round"] == 1:
@@ -318,11 +308,8 @@ def generate_daily_plan(day_date, state, weekly_assignments):
         r1_slot = phone_round1_slots.get(pb["phone_id"])
         if r1_slot is None:
             continue
-        r1_end = r1_slot["end_h"] * 60 + r1_slot["end_m"]
-        cur_start = _slot_start_mins(pb["slot"])
 
-        if cur_start <= _slot_start_mins(r1_slot):
-            # Round 2 is in an earlier or same slot — pick a later one
+        if _slot_start_mins(pb["slot"]) <= _slot_start_mins(r1_slot):
             later_slots = [s for s in slots if _slot_start_mins(s) > _slot_start_mins(r1_slot)]
             if later_slots:
                 new_slot = rules.pick_session_slot(
@@ -332,13 +319,12 @@ def generate_daily_plan(day_date, state, weekly_assignments):
                     is_weekend=is_weekend,
                 )
             else:
-                # No later slot available — use the last slot
                 new_slot = slots[-1]
             pb["slot"] = new_slot
             for sd in pb["sessions"]:
                 sd["slot"] = new_slot
 
-    # ── Step 4: Sort blocks by slot time, then phone order ─────────────
+    # Step 4: Sort blocks by slot time, then phone order
     phone_order_map = {pid: idx for idx, (pid, _) in enumerate(phone_order)}
 
     def slot_start_minutes(slot):
@@ -349,25 +335,22 @@ def generate_daily_plan(day_date, state, weekly_assignments):
         phone_order_map.get(pb["phone_id"], 0),
     ))
 
-    # ── Step 4b: Avoid same platform at phone boundaries ─────────────
-    # When switching phones, the first account of the new phone must be
-    # a different platform from the last account of the previous phone.
-    # If they match, reverse the session order within the new block.
+    # Step 4b: Avoid same platform at phone boundaries
     for i in range(1, len(phone_blocks)):
         prev_block = phone_blocks[i - 1]
         curr_block = phone_blocks[i]
         if prev_block["phone_id"] == curr_block["phone_id"]:
-            continue  # same phone, no boundary issue
+            continue
         if len(prev_block["sessions"]) == 0 or len(curr_block["sessions"]) == 0:
             continue
         if len(curr_block["sessions"]) < 2:
-            continue  # only 1 account active, can't swap
+            continue
         last_platform = prev_block["sessions"][-1]["platform"]
         first_platform = curr_block["sessions"][0]["platform"]
         if last_platform == first_platform:
             curr_block["sessions"].reverse()
 
-    # ── Step 5: Place sessions sequentially (R17) ──────────────────────
+    # Step 5: Place sessions sequentially (R17)
     sessions = []
     proxy_rotations = []
     current_time_mins = None
@@ -380,12 +363,10 @@ def generate_daily_plan(day_date, state, weekly_assignments):
         slot_end = slot["end_h"] * 60 + slot["end_m"]
 
         for sd in pb["sessions"]:
-            # Determine start time
             if current_time_mins is None:
                 start_mins = rules.random_time_in_slot(slot)
             else:
                 gap = rules.random_inter_session_gap()
-                # Within same phone block, use smaller gap (1-5 min)
                 if phone_id == last_phone_id:
                     gap = random.randint(1, 5)
                 earliest = current_time_mins + gap
@@ -393,7 +374,6 @@ def generate_daily_plan(day_date, state, weekly_assignments):
                 if start_mins > slot_end:
                     start_mins = current_time_mins + max(1, gap // 3)
 
-            # Proxy rotation if switching phones
             needs_rotation = (last_phone_id is not None and phone_id != last_phone_id)
             if needs_rotation:
                 rotation_time = _minutes_to_time(max(0, start_mins - 1))
@@ -421,6 +401,7 @@ def generate_daily_plan(day_date, state, weekly_assignments):
                 post_activity_minutes=sd["post_activity_minutes"],
                 total_duration_minutes=duration,
                 proxy_rotation_before=needs_rotation,
+                engagement_caps=sd.get("engagement_caps"),
             )
             sessions.append(session)
 
@@ -430,43 +411,54 @@ def generate_daily_plan(day_date, state, weekly_assignments):
     return DailyPlan(date=day_date, sessions=sessions, proxy_rotations=proxy_rotations)
 
 
-# ─── Weekly Plan ──────────────────────────────────────────────────────────────
-def generate_weekly_plan(start_date=None):
+# --- Weekly Plan ---
+def generate_weekly_plan(accounts=None, start_date=None, state=None):
     """Generate a complete weekly plan (Mon-Sun).
 
     Args:
+        accounts: list of account dicts with keys: name, phone_id, platform.
+                  Falls back to config.ACCOUNTS if None.
         start_date: Any date within the desired week. Defaults to today.
+        state: personality/scheduling state dict. If None, starts fresh.
+               Mutated in place with updated state after generation.
 
     Returns:
         WeeklyPlan object with all daily plans and summaries.
     """
+    if accounts is None:
+        accounts = config.ACCOUNTS
     if start_date is None:
         start_date = date.today()
+    if state is None:
+        state = {}
 
+    phones = sorted(set(a["phone_id"] for a in accounts))
     week_dates = _get_week_dates(start_date)
     iso_cal = start_date.isocalendar()
 
-    # Load and initialize state
-    state = load_state()
-    state = initialize_all_accounts(state, start_date)
+    # Initialize state
+    account_names = [a["name"] for a in accounts]
+    state = initialize_all_accounts(state, start_date, account_names)
 
     # Reset weekly extended session flags
-    for acc in config.ACCOUNTS:
+    for acc in accounts:
         acc_state = get_account_state(state, acc["name"])
         acc_state["extended_session_used_this_week"] = False
         acc_state["extended_session_week"] = iso_cal[1]
 
     # Assign special days for the week
-    weekly_assignments, phone_breaks = _assign_weekly_special_days(state, week_dates)
+    weekly_assignments, phone_breaks = _assign_weekly_special_days(
+        state, week_dates, accounts, phones)
 
     # Generate daily plans
     daily_plans = {}
     for day_date in week_dates:
-        daily_plans[day_date] = generate_daily_plan(day_date, state, weekly_assignments)
+        daily_plans[day_date] = generate_daily_plan(
+            day_date, state, weekly_assignments, accounts, phones)
 
     # Build summaries
     account_summaries = {}
-    for acc in config.ACCOUNTS:
+    for acc in accounts:
         name = acc["name"]
         asgn = weekly_assignments[name]
         summary = AccountWeekSummary(
@@ -481,7 +473,6 @@ def generate_weekly_plan(start_date=None):
         if asgn["two_day_break"]:
             summary.two_day_break = asgn["two_day_break"]
 
-        # Count from daily plans
         for day_date, dp in daily_plans.items():
             for session in dp.sessions:
                 if session.account_name == name:
@@ -499,8 +490,8 @@ def generate_weekly_plan(start_date=None):
 
         account_summaries[name] = summary
 
-    # Update persisted state
-    for acc in config.ACCOUNTS:
+    # Update state (caller is responsible for persisting)
+    for acc in accounts:
         name = acc["name"]
         acc_state = get_account_state(state, name)
         asgn = weekly_assignments[name]
@@ -512,8 +503,6 @@ def generate_weekly_plan(start_date=None):
             acc_state["last_two_day_break_date"] = asgn["two_day_break"][1].isoformat()
             acc_state["two_day_break_interval"] = random.randint(
                 *config.RULES["two_day_break_interval_range"])
-
-    save_state(state)
 
     return WeeklyPlan(
         week_number=iso_cal[1],
