@@ -32,6 +32,8 @@ NEGATIVE_KEYWORDS = [
     "content writer", "graphic design", "logo design", "video editing",
     "mobile app", "android app", "ios app", "wordpress", "shopify store",
     "build a website", "create a website", "develop a website",
+    "on-site", "on site", "in our office", "in-person", "in person",
+    "come to our", "visit our office", "physical presence",
 ]
 
 # === OUR SERVICES — keywords that match projects to our capabilities ===
@@ -430,7 +432,7 @@ Write the proposal now. Under 1200 characters. Every word load-bearing."""
             ],
             "max_tokens": 600,
             "temperature": 0.7
-        }, timeout=15)
+        }, timeout=30)
 
     data = resp.json()
     proposal = data["choices"][0]["message"]["content"].strip()
