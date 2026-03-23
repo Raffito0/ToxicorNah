@@ -214,6 +214,10 @@ def score_project(project):
     elif budget_max < SERVICES[service]["min_price"]:
         score -= 20  # too cheap, not worth it
 
+    # Skip enterprise projects (budget too high for our agent to deliver reliably)
+    if budget_max > 500:
+        return -100, None
+
     # Penalty for non-English projects
     non_english = any(c in desc[:100] for c in "ñéèêëàáâäùúûüöòóôïîìíçæ") and not any(
         w in desc.lower()[:200] for w in ["the ", "and ", "for ", "you ", "need "])
