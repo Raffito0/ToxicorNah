@@ -34,6 +34,11 @@ NEGATIVE_KEYWORDS = [
     "build a website", "create a website", "develop a website",
     "on-site", "on site", "in our office", "in-person", "in person",
     "come to our", "visit our office", "physical presence",
+    # Marketing/ads — we do DATA lead gen, not ads management
+    "facebook ads", "instagram ads", "google ads", "ad campaign", "ads manager",
+    "paid ads", "ppc", "social media marketing", "run ads", "ad creative",
+    "funnel", "landing page", "conversion rate optimization", "email marketing campaign",
+    "seo optimization", "link building", "backlinks",
 ]
 
 # === OUR SERVICES — keywords that match projects to our capabilities ===
