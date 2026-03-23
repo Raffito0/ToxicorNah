@@ -43,13 +43,15 @@ Do this:
 
 ### 2. B2B Lead Generation
 When client says: find leads, find businesses, find restaurants, find companies
-Do this:
-1. Write Python script using SerpApi (google_maps engine)
-2. pip install google-search-results openpyxl
-3. Use SERPAPI_KEY from environment
-4. Extract: name, address, phone, website, rating
-5. Save as Excel with styled headers
-6. Send file via curl
+READY-MADE SCRIPT EXISTS. Run this exact command:
+```
+python3 /root/.openclaw/workspace/scripts/leadgen.py "SEARCH QUERY HERE" NUMBER_OF_RESULTS /root/.openclaw/workspace/OUTPUT_FILENAME.xlsx
+```
+Example: python3 /root/.openclaw/workspace/scripts/leadgen.py "dentists in Houston Texas" 50 /root/.openclaw/workspace/dentists_houston.xlsx
+Then send the file:
+```
+curl -F "chat_id=5120450288" -F "document=@/root/.openclaw/workspace/OUTPUT_FILENAME.xlsx" "https://api.telegram.org/bot8602086967:AAH1mI7C3IpigNai2O0P9aJvTTG_aptWIuo/sendDocument"
+```
 
 ### 3. Data Entry / Data Processing
 When client says: convert PDF, clean data, organize spreadsheet, data entry
