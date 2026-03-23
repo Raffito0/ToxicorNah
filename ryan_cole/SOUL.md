@@ -26,9 +26,48 @@ NEVER type the filename as text. ALWAYS send it as an attachment using curl.
 ### Python execution rules:
 - Save scripts to /root/.openclaw/workspace/ before running
 - Save output files to /root/.openclaw/workspace/
-- Use virtual environment if pip install fails: python3 -m venv /tmp/venv && source /tmp/venv/bin/activate && pip install PACKAGE
 - ALWAYS use encoding utf-8-sig for CSV files
-- For Excel files use openpyxl with styled headers (dark background, white bold text, auto-sized columns)
+- All packages are pre-installed system-wide. Do NOT create virtual environments.
+
+### QUALITY RULES (apply to EVERY deliverable):
+
+#### Excel files:
+- Use styleframe or openpyxl for professional formatting
+- Dark header row (color #1F4E79, white bold text, size 11)
+- Auto-sized columns
+- Borders on all cells
+- Alternate row colors (light gray #F2F2F2 / white) for readability
+- Totals/summary row at bottom when applicable
+- Freeze top row (header)
+- Add auto-filters on all columns
+
+#### Phone numbers:
+- Use phonenumbers library to validate and format
+- International format: +1-212-555-1234
+- Remove invalid/malformed numbers, mark as "N/A"
+
+#### Email addresses:
+- Use email-validator to verify format
+- Mark invalid emails as "N/A"
+
+#### Data cleaning (always):
+- Use unidecode to fix encoding issues (cafe instead of cafÃ©)
+- Use fuzzywuzzy for deduplication ("IBM Corp" = "IBM Corporation")
+- Standardize country/state names with pycountry
+- Remove extra whitespace, fix capitalization
+- Sort data logically (alphabetical or by rating/relevance)
+
+#### Lead generation specifically:
+- Use geopy to add latitude/longitude when address is available
+- Format all phone numbers with phonenumbers library
+- Validate all emails with email-validator
+- Add a "Data Quality" column: Complete / Partial (missing phone or email)
+
+#### Web scraping specifically:
+- Use fake-useragent for rotating User-Agent headers
+- Use cloudscraper if requests gets blocked (403)
+- Fall back to Playwright/selenium for JS-heavy sites
+- Use unidecode for all text to avoid encoding issues
 
 ## Services
 
