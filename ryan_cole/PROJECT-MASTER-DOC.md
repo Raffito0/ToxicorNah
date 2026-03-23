@@ -9,7 +9,7 @@ An AI agent (OpenClaw) runs 24/7 on a VPS, automatically finding freelance jobs,
 
 ### Business Model
 - Agent bids on projects, accepts orders, completes work using AI/automation tools, delivers to clients
-- 5 services, 15 platforms, ~94 bids/day
+- 7 services, 15 platforms, ~94 bids/day
 - Target: €500/month by month 1-2, scaling to €5K-12K/month by month 12
 
 ### Identity
@@ -28,7 +28,11 @@ Born in Italy, raised in the US. After 5 years building data pipelines for tech 
 
 ---
 
-## 2. THE 5 SERVICES
+## 2. THE 7 SERVICES
+
+### Profile Story: "I find data → I process data → I analyze data → I make data actionable"
+
+### PHASE 1 (Week 1) — Core Data Services
 
 ### Service 1: Web Scraping / Data Extraction
 - **Deliverable**: CSV/JSON/Excel with structured data from any website
@@ -46,23 +50,7 @@ Born in Italy, raised in the US. After 5 years building data pipelines for tech 
 - **Failure rate**: 15-20%
 - **Price range**: $25-130 per order
 
-### Service 3: Subtitle/SRT Generation
-- **Deliverable**: .SRT file with accurate timestamps
-- **Tools**: OpenAI Whisper API (GPT-4o Mini Transcribe, $0.003/min)
-- **Cost per order**: $0.03-0.06 (10 min video)
-- **Automation**: 92% reliable
-- **Failure rate**: 8%
-- **Price range**: $10-55 per order
-
-### Service 4: Background Removal / Product Photo Editing
-- **Deliverable**: PNG images with transparent/white background
-- **Tools**: rembg (open source, free, runs locally)
-- **Cost per order**: $0.00
-- **Automation**: 93% reliable
-- **Failure rate**: 7%
-- **Price range**: $5-35 per order (bulk 10-80 images)
-
-### Service 5: Data Entry / Data Processing
+### Service 3: Data Entry / Data Processing
 - **Deliverable**: Clean, formatted spreadsheet
 - **Tools**: Python + pandas + OCR (Tesseract)
 - **Cost per order**: $0.00-0.01
@@ -70,14 +58,72 @@ Born in Italy, raised in the US. After 5 years building data pipelines for tech 
 - **Failure rate**: 5%
 - **Price range**: $15-90 per order
 
-### TEST RESULTS (all verified working)
+### PHASE 2 (Week 2) — Data Enhancement
+
+### Service 4: Data Enrichment & Cleanup
+- **Deliverable**: Client's messy list returned clean: duplicates removed, emails verified, missing fields filled (company size, industry, LinkedIn, phone), standardized formatting
+- **Tools**: Python + Hunter.io/Apollo.io APIs (find missing data) + Reoon (verify emails) + AI fuzzy matching (dedup "IBM Corp" = "International Business Machines")
+- **Cost per order**: $0.03-0.10 per contact enriched (API costs)
+- **Automation**: 95% reliable
+- **Failure rate**: 5%
+- **Price range**: $40-80 per order (500-2000 records), $150-300 for large lists (5000+)
+- **Why it fits**: Natural upsell from lead gen — client gets leads, then needs them cleaned/enriched. Same skill set, higher value.
+- **Repeat potential**: VERY HIGH — B2B sales teams generate new lead lists constantly, natural monthly retainer
+
+### Service 5: Excel/Google Sheets Dashboard & Automation
+- **Deliverable**: Functional spreadsheet with interactive dashboard, charts/KPIs, automated formulas, VBA macros or Apps Script
+- **Tools**: Gemini/Claude generates formulas + VBA + Apps Script code, openpyxl for Excel files
+- **Cost per order**: $0.01-0.05 (AI API only)
+- **Automation**: 90% reliable
+- **Failure rate**: 10% (complex VBA edge cases)
+- **Price range**: $50-150 per order (basic dashboard $50, automated reporting $100, complex VBA system $150+)
+- **Why it fits**: Logical next step after scraping — turns raw data into something actionable
+- **Repeat potential**: HIGH — clients need new dashboards, tweaks, new automations constantly
+
+### PHASE 3 (Week 3) — Premium Data Intelligence
+
+### Service 6: E-commerce Product & Competitor Intelligence Reports
+- **Deliverable**: Structured data report (spreadsheet + charts, NOT prose) — top winning products in a niche with sales estimates, pricing data, supplier links, competitor analysis, market gap analysis
+- **Tools**: Scraping (Amazon BSR, Shopify stores, AliExpress) + AI analysis + matplotlib/plotly for charts
+- **Cost per order**: $0.01-0.05 (scraping + AI)
+- **Automation**: 85% reliable
+- **Failure rate**: 15%
+- **Price range**: $50-150 per report (basic niche scan $50, full intelligence $150)
+- **Why it fits**: Web scraping applied to a specific high-value vertical — "data specialist who can analyze ANY market"
+- **Repeat potential**: VERY HIGH — e-commerce sellers need this continuously, natural monthly retainer for competitor monitoring
+
+### Service 7: Automated Live Dashboards (Looker Studio / Google Sheets)
+- **Deliverable**: Live auto-updating dashboard that pulls data from client's tools (Google Analytics, Shopify, ads platforms) and displays KPIs in real-time. Client gets a URL that stays updated forever.
+- **Tools**: Looker Studio connectors + Google Sheets Apps Script + API integrations. AI generates connector configs, SQL queries, calculated fields, chart layouts
+- **Cost per order**: $0.01-0.05 (AI API only)
+- **Automation**: 90% reliable
+- **Failure rate**: 10%
+- **Price range**: $80-200 setup + $30-50/month maintenance retainer
+- **Why it fits**: Premium evolution — from "I collect data" to "I BUILD SYSTEMS that make data useful forever"
+- **Repeat potential**: HIGHEST — inherently a retainer service. 10 retainer clients at $40/month = $400/month passive
+- **Revenue model**: $150 setup + $50/month retainer = $750/year per client
+
+### REMOVED SERVICES (not coherent with data specialist profile)
+- ~~Subtitle/SRT Generation~~ — video/media service, doesn't fit
+- ~~Background Removal~~ — photo editing service, doesn't fit
+
+### TEST RESULTS (verified working on local machine)
 | Service | Test Result | Notes |
 |---|---|---|
 | Web Scraping | PASSED | 60 products scraped in 2 seconds |
 | Lead Generation | PARTIAL | Needs Playwright (browser) for anti-bot sites. Works on VPS |
-| Subtitle/SRT | PASSED | Whisper perfect transcription with timestamps |
-| Background Removal | PASSED | rembg professional quality |
 | Data Entry/Cleaning | PASSED | Dedup, standardize, format — all working |
+| Data Enrichment | NOT YET TESTED | Same tools as lead gen + email verify APIs |
+| Excel Dashboard | NOT YET TESTED | AI writes formulas/VBA — needs test |
+| E-commerce Intelligence | NOT YET TESTED | Scraping + analysis — needs test |
+| Live Dashboards | NOT YET TESTED | Looker Studio/Apps Script — needs test |
+
+### LAUNCH PHASES
+| Phase | Week | Services | Why this order |
+|---|---|---|---|
+| 1 | Week 1 | Web Scraping + Lead Gen + Data Entry | Core services, proven, easiest to deliver |
+| 2 | Week 2 | + Data Enrichment + Excel Dashboard | Natural upsells from Phase 1 clients |
+| 3 | Week 3 | + E-commerce Intelligence + Live Dashboard | Premium services, higher prices, retainer revenue |
 
 ---
 
@@ -113,10 +159,10 @@ Born in Italy, raised in the US. After 5 years building data pipelines for tech 
 |---|---|---|---|
 | 14 | **Apify Store** | To create | Publish reusable scrapers, earn 80% |
 
-### Tier 5 — Subtitle-specific
+### Tier 5 — Additional
 | # | Platform | Status | Account |
 |---|---|---|---|
-| 15 | **Rev** or alternative | To evaluate | — |
+| 15 | **Upwork** | To create | $30/month connects, highest volume |
 
 ### Bidding Strategy
 - Total: ~94 bids/day across all platforms
@@ -159,29 +205,41 @@ Born in Italy, raised in the US. After 5 years building data pipelines for tech 
 - **Tags**: b2b lead generation, verified email list, lead scraping service, business contact list, targeted prospect list
 - **Pricing**: Basic $25 (100 leads) / Standard $60 (300 leads) / Premium $130 (1,000 leads)
 
-#### Gig 3: Subtitle/SRT
-- **Title**: I will create accurate SRT subtitles for your video with timestamps
-- **Tags**: srt subtitle file, video captions youtube, accurate video subtitles, podcast transcription srt, course video captions
-- **Pricing**: Basic $10 (10 min) / Standard $25 (30 min) / Premium $55 (60 min)
-
-#### Gig 4: Background Removal
-- **Title**: I will remove background from product photos for Amazon and Shopify
-- **Tags**: product photo editing, background removal bulk, amazon product images, ecommerce photo editing, transparent png cutout
-- **Pricing**: Basic $5 (10 images) / Standard $15 (30 images) / Premium $35 (80 images)
-
-#### Gig 5: Data Entry
+#### Gig 3: Data Entry
 - **Title**: I will do data entry, PDF to Excel conversion, and data cleaning
 - **Tags**: pdf to excel conversion, data cleaning service, data entry spreadsheet, ocr document digitization, excel data formatting
 - **Pricing**: Basic $15 (200 rows) / Standard $40 (1,000 rows) / Premium $90 (5,000 rows)
+
+#### Gig 4: Data Enrichment & Cleanup
+- **Title**: I will clean, enrich, and verify your B2B contact list
+- **Tags**: data enrichment service, email verification list, contact list cleaning, b2b data append, list deduplication
+- **Pricing**: Basic $30 (200 contacts) / Standard $60 (500 contacts) / Premium $120 (2,000 contacts)
+
+#### Gig 5: Excel/Sheets Dashboard & Automation
+- **Title**: I will create an automated Excel dashboard with formulas and macros
+- **Tags**: excel dashboard automation, google sheets script, vba macro excel, spreadsheet automation, data dashboard
+- **Pricing**: Basic $50 (basic dashboard) / Standard $100 (automated reporting) / Premium $150 (complex VBA system)
+
+#### Gig 6: E-commerce Product Intelligence
+- **Title**: I will research winning products and competitors for your ecommerce store
+- **Tags**: product research ecommerce, amazon competitor analysis, shopify product research, market research data, dropshipping research
+- **Pricing**: Basic $50 (basic niche scan) / Standard $100 (full competitor analysis) / Premium $150 (intelligence report + supplier data)
+
+#### Gig 7: Automated Live Dashboard (Looker Studio)
+- **Title**: I will build a live auto-updating dashboard for your business data
+- **Tags**: looker studio dashboard, google analytics dashboard, live reporting dashboard, automated business report, data visualization
+- **Pricing**: Basic $80 (single data source) / Standard $150 (multi-source dashboard) / Premium $200 (full setup + monthly maintenance)
 
 ### FREELANCER.COM TITLES
 | Service | Title |
 |---|---|
 | Web Scraping | Fast, Accurate Web Scraping — Any Website to CSV/Excel/JSON |
 | Lead Gen | Targeted B2B Lead Lists — Verified Emails, Phone Numbers, LinkedIn |
-| Subtitle | Professional SRT Subtitle Files — YouTube, Courses, Podcasts |
-| Background Removal | Bulk Background Removal — Clean Product Photos, Fast Delivery |
 | Data Entry | Accurate Data Entry — PDF to Spreadsheet, Data Cleaning, Formatting |
+| Data Enrichment | B2B Contact List Cleaning, Enrichment & Email Verification |
+| Excel Dashboard | Automated Excel/Sheets Dashboard — Formulas, VBA, Apps Script |
+| E-commerce Intel | E-commerce Product & Competitor Intelligence Reports |
+| Live Dashboard | Live Auto-Updating Looker Studio / Google Sheets Dashboard |
 
 ### PROPOSAL TEMPLATE (for bid-based platforms)
 ```
@@ -220,11 +278,25 @@ I'm based in Italy but work US business hours. I'll have a sample ready within [
 | Service | Monthly Orders | Avg Price | Revenue |
 |---|---|---|---|
 | Web Scraping | 4 | $60 | $240 |
-| B2B Lead Gen | 2 | $80 | $160 |
-| Subtitles/SRT | 8 | $20 | $160 |
-| Background Removal | 3 bulk | $30 | $90 |
-| Data Entry | 10 | $10 | $100 |
-| **TOTAL** | **27** | | **$750** |
+| B2B Lead Gen | 3 | $80 | $240 |
+| Data Entry | 8 | $15 | $120 |
+| Data Enrichment | 3 | $60 | $180 |
+| Excel Dashboard | 3 | $75 | $225 |
+| E-commerce Intel | 2 | $100 | $200 |
+| Live Dashboard | 1 setup + retainers | $150 | $150 |
+| **TOTAL** | **24** | | **$1,355** |
+
+### Revenue per Service (month 6 target — with retainers)
+| Service | Monthly Orders | Avg Price | Revenue |
+|---|---|---|---|
+| Web Scraping | 8 | $80 | $640 |
+| B2B Lead Gen | 5 | $100 | $500 |
+| Data Entry | 10 | $25 | $250 |
+| Data Enrichment | 5 | $70 | $350 |
+| Excel Dashboard | 5 | $100 | $500 |
+| E-commerce Intel | 4 | $120 | $480 |
+| Live Dashboard | 2 setup + 5 retainers | $150 + $200 | $500 |
+| **TOTAL** | **39 + retainers** | | **$3,220** |
 
 ### Monthly Costs
 | Item | Cost |
