@@ -1,0 +1,45 @@
+1
+00:00:00,000 --> 00:00:02,680
+This is my voice on the left.
+
+2
+00:00:02,960 --> 00:00:05,680
+This is my voice on the left-hand side.
+
+3
+00:00:05,680 --> 00:00:08,560
+This is my voice on the left.
+
+4
+00:00:08,560 --> 00:00:10,960
+This is my voice on the right.
+
+5
+00:00:10,960 --> 00:00:13,940
+This is my voice on the right-hand side.
+
+6
+00:00:13,940 --> 00:00:16,639
+This is my voice on the right.
+
+7
+00:00:16,639 --> 00:00:19,180
+This is my voice in the center.
+
+8
+00:00:19,180 --> 00:00:22,840
+This is my voice from both left and right.
+
+9
+00:00:22,840 --> 00:00:25,320
+This is my voice in the center.
+
+10
+00:00:25,320 --> 00:00:29,200
+My voice will be out of phase on 3.
+
+11
+00:00:29,200 --> 00:00:31,480
+1, 2
+
+

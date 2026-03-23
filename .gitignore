@@ -1,6 +1,10 @@
 logs
 *.log
 
+# Ryan Cole test files (large)
+ryan_cole/test_results/test_audio.wav
+ryan_cole/__pycache__/
+
 # phone-bot regression sentinel (created after browse-smoke PASS, deleted by hook after use)
 phone-bot/.browse_smoke_ok
 npm-debug.log*
@@ -70,3 +74,4 @@ forge/.predict_cache.json
 forge/.verify_result.json
 forge/.read_log.json
 forge/.filtered_log.txt
+forge/.forge_session.md
