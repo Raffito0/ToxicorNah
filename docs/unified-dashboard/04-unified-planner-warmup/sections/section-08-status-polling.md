@@ -2,128 +2,47 @@
 
 ## Overview
 
-Final section. Adds live session status updates to the timeline by implementing a `setTimeout`-based polling loop (30s interval) and an auto-regeneration trigger when a phone is added.
+Final section. Live session status updates on the timeline via `setTimeout`-based polling (30s), visibility API pause, and auto-regeneration endpoint for phone-add events.
 
 **Depends on:** Section 05 (timeline with status CSS classes), Section 07 (executor writes SessionLog), Section 04 (today-sessions API)
 
-## Files to Modify
+## Files Modified
 
 | File | Change |
 |------|--------|
-| `insta-phone-SAAS-sneder/app/static/js/weekly-plan.js` | Add `pollLoop()`, `updateSessionStatuses()`, visibility API pause |
-| `insta-phone-SAAS-sneder/app/planner_routes.py` | Add `/phone-added` endpoint for auto-regeneration |
+| `insta-phone-SAAS-sneder/app/static/js/weekly-plan.js` | Pre-existing: `pollLoop()`, `updateSessionStatuses()`, visibility API pause |
+| `insta-phone-SAAS-sneder/app/planner_routes.py` | Pre-existing: `/api/planner/phone-added` endpoint |
+| `insta-phone-SAAS-sneder/tests/test_planner_routes.py` | **NEW tests**: 5 tests for phone-added endpoint |
+
+## Implementation Status
+
+All functionality was implemented in prior sections (05 and 04). This section adds test coverage for the `phone-added` endpoint.
+
+### Pre-existing in weekly-plan.js
+- `pollLoop()` — setTimeout-based, 30s interval, fetches `/api/planner/today-sessions`
+- `updateSessionStatuses()` — DOM diffing by session_id, updates status classes
+- Visibility API — pauses polling when tab hidden, resumes on visible
+- Set comparison for structural changes vs status-only updates
+
+### Pre-existing in planner_routes.py
+- `POST /api/planner/phone-added` — triggers `regenerate_remaining_days(proxy_id, date.today())`
+- `@login_required` decorator
+- Error handling: 400 on missing proxy_id, 400 on service errors
 
 ## Tests
 
-```
-# Verify: session blocks update status every 30s
-# Verify: completed=green check, running=pulse blue, failed=red X
-# Verify: polling uses setTimeout (not setInterval) -- no request accumulation
-# Verify: polling pauses when tab hidden, resumes on visibility
-# Verify: phone-added triggers regeneration and timeline refreshes
-```
+File: `insta-phone-SAAS-sneder/tests/test_planner_routes.py` — **5 new tests added (26 total, all passing)**
 
-```python
-# Test: POST /api/planner/phone-added triggers regenerate_remaining_days
-# Test: POST /api/planner/phone-added returns 200 with updated plan
-# Test: POST /api/planner/phone-added returns 404 if no active plan
-# Test: POST /api/planner/phone-added requires @login_required
-```
-
-## Implementation Details
-
-### 8.1 Polling Loop
-
-Add to `weekly-plan.js`:
-
-```javascript
-let pollTimeoutId = null;
-
-async function pollLoop() {
-    try {
-        const resp = await fetch(`/api/planner/today-sessions?proxy_id=${currentProxyId}`);
-        const data = await resp.json();
-
-        // Detect structural change (regeneration/day rollover)
-        const currentIds = new Set([...document.querySelectorAll('[data-session-id]')].map(el => el.dataset.sessionId));
-        const newIds = new Set(data.sessions.map(s => s.session_id));
-
-        if (setsEqual(currentIds, newIds)) {
-            updateSessionStatuses(data.sessions);  // lightweight DOM update
-        } else {
-            renderTimeline(data.sessions);  // full re-render
-        }
-    } catch (err) {
-        console.error('Poll failed:', err);
-    }
-    pollTimeoutId = setTimeout(pollLoop, 30000);
-}
-```
-
-### 8.2 Status Updates
-
-`updateSessionStatuses(sessions)`:
-- Find block by `data-session-id` attribute
-- Compare current status class with new `execution_status`
-- If changed, remove old status class, add new one
-- Status classes: `.status-completed`, `.status-running`, `.status-failed`, `.status-skipped`
-- Skip unchanged blocks (avoid DOM thrash)
-
-**Requires:** Section 05's `renderTimeline()` must set `data-session-id` on each block div.
-
-### 8.3 Visibility API (Pause When Hidden)
-
-```javascript
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-        clearTimeout(pollTimeoutId);
-    } else {
-        pollLoop();  // resume immediately
-    }
-});
-```
-
-### 8.4 Start Polling
-
-In `DOMContentLoaded` handler (after `loadTodaySessions()`):
-```javascript
-pollLoop();
-```
-
-### 8.5 Auto-Regeneration on Phone Add
-
-**API endpoint** (add to `planner_routes.py`):
-
-```python
-@planner_bp.route('/api/planner/phone-added', methods=['POST'])
-@login_required
-def phone_added():
-    """Triggered after phone add. Regenerates remaining days."""
-    proxy_id = request.get_json().get('proxy_id')
-    result = regenerate_remaining_days(proxy_id, date.today())
-    return jsonify(result), 200
-```
-
-**Frontend trigger:** In phone-add flow (Phone Settings), after success, POST to `/api/planner/phone-added` with `proxy_id`. Weekly plan page picks up changes via next poll cycle.
-
-### 8.6 Full Re-render vs Status-Only
-
-- **Status-only** (common): same session_ids, only execution_status changed. Use `updateSessionStatuses()`.
-- **Structure change** (rare): session_id set differs. Trigger full `renderTimeline()`.
-
-Detection: compare session_id sets between DOM and API response.
-
-### 8.7 Error Handling
-
-- **Network error:** Log, schedule next poll at 60s (extended). No toast (too noisy).
-- **401 Unauthorized:** Redirect to login.
-- **Empty response:** Valid (no sessions today). Keep timeline as-is.
-- **3 consecutive failures:** Optionally show small "offline" indicator.
+1. `test_phone_added_triggers_regenerate` — verifies mock called
+2. `test_phone_added_returns_updated_plan` — checks response has `days`
+3. `test_phone_added_400_on_error` — ValueError -> 400
+4. `test_phone_added_400_no_proxy` — missing proxy_id -> 400
+5. `test_phone_added_requires_auth` — unauthenticated -> 302/401
 
 ## Key Decisions
 
-1. **setTimeout over setInterval** -- prevents request pile-up
-2. **30-second interval** -- balance between freshness and load
-3. **Visibility API pause** -- no polling when tab hidden
-4. **DOM diffing by session_id set** -- avoids visual flicker on status-only updates
-5. **Auto-regen as server POST** -- phone-add triggers it, weekly plan picks up via polling
+1. **setTimeout over setInterval** — prevents request pile-up
+2. **30-second interval** — balance between freshness and server load
+3. **Visibility API pause** — no polling when tab hidden
+4. **DOM diffing by session_id set** — avoids visual flicker on status-only updates
+5. **Auto-regen as server POST** — phone-add triggers it, weekly plan picks up via polling
