@@ -484,6 +484,7 @@ class InterventionLog(db.Model):
     __tablename__ = 'intervention_log'
 
     id = db.Column(db.Integer, primary_key=True)
+    bot_id = db.Column(db.Integer, db.ForeignKey('bot.id'), nullable=True)
     bot_account_id = db.Column(db.Integer, db.ForeignKey('bot_account.id'), nullable=False)
     session_id = db.Column(db.String(100), nullable=False)
     intervention_type = db.Column(db.String(20), nullable=False)

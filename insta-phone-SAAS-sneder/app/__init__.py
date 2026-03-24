@@ -49,6 +49,8 @@ def ensure_columns(db):
         "ALTER TABLE bot_account ADD COLUMN warmup_json JSON",
         "ALTER TABLE bot_account ADD COLUMN niche_json JSON",
         "ALTER TABLE bot_account ADD COLUMN notify_before_post BOOLEAN DEFAULT 1",
+        # InterventionLog new columns (section-03 remote intervention)
+        "ALTER TABLE intervention_log ADD COLUMN bot_id INTEGER REFERENCES bot(id)",
     ]
 
     from sqlalchemy import text
@@ -137,6 +139,7 @@ def create_app():
     from .personality_routes import personality_bp
     from .timing_routes import timing_bp_api
     from .content_routes import content_bp
+    from .intervention_routes import intervention_bp
     app.register_blueprint(auth)
     app.register_blueprint(analysis)
     app.register_blueprint(proxy_bp)
@@ -144,6 +147,7 @@ def create_app():
     app.register_blueprint(personality_bp)
     app.register_blueprint(timing_bp_api)
     app.register_blueprint(content_bp)
+    app.register_blueprint(intervention_bp)
 
     # Start proxy health-check thread (skip in tests)
     if not app.config.get('TESTING'):
