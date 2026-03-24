@@ -141,6 +141,7 @@ def create_app():
     from .content_routes import content_bp
     from .intervention_routes import intervention_bp
     from .scrcpy_routes import scrcpy_bp
+    from .tunnel_routes import tunnel_bp
     app.register_blueprint(auth)
     app.register_blueprint(analysis)
     app.register_blueprint(proxy_bp)
@@ -150,6 +151,7 @@ def create_app():
     app.register_blueprint(content_bp)
     app.register_blueprint(intervention_bp)
     app.register_blueprint(scrcpy_bp)
+    app.register_blueprint(tunnel_bp)
 
     # Start proxy health-check thread (skip in tests)
     if not app.config.get('TESTING'):
