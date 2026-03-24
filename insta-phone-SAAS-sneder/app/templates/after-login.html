@@ -36,6 +36,17 @@
         <div class="sidebar-icon" title="Analytics" onclick="window.location.href='/analysis'">
             <i class="fas fa-chart-bar"></i>
         </div>
+        <div class="sidebar-icon" id="tunnel-status-icon" title="Remote Tunnel">
+            <i class="fas fa-globe" id="tunnel-icon-globe"></i>
+            <span class="tunnel-dot" style="display:none;">&#9679;</span>
+        </div>
+        <div id="tunnel-url-bar" style="display:none;">
+            <small><a href="#" id="tunnel-url-link" target="_blank" rel="noopener"></a></small>
+            <button class="btn btn-xs btn-outline-danger" id="tunnel-stop-btn">Stop</button>
+        </div>
+        <div id="tunnel-start-bar">
+            <button class="btn btn-xs btn-outline-success" id="tunnel-start-btn">Start Tunnel</button>
+        </div>
         <div class="sidebar-icon logout-icon" title="Logout">
             <a href="{{ url_for('auth.logout') }}"><i class="fas fa-sign-out-alt logout-icon"></i></a>
         </div>
@@ -639,6 +650,10 @@
         </div>
     </div>
 <script type="module"  src="{{ url_for('static', filename='js/after_login_scripts.js') }}"></script>
+<script type="module">
+import { startPolling, wireEvents } from '/static/js/intervention.js';
+document.addEventListener('DOMContentLoaded', () => { wireEvents(); startPolling(); });
+</script>
 <div id="toaster-container" class="toaster-container"></div>
 <div class="custom-confirm-modal" id="confirmModal" style="display: none;">
     <div class="confirm-content">
