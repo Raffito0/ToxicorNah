@@ -239,92 +239,168 @@ class PopupGuardian:
         return False
 
     def _dismiss(self, result):
-        """Dismiss a popup with 4-level escalation. Fastest path first.
+        """Dismiss a popup using the right tool for each dismiss method.
 
-        Level 1: press_back (free, ~0.7s total, works 95% of cases)
-        Level 2: Gemini coords from original detection (~2.5s, for stubborn popups)
-        Level 3: find_element_by_vision focused search (~2s, precise button finding)
-        Level 4: Hardcoded fallback zones (~0.6s, last resort)
+        Gemini classifies the popup and returns dismiss_method + dismiss_text.
+        This function uses the appropriate tool for each method:
+        - tap_button: OCR finds exact text coords → tap (fallback: Gemini bbox)
+        - tap_x: Gemini bbox with focused prompt → tap
+        - press_back: BACK + same-page verification
+        - tap_outside: tap on backdrop area
 
-        Verification between levels uses fingerprint comparison (free, ~0.05s)
-        instead of Gemini API calls. Only escalates to Gemini verify if fingerprint
-        is ambiguous.
+        Escalation: primary method → fallback methods → log error.
         """
-        # Simulate reading the popup (human behavior)
+        from ..core import ocr as ocr_mod
+
         time.sleep(self.human.timing("t_popup_read"))
 
-        # Snapshot fingerprint BEFORE dismiss attempt (with popup on screen)
-        _, fp_with_popup = self.take_fingerprint()
+        # Single screenshot for fingerprint + page detection
+        pre_shot = self.adb.screenshot_bytes()
+        fp_with_popup = page_state.screen_fingerprint(pre_shot) if pre_shot else None
+        pre_page = page_state.detect_page(
+            pre_shot, self.adb.screen_w, self.adb.screen_h
+        ).get("page", "unknown") if pre_shot else "unknown"
 
-        # ── Level 1: press_back ──────────────────────────────────────────
-        log.info("PopupGuardian: L1 press_back")
-        self.adb.press_back()
-        time.sleep(self.human.timing("t_popup_dismiss"))
+        method = result.get("dismiss_method", "press_back")
+        dismiss_text = result.get("dismiss_text")
+        sw, sh = self.adb.screen_w, self.adb.screen_h
 
-        if self._verify_dismissed(fp_with_popup, "L1"):
-            return True
+        # Build ordered list of strategies based on primary method
+        strategies = []
+        if method == "tap_button" and dismiss_text:
+            strategies.append(("ocr_text", dismiss_text))
+            strategies.append(("gemini_bbox_button", dismiss_text))
+            strategies.append(("press_back_safe", None))
+        elif method == "tap_x":
+            strategies.append(("gemini_bbox_x", None))
+            strategies.append(("press_back_safe", None))
+            strategies.append(("tap_outside", None))
+        elif method == "press_back":
+            strategies.append(("press_back_safe", None))
+            strategies.append(("gemini_find_button", None))
+            strategies.append(("tap_outside", None))
+        elif method == "tap_outside":
+            strategies.append(("tap_outside", None))
+            strategies.append(("press_back_safe", None))
+            strategies.append(("gemini_find_button", None))
+        else:
+            strategies.append(("press_back_safe", None))
+            strategies.append(("gemini_find_button", None))
 
-        # ── Level 2: Gemini coords from original detection ───────────────
-        dx = result.get("dismiss_x")
-        dy = result.get("dismiss_y")
-        if dx is not None and dy is not None:
-            self.stats["dismiss_retries"] += 1
-            log.info("PopupGuardian: L2 tap Gemini coords (%d, %d) [%s]",
-                     dx, dy, result.get("dismiss_label", "?"))
-            time.sleep(self.human.timing("t_popup_read") * 0.3)
-            tx, ty = self.human.jitter_tap(dx, dy)
-            self.adb.tap(tx, ty)
-            time.sleep(self.human.timing("t_popup_dismiss"))
+        for strategy, param in strategies:
+            log.info("PopupGuardian: trying strategy '%s' (param=%s)", strategy, param)
 
-            if self._verify_dismissed(fp_with_popup, "L2"):
-                return True
+            if strategy == "ocr_text":
+                # OCR finds exact text coordinates (~300ms)
+                shot = self.adb.screenshot_bytes()
+                if shot:
+                    import cv2, numpy as np
+                    arr = np.frombuffer(shot, np.uint8)
+                    bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    coords = ocr_mod.find_text_coord(bgr, param, (0.0, 0.0, 1.0, 1.0))
+                    if coords:
+                        tx, ty = self.human.jitter_tap(coords[0], coords[1])
+                        log.info("PopupGuardian: OCR found '%s' at (%d,%d)", param, tx, ty)
+                        self.adb.tap(tx, ty)
+                        time.sleep(self.human.timing("t_popup_dismiss"))
+                        if self._verify_dismissed(fp_with_popup, f"ocr_{param}"):
+                            return True
+                    else:
+                        log.info("PopupGuardian: OCR could not find '%s'", param)
 
-        # ── Level 3: find_element_by_vision (focused button search) ──────
-        self.stats["dismiss_retries"] += 1
-        log.info("PopupGuardian: L3 find_element_by_vision for dismiss button")
-        screenshot = self.adb.screenshot_bytes()
-        if screenshot:
-            coords = gemini.find_element_by_vision(
-                screenshot,
-                "the X, Close, Not now, Don't allow, Cancel, or dismiss button on the popup",
-                self.adb.screen_w, self.adb.screen_h)
-            self.stats["gemini_calls"] += 1
+            elif strategy == "gemini_bbox_button":
+                # Gemini bbox for a specific button text — hyper-focused prompt
+                shot = self.adb.screenshot_bytes()
+                if shot:
+                    popup_desc = result.get("popup_text", "popup")
+                    bbox = gemini.find_element_by_vision(
+                        shot,
+                        f"the button or text that says exactly '{param}' "
+                        f"on the '{popup_desc}' dialog/popup. "
+                        f"Find ONLY the '{param}' button, nothing else.",
+                        sw, sh)
+                    self.stats["gemini_calls"] += 1
+                    if bbox:
+                        tx, ty = self.human.jitter_tap(bbox[0], bbox[1])
+                        log.info("PopupGuardian: bbox found '%s' at (%d,%d)", param, tx, ty)
+                        self.adb.tap(tx, ty)
+                        time.sleep(self.human.timing("t_popup_dismiss"))
+                        if self._verify_dismissed(fp_with_popup, f"bbox_{param}"):
+                            return True
 
-            if coords:
-                tx, ty = self.human.jitter_tap(coords[0], coords[1])
-                log.info("PopupGuardian: L3 tapping found button at (%d, %d)", tx, ty)
-                self.adb.tap(tx, ty)
+            elif strategy == "gemini_bbox_x":
+                # Gemini bbox for X close button — hyper-focused with popup context
+                shot = self.adb.screenshot_bytes()
+                if shot:
+                    popup_desc = result.get("popup_text", "popup")
+                    bbox = gemini.find_element_by_vision(
+                        shot,
+                        f"the small X close/dismiss icon on the '{popup_desc}' "
+                        f"banner or popup. This is a tiny X or x symbol, "
+                        f"NOT a search icon, NOT a magnifying glass, NOT a navigation icon. "
+                        f"It is the dismiss/close control for the '{popup_desc}' element only.",
+                        sw, sh)
+                    self.stats["gemini_calls"] += 1
+                    if bbox:
+                        tx, ty = self.human.jitter_tap(bbox[0], bbox[1])
+                        log.info("PopupGuardian: bbox X at (%d,%d) for '%s'",
+                                 tx, ty, popup_desc)
+                        self.adb.tap(tx, ty)
+                        time.sleep(self.human.timing("t_popup_dismiss"))
+                        if self._verify_dismissed(fp_with_popup, "bbox_x"):
+                            return True
+
+            elif strategy == "gemini_find_button":
+                # Fresh Gemini search for ANY dismiss button
+                shot = self.adb.screenshot_bytes()
+                if shot:
+                    coords = gemini.find_element_by_vision(
+                        shot,
+                        "the X, Close, Not now, Don't allow, Cancel, Skip, "
+                        "or dismiss button on the popup/banner/overlay",
+                        sw, sh)
+                    self.stats["gemini_calls"] += 1
+                    if coords:
+                        tx, ty = self.human.jitter_tap(coords[0], coords[1])
+                        log.info("PopupGuardian: Gemini find_button at (%d,%d)", tx, ty)
+                        self.adb.tap(tx, ty)
+                        time.sleep(self.human.timing("t_popup_dismiss"))
+                        if self._verify_dismissed(fp_with_popup, "find_button"):
+                            return True
+
+            elif strategy == "press_back_safe":
+                # BACK with same-page verification
+                self.adb.press_back()
                 time.sleep(self.human.timing("t_popup_dismiss"))
+                post_shot = self.adb.screenshot_bytes()
+                post_page = page_state.detect_page(
+                    post_shot, sw, sh
+                ).get("page", "unknown") if post_shot else "unknown"
 
-                if self._verify_dismissed(fp_with_popup, "L3"):
+                if pre_page != "unknown" and post_page != "unknown" and pre_page != post_page:
+                    log.warning("PopupGuardian: BACK navigated away (%s -> %s), "
+                                "popup still on %s — aborting dismiss (caller will retry)",
+                                pre_page, post_page, pre_page)
+                    return False
+                if self._verify_dismissed(fp_with_popup, "back_safe"):
                     return True
 
-        # ── Level 4: Hardcoded fallback zones ────────────────────────────
-        self.stats["dismiss_retries"] += 1
-        sw, sh = self.adb.screen_w, self.adb.screen_h
-        fallback_zones = [
-            # Top-right X button (common on bottom sheets, dialogs)
-            (int(sw * 0.92), int(sh * 0.38), "top-right X"),
-            # Bottom-center button (OK, Accept, Not now)
-            (int(sw * 0.50), int(sh * 0.58), "bottom-center button"),
-            # press_back one more time
-            (None, None, "press_back"),
-        ]
+            elif strategy == "tap_outside":
+                # Tap backdrop areas (above and below modal)
+                for fx, fy, desc in [
+                    (int(sw * 0.50), int(sh * 0.10), "above"),
+                    (int(sw * 0.50), int(sh * 0.90), "below"),
+                ]:
+                    tx, ty = self.human.jitter_tap(fx, fy)
+                    log.info("PopupGuardian: tap outside %s (%d,%d)", desc, tx, ty)
+                    self.adb.tap(tx, ty)
+                    time.sleep(self.human.timing("t_popup_dismiss") * 0.7)
+                    if self._verify_dismissed(fp_with_popup, f"outside_{desc}"):
+                        return True
 
-        for fx, fy, desc in fallback_zones:
-            log.info("PopupGuardian: L4 fallback: %s", desc)
-            if fx is not None:
-                tx, ty = self.human.jitter_tap(fx, fy)
-                self.adb.tap(tx, ty)
-            else:
-                self.adb.press_back()
-            time.sleep(self.human.timing("t_popup_dismiss") * 0.7)
+            self.stats["dismiss_retries"] += 1
 
-            if self._verify_dismissed(fp_with_popup, "L4"):
-                return True
-
-        # If we're here, nothing worked.
-        log.error("PopupGuardian: ALL dismiss levels failed. Popup may still be on screen.")
+        log.error("PopupGuardian: ALL strategies failed. Popup may still be on screen.")
         _, fp = self.take_fingerprint()
         if fp:
             self._last_clean_fp = fp
@@ -878,6 +954,8 @@ class TikTokBot:
         # Dynamic tab cache (scanned once per session)
         self._cached_bottom_tabs = None  # list of detected bottom tab names
         self._cached_top_tabs = None     # list of detected top tab names
+        # Pre-post intervention callback (set by Flask worker for Telegram notification)
+        self._pre_post_callback = None  # callable(reason) -> None
         # Set screen-specific params for page_state (dynamic _NAV_Y based on density)
         from ..core import page_state
         page_state.set_screen_params(adb.screen_h, adb._density)
@@ -912,6 +990,32 @@ class TikTokBot:
             metadata=metadata or {},
         )
         monitor_log(event)
+
+    # --- Pre-post intervention gate -------------------------------------------
+
+    def _check_pre_post_pause(self, reason: str = "") -> str:
+        """
+        If a pre-post callback is registered AND the intervention gate is available,
+        signal it and block until resolved.
+        Returns 'approve' | 'skip' | 'timeout'.
+        If no callback is registered (standalone mode), returns 'approve' immediately.
+        """
+        if not self._pre_post_callback:
+            return "approve"
+        try:
+            from ..core.intervention import get_gate
+        except ImportError:
+            return "approve"
+        gate = get_gate()
+        phone_id = self.adb.phone.get("id", 0)
+        gate.request_pause(phone_id=phone_id, reason=reason)
+        try:
+            self._pre_post_callback(reason)
+        except Exception as e:
+            log.warning("Pre-post callback error: %s", e)
+        decision = gate.check_and_wait(phone_id=phone_id, timeout_s=1800)
+        log.info("Pre-post pause decision for phone %d: %s", phone_id, decision)
+        return decision
 
     # --- Sidebar pixel scan (zero AI, <50ms) --------------------------------
 
@@ -2133,7 +2237,7 @@ class TikTokBot:
     def _browse_messages_glance(self):
         """Brief DM/Messages glance — open, look, close. NEVER interact with conversations."""
         log.info("[DM] opening messages for brief glance")
-        if self._inbox_enter_subpage("Messages", "Messages"):
+        if self._inbox_enter_subpage("Messages"):
             time.sleep(self.human.timing("t_message_glance"))
             # Maybe scroll once (40% chance)
             if random.random() < 0.4:
@@ -5291,12 +5395,17 @@ JSON only, no markdown."""
             # --- Post video at the right time ---
             if should_post and not post_done and elapsed >= post_after:
                 if video_path:
-                    result = self.post_video(video_path, caption)
-                    post_done = True
-                    self._last_post_result = result
-                    if result == "success":
-                        self.go_to_fyp()
-                        time.sleep(self.human.timing("t_nav_settle"))
+                    decision = self._check_pre_post_pause(reason="browse_session post")
+                    if decision == "approve":
+                        result = self.post_video(video_path, caption)
+                        post_done = True
+                        self._last_post_result = result
+                        if result == "success":
+                            self.go_to_fyp()
+                            time.sleep(self.human.timing("t_nav_settle"))
+                    else:
+                        log.info("Pre-post pause: decision=%s — skipping post", decision)
+                        post_done = True
                     continue
 
             # Behavior #1: Zona morta (dead stare, no touch)

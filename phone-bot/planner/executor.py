@@ -811,6 +811,13 @@ class SessionExecutor:
         pkg = TIKTOK_PKG if platform == "tiktok" else INSTAGRAM_PKG
         post_fn = bot.post_video if platform == "tiktok" else bot.post_reel
 
+        # Pre-post intervention gate check (delegates to bot method)
+        if hasattr(bot, '_check_pre_post_pause'):
+            decision = bot._check_pre_post_pause(reason="executor post")
+            if decision != "approve":
+                log.info("Pre-post pause: decision=%s — skipping post for phone %d", decision, phone_id)
+                return "skipped"
+
         for attempt in range(2):
             result = post_fn(video_path, caption)
             log.info("Post attempt %d/%d: %s (platform=%s, phone=%d)",
