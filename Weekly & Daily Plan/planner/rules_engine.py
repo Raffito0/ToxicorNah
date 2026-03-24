@@ -6,19 +6,15 @@ from . import config
 
 
 # ─── R1: Daily Order of Accounts ─────────────────────────────────────────────
-def randomize_phone_order(accounts=None, phones=None):
+def randomize_phone_order(accounts, phones):
     """Randomize the order of phones for the day.
     Within each phone, TikTok and Instagram order is also randomized.
     Returns list of (phone_id, [account_name_1, account_name_2]).
 
     Args:
-        accounts: list of account dicts. Falls back to config.ACCOUNTS if None.
-        phones: list of phone IDs. Falls back to config.PHONES if None.
+        accounts: list of account dicts (required).
+        phones: list of phone IDs (required).
     """
-    if accounts is None:
-        accounts = config.ACCOUNTS
-    if phones is None:
-        phones = config.PHONES
     phones = list(phones)
     random.shuffle(phones)
 
@@ -188,16 +184,14 @@ def should_start_two_day_break(account_state, current_date):
     return days_since >= interval
 
 
-def assign_two_day_break(phone_id, week_dates, state, other_phone_breaks, accounts=None):
+def assign_two_day_break(phone_id, week_dates, state, other_phone_breaks, accounts):
     """Assign a 2-day break to one random account on this phone.
     Ensures no overlap with breaks on other phones.
     Returns (account_name, break_day1, break_day2) or None.
 
     Args:
-        accounts: list of account dicts. Falls back to config.ACCOUNTS if None.
+        accounts: list of account dicts (required).
     """
-    if accounts is None:
-        accounts = config.ACCOUNTS
     phone_accounts = [a for a in accounts if a["phone_id"] == phone_id]
 
     # Find which dates are already taken by other phone breaks
@@ -280,16 +274,14 @@ def apply_post_error(personality):
 
 
 # ─── R15: Cross-Phone Coordination ───────────────────────────────────────────
-def validate_cross_phone(day_date, account_activity, accounts=None):
+def validate_cross_phone(day_date, account_activity, accounts):
     """Ensure at least 1 account on at least 2 phones is active.
     account_activity: dict {account_name: bool (active or not)}
     Returns True if valid, False if violated.
 
     Args:
-        accounts: list of account dicts. Falls back to config.ACCOUNTS if None.
+        accounts: list of account dicts (required).
     """
-    if accounts is None:
-        accounts = config.ACCOUNTS
     active_phones = set()
     for acc in accounts:
         if account_activity.get(acc["name"], True):

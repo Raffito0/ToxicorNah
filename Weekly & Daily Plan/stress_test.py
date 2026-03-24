@@ -10,6 +10,7 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from planner.scheduler import generate_weekly_plan
+from planner import config
 
 NUM_RUNS = 20
 TARGET_DATE = dt_date(2026, 2, 27)  # Week 9
@@ -218,7 +219,7 @@ def main():
 
     for i in range(NUM_RUNS):
         try:
-            plan = generate_weekly_plan(TARGET_DATE)
+            plan = generate_weekly_plan(accounts=config.ACCOUNTS, start_date=TARGET_DATE)
             plan_dict = plan.to_dict()
 
             errs, warns, wknd_pct = validate_plan(plan_dict)

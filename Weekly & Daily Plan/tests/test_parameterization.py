@@ -78,12 +78,86 @@ class TestAccountParameterization:
         finally:
             cfg.ACCOUNTS = original
 
+    def test_no_config_accounts_references_in_source(self):
+        """Verify scheduler, rules_engine, personality don't reference config.ACCOUNTS/PHONES."""
+        import inspect
+        from planner import scheduler, rules_engine, personality
+        for mod in [scheduler, rules_engine, personality]:
+            source = inspect.getsource(mod)
+            assert "config.ACCOUNTS" not in source, f"{mod.__name__} still references config.ACCOUNTS"
+            assert "config.PHONES" not in source, f"{mod.__name__} still references config.PHONES"
+
+    def test_randomize_phone_order_requires_params(self, six_accounts):
+        """randomize_phone_order must require accounts and phones params."""
+        from planner.rules_engine import randomize_phone_order
+        phones = [1, 2, 3]
+        result = randomize_phone_order(accounts=six_accounts, phones=phones)
+        assert len(result) == 3
+        all_names = set()
+        for pid, names in result:
+            all_names.update(names)
+        assert len(all_names) == 6
+
+    def test_validate_cross_phone_requires_accounts(self, six_accounts):
+        """validate_cross_phone must require accounts param."""
+        from planner.rules_engine import validate_cross_phone
+        activity = {a["name"]: True for a in six_accounts}
+        assert validate_cross_phone(date(2026, 3, 22), activity, accounts=six_accounts)
+
+    def test_generate_daily_plan_uses_params(self, six_accounts):
+        """generate_daily_plan accepts accounts and phones params."""
+        from planner.scheduler import generate_daily_plan
+        state = {}
+        initialize_all_accounts(state, date(2026, 3, 22), [a["name"] for a in six_accounts])
+        phones = sorted(set(a["phone_id"] for a in six_accounts))
+        # Build minimal weekly_assignments
+        weekly_assignments = {}
+        for acc in six_accounts:
+            weekly_assignments[acc["name"]] = {
+                "rest_day": None, "one_post_day": None,
+                "two_day_break": None, "rest_weekday": None, "one_post_weekday": None,
+            }
+        daily = generate_daily_plan(date(2026, 3, 22), state, weekly_assignments, six_accounts, phones)
+        assert daily.date == date(2026, 3, 22)
+        assert len(daily.sessions) > 0
+
     def test_initialize_all_accounts_accepts_names(self):
         state = {}
         names = ["test_acc_1", "test_acc_2"]
         result = initialize_all_accounts(state, date(2026, 3, 22), names)
         assert "test_acc_1" in result
         assert "test_acc_2" in result
+
+
+    def test_accounts_required_positional(self):
+        """generate_weekly_plan requires accounts as first arg."""
+        with pytest.raises(TypeError):
+            generate_weekly_plan()
+
+    def test_assign_two_day_break_with_dynamic_accounts(self):
+        """assign_two_day_break works with arbitrary account lists."""
+        from planner.rules_engine import assign_two_day_break
+        from datetime import timedelta
+        accounts = [
+            {"name": "test_tiktok", "phone_id": 99, "platform": "tiktok"},
+            {"name": "test_instagram", "phone_id": 99, "platform": "instagram"},
+        ]
+        week_dates = [date(2026, 3, 23) + timedelta(days=i) for i in range(7)]
+        state = {}
+        result = assign_two_day_break(99, week_dates, state, {}, accounts=accounts)
+        if result:
+            acc_name, d1, d2 = result
+            assert acc_name in ["test_tiktok", "test_instagram"]
+            assert d2 - d1 == timedelta(days=1)
+
+    def test_single_phone_plan_works(self, two_accounts):
+        """Single-phone plans work (R15 may deactivate breaks)."""
+        plan = generate_weekly_plan(accounts=two_accounts, start_date=date(2026, 3, 22))
+        assert len(plan.daily_plans) == 7
+        # All sessions belong to phone 1
+        for dp in plan.daily_plans.values():
+            for s in dp.sessions:
+                assert s.phone_id == 1
 
 
 class TestEngagementCaps:

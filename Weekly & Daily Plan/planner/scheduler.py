@@ -511,12 +511,11 @@ def generate_daily_plan(day_date, state, weekly_assignments, accounts, phones):
 
 
 # --- Weekly Plan ---
-def generate_weekly_plan(accounts=None, start_date=None, state=None):
+def generate_weekly_plan(accounts, start_date=None, state=None):
     """Generate a complete weekly plan (Mon-Sun).
 
     Args:
         accounts: list of account dicts with keys: name, phone_id, platform.
-                  Falls back to config.ACCOUNTS if None.
         start_date: Any date within the desired week. Defaults to today.
         state: personality/scheduling state dict. If None, starts fresh.
                Mutated in place with updated state after generation.
@@ -524,8 +523,6 @@ def generate_weekly_plan(accounts=None, start_date=None, state=None):
     Returns:
         WeeklyPlan object with all daily plans and summaries.
     """
-    if accounts is None:
-        accounts = config.ACCOUNTS
     if start_date is None:
         start_date = date.today()
     if state is None:
