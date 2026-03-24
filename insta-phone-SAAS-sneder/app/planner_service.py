@@ -4,10 +4,13 @@ Handles: account querying, timezone conversion, UPSERT plan storage,
 field name mapping, deterministic session IDs, personality round-trips,
 and warmup service functions.
 """
+import copy
 import json
 import logging
-from datetime import date, datetime, time
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
+
+from sqlalchemy.orm.attributes import flag_modified
 
 from . import db
 from .models import WeeklyPlan, SessionLog, BotAccount, Bot, Phone
@@ -122,7 +125,11 @@ def _convert_times_to_utc(plan_dict):
             if end_et:
                 session["end_time_et"] = end_et
                 h, m = map(int, end_et.split(":"))
-                dt = datetime(day_date.year, day_date.month, day_date.day, h, m, tzinfo=EASTERN)
+                # Handle end times past midnight (e.g., session 23:00-00:30)
+                end_day = day_date
+                if start_et and h < int(start_et.split(":")[0]):
+                    end_day = day_date + timedelta(days=1)
+                dt = datetime(end_day.year, end_day.month, end_day.day, h, m, tzinfo=EASTERN)
                 session["end_time_utc"] = dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -182,12 +189,15 @@ def generate_weekly_plan(proxy_id, week_date=None):
         db.session.add(new_plan)
 
     # Write personality state back to DB
+    # Must deepcopy: _get_accounts_for_proxy may return the same dict object
+    # as ba.personality_json, so SQLAlchemy won't detect in-place mutations.
     for acc in accounts:
         acc_state = state.get(acc["name"])
         if acc_state and acc.get("_bot_account_id"):
             ba = db.session.get(BotAccount, acc["_bot_account_id"])
             if ba:
-                ba.personality_json = acc_state
+                ba.personality_json = copy.deepcopy(acc_state)
+                flag_modified(ba, "personality_json")
 
     db.session.commit()
     return plan_dict
@@ -223,23 +233,25 @@ def get_today_sessions(proxy_id=None):
     today = date.today()
     today_str = today.isoformat()
 
-    # Get plan
+    # Get plan(s)
     if proxy_id:
-        plan_dict = get_current_plan(proxy_id)
+        plan_dicts = []
+        p = get_current_plan(proxy_id)
+        if p:
+            plan_dicts.append(p)
     else:
-        # Get all active plans
+        # Aggregate sessions from ALL active plans
         plans = WeeklyPlan.query.filter_by(status='active').all()
-        plan_dict = None
-        for p in plans:
-            if today_str in (p.plan_json or {}).get("days", {}):
-                plan_dict = p.plan_json
-                break
+        plan_dicts = [p.plan_json for p in plans
+                      if today_str in (p.plan_json or {}).get("days", {})]
 
-    if not plan_dict:
+    if not plan_dicts:
         return []
 
-    day_data = plan_dict.get("days", {}).get(today_str, {})
-    sessions = day_data.get("sessions", [])
+    sessions = []
+    for plan_dict in plan_dicts:
+        day_data = plan_dict.get("days", {}).get(today_str, {})
+        sessions.extend(day_data.get("sessions", []))
 
     # Enrich with execution status
     for session in sessions:
@@ -332,9 +344,7 @@ def update_warmup(account_name, action, **kwargs):
         raise ValueError(f"Unknown warmup action: {action}")
 
     # Force SQLAlchemy to detect the change (JSON column mutation)
-    import copy
     ba.warmup_json = copy.deepcopy(ws)
-    from sqlalchemy.orm.attributes import flag_modified
     flag_modified(ba, "warmup_json")
     db.session.commit()
 
