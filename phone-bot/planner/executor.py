@@ -104,29 +104,31 @@ def _load_plan_from_db(proxy_id=1):
 
     try:
         conn = _get_db()
-        row = conn.execute(
-            "SELECT plan_json FROM weekly_plan "
-            "WHERE proxy_id = ? AND week_number = ? AND year = ? AND status = 'active'",
-            (proxy_id, iso_cal[1], iso_cal[0])
-        ).fetchone()
-        conn.close()
+        try:
+            row = conn.execute(
+                "SELECT plan_json FROM weekly_plan "
+                "WHERE proxy_id = ? AND week_number = ? AND year = ? AND status = 'active'",
+                (proxy_id, iso_cal[1], iso_cal[0])
+            ).fetchone()
 
-        if not row:
-            return None
+            if not row:
+                return None
 
-        plan_data = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+            plan_data = json.loads(row[0]) if isinstance(row[0], str) else row[0]
 
-        # Convert UTC times to Eastern for execution
-        for day_str, day_data in plan_data.get("days", {}).items():
-            for session in day_data.get("sessions", []):
-                if "start_time_utc" in session:
-                    session["start_time"] = _utc_to_eastern(session["start_time_utc"])
-                if "end_time_utc" in session:
-                    session["end_time"] = _utc_to_eastern(session["end_time_utc"])
+            # Convert UTC times to Eastern for execution
+            for day_str, day_data in plan_data.get("days", {}).items():
+                for session in day_data.get("sessions", []):
+                    if "start_time_utc" in session:
+                        session["start_time"] = _utc_to_eastern(session["start_time_utc"])
+                    if "end_time_utc" in session:
+                        session["end_time"] = _utc_to_eastern(session["end_time_utc"])
 
-        return plan_data
+            return plan_data
+        finally:
+            conn.close()
     except Exception as e:
-        log.warning(f"Failed to load plan from DB: {e}")
+        log.warning("Failed to load plan from DB: %s", e)
         return None
 
 
@@ -137,15 +139,17 @@ def _log_session_start_db(session_id, bot_account_id, session_type, dry_run=Fals
 
     try:
         conn = _get_db()
-        conn.execute(
-            "INSERT INTO session_log (bot_account_id, session_id, started_at, session_type, status, dry_run) "
-            "VALUES (?, ?, datetime('now'), ?, 'running', ?)",
-            (bot_account_id, session_id, session_type, dry_run)
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                "INSERT INTO session_log (bot_account_id, session_id, started_at, session_type, status, dry_run) "
+                "VALUES (?, ?, datetime('now'), ?, 'running', ?)",
+                (bot_account_id, session_id, session_type, dry_run)
+            )
+            conn.commit()
+        finally:
+            conn.close()
     except Exception as e:
-        log.warning(f"Failed to log session start to DB: {e}")
+        log.warning("Failed to log session start to DB: %s", e)
 
 
 def _log_session_end_db(session_id, success, error_message=None, post_outcome=None):
@@ -156,15 +160,17 @@ def _log_session_end_db(session_id, success, error_message=None, post_outcome=No
     status = "success" if success else "error"
     try:
         conn = _get_db()
-        conn.execute(
-            "UPDATE session_log SET ended_at = datetime('now'), status = ?, "
-            "error_message = ?, post_outcome = ? WHERE session_id = ?",
-            (status, error_message, post_outcome, session_id)
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                "UPDATE session_log SET ended_at = datetime('now'), status = ?, "
+                "error_message = ?, post_outcome = ? WHERE session_id = ?",
+                (status, error_message, post_outcome, session_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
     except Exception as e:
-        log.warning(f"Failed to log session end to DB: {e}")
+        log.warning("Failed to log session end to DB: %s", e)
 
 
 def check_content_stock(phones: list[int]) -> dict[int, int]:
@@ -230,17 +236,64 @@ class SessionExecutor:
     # --- Warmup State Persistence ------------------------------------------
 
     def _load_warmup_state(self):
-        """Load warmup state from disk."""
+        """Load warmup state — DB first (BotAccount.warmup_json), JSON file fallback."""
+        # Try DB first
+        if _db_available():
+            try:
+                conn = _get_db()
+                try:
+                    rows = conn.execute(
+                        "SELECT username, warmup_json FROM bot_account WHERE warmup_json IS NOT NULL"
+                    ).fetchall()
+                finally:
+                    conn.close()
+                for row in rows:
+                    username, wj = row[0], row[1]
+                    if not wj:
+                        continue
+                    state_dict = json.loads(wj) if isinstance(wj, str) else wj
+                    self.warmup_states[username] = AccountWarmupState.from_dict(state_dict)
+                if self.warmup_states:
+                    log.info("Loaded warmup state for %d accounts from DB", len(self.warmup_states))
+                    return
+            except Exception as e:
+                log.warning("Failed to load warmup state from DB: %s", e)
+
+        # Fallback to JSON file
         if os.path.exists(WARMUP_STATE_FILE):
             with open(WARMUP_STATE_FILE, "r") as f:
                 data = json.load(f)
             for name, state_dict in data.items():
                 self.warmup_states[name] = AccountWarmupState.from_dict(state_dict)
-            log.info("Loaded warmup state for %d accounts", len(self.warmup_states))
+            log.info("Loaded warmup state for %d accounts from file", len(self.warmup_states))
 
     def _save_warmup_state(self):
-        """Save warmup state to disk (atomic: write .tmp then os.replace)."""
+        """Save warmup state — DB first (BotAccount.warmup_json), JSON file fallback."""
         data = {name: state.to_dict() for name, state in self.warmup_states.items()}
+
+        # Try DB first — only skip JSON fallback if ALL accounts were saved
+        if _db_available() and self._account_db_ids:
+            try:
+                conn = _get_db()
+                saved_count = 0
+                try:
+                    for name, state_dict in data.items():
+                        db_id = self._account_db_ids.get(name)
+                        if db_id:
+                            conn.execute(
+                                "UPDATE bot_account SET warmup_json = ? WHERE id = ?",
+                                (json.dumps(state_dict), db_id)
+                            )
+                            saved_count += 1
+                    conn.commit()
+                finally:
+                    conn.close()
+                if saved_count == len(data):
+                    return  # All accounts saved to DB, skip JSON fallback
+            except Exception as e:
+                log.warning("Failed to save warmup state to DB: %s", e)
+
+        # Fallback to JSON file
         tmp_path = WARMUP_STATE_FILE + ".tmp"
         with open(tmp_path, "w") as f:
             json.dump(data, f, indent=2)
@@ -252,8 +305,10 @@ class SessionExecutor:
             return
         try:
             conn = _get_db()
-            rows = conn.execute("SELECT id, username FROM bot_account").fetchall()
-            conn.close()
+            try:
+                rows = conn.execute("SELECT id, username FROM bot_account").fetchall()
+            finally:
+                conn.close()
             for row in rows:
                 self._account_db_ids[row[1]] = row[0]
             if self._account_db_ids:
