@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montaga&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    @page {
+      size: 8.5in 11in;
+      margin: 0;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      line-height: 1.6;
+      color: #1a1a1a;
+      background: #ffffff;
+      width: 8.5in;
+    }
+
+    .page {
+      width: 8.5in;
+      min-height: 11in;
+      padding: 50px;
+      position: relative;
+      page-break-after: always;
+    }
+
+    /* --- Cover --- */
+    .cover {
+      background: #002A5E;
+      margin: -50px -50px 0 -50px;
+      padding: 52px 50px 44px 50px;
+      color: #ffffff;
+      text-align: center;
+    }
+
+    .cover-logo {
+      font-family: 'Montaga', serif;
+      font-size: 20px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-bottom: 28px;
+    }
+
+    .cover-eyebrow {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      color: #00D26A;
+      margin-bottom: 10px;
+    }
+
+    .cover-title {
+      font-family: 'Montaga', serif;
+      font-size: 28px;
+      line-height: 1.25;
+      color: #ffffff;
+      margin-bottom: 6px;
+    }
+
+    .cover-subtitle {
+      font-family: 'Montaga', serif;
+      font-size: 20px;
+      color: rgba(255, 255, 255, 0.75);
+      margin-bottom: 18px;
+    }
+
+    .cover-month {
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .cover-divider {
+      width: 60px;
+      height: 2px;
+      background: #00D26A;
+      margin: 20px auto 0 auto;
+    }
+
+    /* --- Typography --- */
+    h2 {
+      font-family: 'Montaga', serif;
+      font-size: 18px;
+      color: #002A5E;
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #002A5E;
+    }
+
+    h3 {
+      font-family: 'Montaga', serif;
+      font-size: 14px;
+      color: #002A5E;
+      margin-bottom: 8px;
+    }
+
+    p {
+      margin-bottom: 10px;
+    }
+
+    .data-value {
+      font-family: 'Space Mono', monospace;
+      font-weight: 700;
+    }
+
+    .positive { color: #00D26A; }
+    .negative { color: #FF3B3B; }
+
+    /* --- Performance Summary --- */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+
+    .summary-card {
+      background: #f0f4f8;
+      border-radius: 6px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .summary-card .label {
+      font-family: 'Space Mono', monospace;
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: #6b7a8d;
+      margin-bottom: 4px;
+    }
+
+    .summary-card .value {
+      font-family: 'Space Mono', monospace;
+      font-size: 24px;
+      font-weight: 700;
+      color: #002A5E;
+    }
+
+    .summary-card .subtext {
+      font-size: 9px;
+      color: #8a95a3;
+      margin-top: 4px;
+    }
+
+    /* --- Top Performers Table --- */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      font-size: 10.5px;
+    }
+
+    thead th {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #002A5E;
+      background: #f0f4f8;
+      padding: 8px 10px;
+      text-align: left;
+      border-bottom: 2px solid #002A5E;
+    }
+
+    tbody td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e8ecf0;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #fafbfc;
+    }
+
+    .rank-badge {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: #002A5E;
+      background: #e8edf3;
+      border-radius: 4px;
+      padding: 2px 8px;
+      display: inline-block;
+    }
+
+    .rank-1 { background: #ffd700; color: #1a1a1a; }
+    .rank-2 { background: #c0c0c0; color: #1a1a1a; }
+    .rank-3 { background: #cd7f32; color: #ffffff; }
+
+    /* --- Cluster Analysis --- */
+    .cluster-section {
+      margin-bottom: 28px;
+    }
+
+    .cluster-card {
+      background: #f0f4f8;
+      border-radius: 6px;
+      padding: 14px 18px;
+      margin-bottom: 12px;
+      border-left: 4px solid #002A5E;
+    }
+
+    .cluster-card .cluster-name {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #002A5E;
+      margin-bottom: 4px;
+    }
+
+    .cluster-card p {
+      font-size: 10.5px;
+      color: #4a5568;
+      margin-bottom: 0;
+    }
+
+    /* --- CTA Box --- */
+    .cta-box {
+      background: linear-gradient(135deg, #002A5E 0%, #003d80 100%);
+      border-radius: 8px;
+      padding: 28px 32px;
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .cta-box h3 {
+      font-family: 'Montaga', serif;
+      font-size: 20px;
+      color: #ffffff;
+      margin-bottom: 8px;
+    }
+
+    .cta-box p {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 16px;
+    }
+
+    .cta-button {
+      display: inline-block;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      background: #00D26A;
+      color: #ffffff;
+      padding: 10px 32px;
+      border-radius: 6px;
+      text-decoration: none;
+    }
+
+    .cta-url {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: 10px;
+    }
+
+    /* --- Section --- */
+    .section {
+      margin-bottom: 28px;
+    }
+
+    /* --- Footer --- */
+    .report-footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 16px 50px;
+      border-top: 1px solid #e0e5eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .footer-disclaimer {
+      font-size: 7.5px;
+      color: #8a95a3;
+      max-width: 70%;
+      line-height: 1.4;
+    }
+
+    .footer-right {
+      text-align: right;
+    }
+
+    .footer-site {
+      font-family: 'Space Mono', monospace;
+      font-size: 8px;
+      color: #002A5E;
+      font-weight: 700;
+    }
+
+    .footer-page {
+      font-family: 'Space Mono', monospace;
+      font-size: 8px;
+      color: #8a95a3;
+      margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <!-- Cover -->
+    <div class="cover">
+      <div class="cover-logo">EarlyInsider</div>
+      <div class="cover-eyebrow">Free Monthly Report</div>
+      <h1 class="cover-title">Monthly Insider Buying</h1>
+      <div class="cover-subtitle">Backtest Report</div>
+      <div class="cover-month">{{month_year}}</div>
+      <div class="cover-divider"></div>
+    </div>
+
+    <!-- Performance Summary -->
+    <div class="section" style="padding-top: 32px;">
+      <h2>Performance Summary</h2>
+      {{summary}}
+    </div>
+
+    <!-- Top 5 Performers -->
+    <div class="section">
+      <h2>Top 5 Performers</h2>
+      {{top_performers}}
+    </div>
+
+    <!-- Cluster Analysis -->
+    <div class="section">
+      <h2>Cluster Analysis</h2>
+      <div class="cluster-section">
+        {{cluster_analysis}}
+      </div>
+    </div>
+
+    <!-- CTA -->
+    <div class="cta-box">
+      <h3>Get Real-Time Insider Buying Alerts</h3>
+      <p>Stop waiting for monthly reports. Get notified the moment insiders buy.</p>
+      <div class="cta-button">Start Free Trial</div>
+      <div class="cta-url">earlyinsider.com/pricing</div>
+    </div>
+
+    <!-- Footer -->
+    <div class="report-footer">
+      <div class="footer-disclaimer">
+        This report is for informational purposes only and does not constitute financial advice.
+        Past performance does not guarantee future results. Always conduct your own research before
+        making investment decisions.
+      </div>
+      <div class="footer-right">
+        <div class="footer-site">earlyinsider.com</div>
+        <div class="footer-page">Page {{page_number}}</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

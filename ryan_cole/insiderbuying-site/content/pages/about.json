@@ -1,0 +1,13 @@
+{
+  "type": "AboutPage",
+  "title": "About EarlyInsider",
+  "subtitle": "SEC EDGAR publishes over 150,000 Form 4 insider trading filings per year. 80% are routine noise. The 20% that signal genuine conviction reach most investors 24-48 hours late.",
+  "solutionTitle": "The Solution",
+  "solutionParagraphs": [
+    "EarlyInsider monitors SEC EDGAR continuously across 17,325+ companies and parses every Form 3, 4, and 13D filing within seconds of publication. Each filing runs through a conviction-scoring model that weighs trade size, executive track record, and cluster buying patterns.",
+    "Every data point traces back to an SEC filing or verified financial dataset. The platform takes clear analytical positions — BUY, CAUTION, WAIT, NO TRADE — with numeric thresholds and stated conditions that would change each thesis.",
+    "Stating what the system cannot do is as important as stating what it can. Limitations are published on the Methodology page."
+  ],
+  "ctaHeadline": "Your signal pipeline starts here.",
+  "ctaButton": "Start Monitoring Free"
+}

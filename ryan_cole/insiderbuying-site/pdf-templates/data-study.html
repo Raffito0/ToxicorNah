@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montaga&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    @page {
+      size: 8.5in 11in;
+      margin: 0;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      line-height: 1.6;
+      color: #1a1a1a;
+      background: #ffffff;
+      width: 8.5in;
+    }
+
+    .page {
+      width: 8.5in;
+      min-height: 11in;
+      padding: 50px;
+      position: relative;
+      page-break-after: always;
+    }
+
+    /* --- Cover Section --- */
+    .cover-section {
+      background: #002A5E;
+      margin: -50px -50px 0 -50px;
+      padding: 48px 50px 40px 50px;
+      color: #ffffff;
+    }
+
+    .cover-eyebrow {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: rgba(255, 255, 255, 0.6);
+      margin-bottom: 12px;
+    }
+
+    .cover-title {
+      font-family: 'Montaga', serif;
+      font-size: 32px;
+      line-height: 1.2;
+      color: #ffffff;
+      margin-bottom: 8px;
+    }
+
+    .cover-period {
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.7);
+      margin-bottom: 24px;
+    }
+
+    .cover-key-stat {
+      display: inline-block;
+      background: rgba(0, 210, 106, 0.15);
+      border: 1px solid rgba(0, 210, 106, 0.4);
+      border-radius: 6px;
+      padding: 12px 24px;
+    }
+
+    .cover-key-stat .stat-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: rgba(255, 255, 255, 0.7);
+      margin-bottom: 2px;
+    }
+
+    .cover-key-stat .stat-value {
+      font-family: 'Space Mono', monospace;
+      font-size: 28px;
+      font-weight: 700;
+      color: #00D26A;
+    }
+
+    .cover-logo {
+      font-family: 'Montaga', serif;
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.5);
+      position: absolute;
+      top: 50px;
+      right: 50px;
+    }
+
+    /* --- Typography --- */
+    h2 {
+      font-family: 'Montaga', serif;
+      font-size: 18px;
+      color: #002A5E;
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #002A5E;
+    }
+
+    h3 {
+      font-family: 'Montaga', serif;
+      font-size: 14px;
+      color: #002A5E;
+      margin-bottom: 8px;
+    }
+
+    p {
+      margin-bottom: 10px;
+    }
+
+    .data-value {
+      font-family: 'Space Mono', monospace;
+      font-weight: 700;
+    }
+
+    .positive { color: #00D26A; }
+    .negative { color: #FF3B3B; }
+
+    /* --- Key Findings Grid --- */
+    .findings-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+
+    .finding-card {
+      background: #f0f4f8;
+      border-radius: 6px;
+      padding: 16px 18px;
+      border-left: 4px solid #002A5E;
+    }
+
+    .finding-card .finding-number {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #6b7a8d;
+      margin-bottom: 4px;
+    }
+
+    .finding-card .finding-text {
+      font-size: 11px;
+      font-weight: 600;
+      color: #002A5E;
+      line-height: 1.4;
+    }
+
+    /* --- Methodology --- */
+    .methodology-box {
+      background: #f8f9fb;
+      border: 1px solid #e0e5eb;
+      border-radius: 6px;
+      padding: 18px 22px;
+      margin-bottom: 28px;
+    }
+
+    .methodology-box h3 {
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+
+    .methodology-box p {
+      font-size: 10.5px;
+      color: #4a5568;
+    }
+
+    /* --- Charts Area --- */
+    .charts-area {
+      margin-bottom: 28px;
+    }
+
+    .chart-placeholder {
+      background: #f0f4f8;
+      border: 1px dashed #c7cfd8;
+      border-radius: 6px;
+      padding: 40px;
+      text-align: center;
+      color: #8a95a3;
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      margin-bottom: 14px;
+    }
+
+    /* --- Implications --- */
+    .implications-section {
+      margin-bottom: 28px;
+    }
+
+    .implication-item {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+      align-items: flex-start;
+    }
+
+    .implication-bullet {
+      width: 6px;
+      height: 6px;
+      background: #002A5E;
+      border-radius: 50%;
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+
+    /* --- Tables --- */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      font-size: 10.5px;
+    }
+
+    thead th {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #002A5E;
+      background: #f0f4f8;
+      padding: 8px 10px;
+      text-align: left;
+      border-bottom: 2px solid #002A5E;
+    }
+
+    tbody td {
+      padding: 7px 10px;
+      border-bottom: 1px solid #e8ecf0;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #fafbfc;
+    }
+
+    /* --- Section --- */
+    .section {
+      margin-bottom: 28px;
+    }
+
+    /* --- Footer --- */
+    .report-footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 16px 50px;
+      border-top: 1px solid #e0e5eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .footer-disclaimer {
+      font-size: 7.5px;
+      color: #8a95a3;
+      max-width: 70%;
+      line-height: 1.4;
+    }
+
+    .footer-right {
+      text-align: right;
+    }
+
+    .footer-site {
+      font-family: 'Space Mono', monospace;
+      font-size: 8px;
+      color: #002A5E;
+      font-weight: 700;
+    }
+
+    .footer-page {
+      font-family: 'Space Mono', monospace;
+      font-size: 8px;
+      color: #8a95a3;
+      margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <!-- Cover -->
+    <div class="cover-section">
+      <div class="cover-logo">EarlyInsider</div>
+      <div class="cover-eyebrow">Data Study</div>
+      <h1 class="cover-title">{{title}}</h1>
+      <div class="cover-period">{{period}}</div>
+      <div class="cover-key-stat">
+        {{key_stat}}
+      </div>
+    </div>
+
+    <!-- Key Findings -->
+    <div class="section" style="padding-top: 32px;">
+      <h2>Key Findings</h2>
+      <div class="findings-grid">
+        {{key_findings}}
+      </div>
+    </div>
+
+    <!-- Methodology -->
+    <div class="section">
+      <h2>Methodology</h2>
+      <div class="methodology-box">
+        {{methodology}}
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="section">
+      <h2>Data Visualization</h2>
+      <div class="charts-area">
+        {{charts_html}}
+      </div>
+    </div>
+
+    <!-- Implications -->
+    <div class="section">
+      <h2>Implications</h2>
+      <div class="implications-section">
+        {{implications}}
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="report-footer">
+      <div class="footer-disclaimer">
+        This report is for informational purposes only and does not constitute financial advice.
+        Past performance does not guarantee future results. Always conduct your own research before
+        making investment decisions.
+      </div>
+      <div class="footer-right">
+        <div class="footer-site">earlyinsider.com</div>
+        <div class="footer-page">Page {{page_number}}</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "type": "GlobalStyles",
+  "primaryColor": "#002A5E",
+  "accentGreen": "#00D26A",
+  "accentRed": "#FF3B3B",
+  "bgColor": "#FFFFFF",
+  "bgAlt": "#F5F6F8",
+  "textColor": "#1A1A1A",
+  "textSecondary": "#5C6670"
+}

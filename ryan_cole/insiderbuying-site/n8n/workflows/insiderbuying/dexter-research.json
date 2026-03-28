@@ -1,0 +1,69 @@
+{
+  "name": "EarlyInsider — Dexter Research Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dexter-research",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Load dexter-research.js code\nconst { dexterResearch } = require('/home/node/.n8n/code/insiderbuying/dexter-research.js');\n\nconst _https = require('https');\nconst _http = require('http');\nconst { URL } = require('url');\n\n// n8n fetch polyfill\nfunction fetchFn(urlStr, opts = {}) {\n  return new Promise((resolve, reject) => {\n    const u = new URL(urlStr);\n    const mod = u.protocol === 'https:' ? _https : _http;\n    const reqOpts = {\n      hostname: u.hostname,\n      port: u.port,\n      path: u.pathname + u.search,\n      method: opts.method || 'GET',\n      headers: opts.headers || {},\n    };\n    const req = mod.request(reqOpts, (res) => {\n      const chunks = [];\n      res.on('data', (c) => chunks.push(c));\n      res.on('end', () => {\n        const body = Buffer.concat(chunks).toString();\n        resolve({\n          ok: res.statusCode >= 200 && res.statusCode < 300,\n          status: res.statusCode,\n          json: () => Promise.resolve(JSON.parse(body)),\n          text: () => Promise.resolve(body),\n        });\n      });\n    });\n    req.on('error', reject);\n    if (opts.body) req.write(typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body));\n    req.end();\n  });\n}\n\nconst input = $input.first().json;\nconst result = await dexterResearch(input, {\n  fetchFn,\n  env: {\n    FINANCIAL_DATASETS_API_KEY: $env.FINANCIAL_DATASETS_API_KEY,\n    NOCODB_BASE_URL: $env.NOCODB_BASE_URL,\n    NOCODB_API_TOKEN: $env.NOCODB_API_TOKEN,\n  },\n});\n\nreturn [{ json: result }];"
+      },
+      "id": "code-dexter",
+      "name": "Dexter Research",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "model": "models/gemini-2.0-flash",
+        "prompt": "={{ $json.dexter_analysis_prompt }}",
+        "options": { "temperature": 0.3 }
+      },
+      "id": "gemini-preanalysis",
+      "name": "Gemini Pre-Analysis",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [440, 0],
+      "credentials": { "googleGeminiApi": { "id": "gemini-cred", "name": "Google Gemini" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const { parsePreAnalysis } = require('/home/node/.n8n/code/insiderbuying/dexter-research.js');\nconst llmResponse = $input.first().json.text || $input.first().json.output || '';\nconst analysis = parsePreAnalysis(llmResponse);\nconst prev = $('Dexter Research').first().json;\nprev.dexter_analysis = analysis;\nreturn [{ json: prev }];"
+      },
+      "id": "code-merge",
+      "name": "Merge Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [880, 0]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Dexter Research", "type": "main", "index": 0 }]] },
+    "Dexter Research": { "main": [[{ "node": "Gemini Pre-Analysis", "type": "main", "index": 0 }]] },
+    "Gemini Pre-Analysis": { "main": [[{ "node": "Merge Analysis", "type": "main", "index": 0 }]] },
+    "Merge Analysis": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "EarlyInsider" }]
+}

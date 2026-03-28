@@ -1,0 +1,44 @@
+{
+  "name": "EarlyInsider — W12 Image Generation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "w12-image-generation",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { generateImages } = require('/home/node/.n8n/code/insiderbuying/generate-image.js');\n\nconst _https = require('https');\nconst _http = require('http');\nconst { URL } = require('url');\n\nfunction fetchFn(urlStr, opts = {}) {\n  return new Promise((resolve, reject) => {\n    const u = new URL(urlStr);\n    const mod = u.protocol === 'https:' ? _https : _http;\n    const reqOpts = {\n      hostname: u.hostname, port: u.port,\n      path: u.pathname + u.search,\n      method: opts.method || 'GET',\n      headers: opts.headers || {},\n    };\n    const req = mod.request(reqOpts, (res) => {\n      const chunks = [];\n      res.on('data', (c) => chunks.push(c));\n      res.on('end', () => {\n        const body = Buffer.concat(chunks);\n        resolve({\n          ok: res.statusCode >= 200 && res.statusCode < 300,\n          status: res.statusCode,\n          json: () => Promise.resolve(JSON.parse(body.toString())),\n          text: () => Promise.resolve(body.toString()),\n          arrayBuffer: () => Promise.resolve(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)),\n        });\n      });\n    });\n    req.on('error', reject);\n    if (opts.body) {\n      if (Buffer.isBuffer(opts.body)) req.write(opts.body);\n      else req.write(typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body));\n    }\n    req.end();\n  });\n}\n\nconst input = $input.first().json;\nconst result = await generateImages(input, {\n  fetchFn,\n  env: {\n    NOCODB_BASE_URL: $env.NOCODB_BASE_URL,\n    NOCODB_API_TOKEN: $env.NOCODB_API_TOKEN,\n    FAL_KEY: $env.FAL_KEY,\n    SCREENSHOT_SERVER_URL: $env.SCREENSHOT_SERVER_URL || 'http://host.docker.internal:3456',\n    R2_ACCOUNT_ID: $env.R2_ACCOUNT_ID,\n    R2_ACCESS_KEY_ID: $env.R2_ACCESS_KEY_ID,\n    R2_SECRET_ACCESS_KEY: $env.R2_SECRET_ACCESS_KEY,\n    R2_PUBLIC_URL: $env.R2_PUBLIC_URL,\n  },\n});\n\nreturn [{ json: result }];"
+      },
+      "id": "code-images",
+      "name": "Generate Images",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [440, 0]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Generate Images", "type": "main", "index": 0 }]] },
+    "Generate Images": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "EarlyInsider" }]
+}

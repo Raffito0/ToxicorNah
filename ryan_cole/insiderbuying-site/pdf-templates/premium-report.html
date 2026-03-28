@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montaga&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    @page {
+      size: 8.5in 11in;
+      margin: 0;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      line-height: 1.6;
+      color: #1a1a1a;
+      background: #ffffff;
+      width: 8.5in;
+    }
+
+    .page {
+      width: 8.5in;
+      min-height: 11in;
+      padding: 50px;
+      position: relative;
+      page-break-after: always;
+    }
+
+    /* --- Cover --- */
+    .cover {
+      background: #002A5E;
+      margin: -50px -50px 0 -50px;
+      padding: 48px 50px 40px 50px;
+      color: #ffffff;
+    }
+
+    .cover-logo {
+      font-family: 'Montaga', serif;
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.5);
+      position: absolute;
+      top: 50px;
+      right: 50px;
+    }
+
+    .cover-badge {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 4px;
+      padding: 4px 12px;
+      display: inline-block;
+      margin-bottom: 14px;
+    }
+
+    .cover-title {
+      font-family: 'Montaga', serif;
+      font-size: 30px;
+      line-height: 1.2;
+      color: #ffffff;
+      margin-bottom: 10px;
+    }
+
+    .cover-ticker {
+      font-family: 'Space Mono', monospace;
+      font-size: 18px;
+      font-weight: 700;
+      color: #00D26A;
+      margin-bottom: 6px;
+    }
+
+    .cover-date {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.65);
+    }
+
+    /* --- Typography --- */
+    h2 {
+      font-family: 'Montaga', serif;
+      font-size: 18px;
+      color: #002A5E;
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #002A5E;
+    }
+
+    h3 {
+      font-family: 'Montaga', serif;
+      font-size: 14px;
+      color: #002A5E;
+      margin-bottom: 8px;
+    }
+
+    p {
+      margin-bottom: 10px;
+    }
+
+    .data-value {
+      font-family: 'Space Mono', monospace;
+      font-weight: 700;
+    }
+
+    .positive { color: #00D26A; }
+    .negative { color: #FF3B3B; }
+
+    /* --- Executive Summary --- */
+    .exec-summary {
+      background: #f0f4f8;
+      border-left: 4px solid #002A5E;
+      border-radius: 0 6px 6px 0;
+      padding: 18px 22px;
+      margin-bottom: 28px;
+      font-size: 11.5px;
+      line-height: 1.7;
+    }
+
+    /* --- Key Findings --- */
+    .findings-list {
+      margin-bottom: 28px;
+    }
+
+    .finding-item {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      align-items: flex-start;
+    }
+
+    .finding-icon {
+      width: 24px;
+      height: 24px;
+      background: #002A5E;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .finding-icon span {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+
+    .finding-content {
+      flex: 1;
+    }
+
+    .finding-content strong {
+      display: block;
+      font-size: 11.5px;
+      color: #002A5E;
+      margin-bottom: 2px;
+    }
+
+    .finding-content p {
+      font-size: 10.5px;
+      color: #4a5568;
+      margin-bottom: 0;
+    }
+
+    /* --- Analysis Sections --- */
+    .analysis-section {
+      margin-bottom: 24px;
+    }
+
+    .analysis-section h3 {
+      margin-bottom: 10px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #e0e5eb;
+    }
+
+    /* --- Risk Assessment --- */
+    .risk-box {
+      background: #fff8f0;
+      border: 1px solid #f0d8b8;
+      border-radius: 6px;
+      padding: 18px 22px;
+      margin-bottom: 28px;
+    }
+
+    .risk-box h3 {
+      color: #c45a00;
+      margin-bottom: 10px;
+    }
+
+    .risk-item {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+      align-items: flex-start;
+    }
+
+    .risk-level {
+      font-family: 'Space Mono', monospace;
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .risk-high {
+      background: #FF3B3B;
+      color: #ffffff;
+    }
+
+    .risk-medium {
+      background: #f0a830;
+      color: #ffffff;
+    }
+
+    .risk-low {
+      background: #00D26A;
+      color: #ffffff;
+    }
+
+    /* --- Conclusion --- */
+    .conclusion-box {
+      background: #f0f4f8;
+      border-radius: 6px;
+      padding: 20px 24px;
+      margin-bottom: 28px;
+      border-top: 3px solid #002A5E;
+    }
+
+    /* --- Tables --- */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      font-size: 10.5px;
+    }
+
+    thead th {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #002A5E;
+      background: #f0f4f8;
+      padding: 8px 10px;
+      text-align: left;
+      border-bottom: 2px solid #002A5E;
+    }
+
+    tbody td {
+      padding: 7px 10px;
+      border-bottom: 1px solid #e8ecf0;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #fafbfc;
+    }
+
+    /* --- Section --- */
+    .section {
+      margin-bottom: 28px;
+    }
+
+    /* --- Footer --- */
+    .report-footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 16px 50px;
+      border-top: 1px solid #e0e5eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .footer-disclaimer {
+      font-size: 7.5px;
+      color: #8a95a3;
+      max-width: 70%;
+      line-height: 1.4;
+    }
+
+    .footer-right {
+      text-align: right;
+    }
+
+    .footer-site {
+      font-family: 'Space Mono', monospace;
+      font-size: 8px;
+      color: #002A5E;
+      font-weight: 700;
+    }
+
+    .footer-page {
+      font-family: 'Space Mono', monospace;
+      font-size: 8px;
+      color: #8a95a3;
+      margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <!-- Cover -->
+    <div class="cover">
+      <div class="cover-logo">EarlyInsider</div>
+      <div class="cover-badge">Premium Report</div>
+      <h1 class="cover-title">{{title}}</h1>
+      <div class="cover-ticker">{{ticker}}</div>
+      <div class="cover-date">{{date}}</div>
+    </div>
+
+    <!-- Executive Summary -->
+    <div class="section" style="padding-top: 32px;">
+      <h2>Executive Summary</h2>
+      <div class="exec-summary">
+        {{executive_summary}}
+      </div>
+    </div>
+
+    <!-- Key Findings -->
+    <div class="section">
+      <h2>Key Findings</h2>
+      <div class="findings-list">
+        {{key_findings}}
+      </div>
+    </div>
+
+    <!-- Detailed Analysis -->
+    <div class="section">
+      <h2>Detailed Analysis</h2>
+      {{analysis_sections}}
+    </div>
+
+    <!-- Risk Assessment -->
+    <div class="section">
+      <h2>Risk Assessment</h2>
+      <div class="risk-box">
+        {{risk_assessment}}
+      </div>
+    </div>
+
+    <!-- Conclusion -->
+    <div class="section">
+      <h2>Conclusion</h2>
+      <div class="conclusion-box">
+        {{conclusion}}
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="report-footer">
+      <div class="footer-disclaimer">
+        This report is for informational purposes only and does not constitute financial advice.
+        Past performance does not guarantee future results. Always conduct your own research before
+        making investment decisions.
+      </div>
+      <div class="footer-right">
+        <div class="footer-site">earlyinsider.com</div>
+        <div class="footer-page">Page {{page_number}}</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

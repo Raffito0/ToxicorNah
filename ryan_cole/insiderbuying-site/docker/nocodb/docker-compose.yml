@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  nocodb:
+    image: nocodb/nocodb:latest
+    restart: always
+    environment:
+      NC_DB: "pg://nocodb_db:5432?u=nocodb&p=${NOCODB_DB_PASSWORD}&d=nocodb"
+      NC_AUTH_JWT_SECRET: "${NOCODB_JWT_SECRET}"
+      NC_PUBLIC_URL: "https://db.earlyinsider.com"
+    depends_on:
+      nocodb_db:
+        condition: service_healthy
+    volumes:
+      - nocodb_data:/usr/app/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nocodb.rule=Host(`db.earlyinsider.com`)"
+      - "traefik.http.routers.nocodb.tls=true"
+      - "traefik.http.routers.nocodb.tls.certresolver=letsencrypt"
+      - "traefik.docker.network=root_default"
+      - "traefik.http.services.nocodb.loadbalancer.server.port=8080"
+    networks:
+      - traefik_net
+      - nocodb_internal
+
+  nocodb_db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: nocodb
+      POSTGRES_PASSWORD: "${NOCODB_DB_PASSWORD}"
+      POSTGRES_DB: nocodb
+    volumes:
+      - nocodb_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nocodb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nocodb_internal
+
+volumes:
+  nocodb_data:
+  nocodb_pg:
+
+networks:
+  traefik_net:
+    external: true
+    name: root_default
+  nocodb_internal:
+    driver: bridge

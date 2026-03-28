@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Brand ── */
+  --color-primary: #000592;
+  --color-primary-dark: #000250;
+  --color-navy: #002A5E;
+
+  /* ── Text ── */
+  --color-text: #1C1B1B;
+  --color-text-secondary: #454556;
+  --color-text-muted: #6B7280;
+
+  /* ── Backgrounds ── */
+  --color-bg-white: #FFFFFF;
+  --color-bg-alt: #F6F3F2;
+  --color-bg-dark: #151414;
+
+  /* ── Signals ── */
+  --color-signal-green: #006D34;
+  --color-signal-green-bg: #C4E6D0;
+  --color-signal-red: #930A0A;
+  --color-signal-red-bg: #FFDAD6;
+
+  /* ── Borders ── */
+  --color-border: #E5E2E1;
+  --color-border-light: #F0EDED;
+
+  /* ── Link ── */
+  --color-link: #000AD2;
+
+  /* ── Aliases (component compatibility) ── */
+  --color-muted: var(--color-text-muted);
+  --color-accent-green: var(--color-signal-green);
+  --color-accent-red: var(--color-signal-red);
+  --color-navy-light: #003d8a;
+
+  /* ── Fonts ── */
+  --font-montaga: "Montaga", serif;
+  --font-inter: "Inter", sans-serif;
+  --font-mono: "Space Mono", monospace;
+
+  /* ── Typography Scale ── */
+  --text-display: 54px;
+  --text-title: 42px;
+  --text-heading: 24px;
+  --text-subheading: 18px;
+  --text-body: 16px;
+  --text-small: 14px;
+  --text-caption: 12px;
+
+  /* ── Spacing ── */
+  --section-y: 96px;
+  --section-y-hero: 128px;
+  --section-y-mobile: 64px;
+  --section-y-hero-mobile: 80px;
+  --gap-section: 64px;
+  --gap-cards: 32px;
+  --gap-items: 24px;
+  --gap-tight: 16px;
+}
+
+body {
+  font-family: var(--font-inter);
+  color: var(--color-text);
+  background-color: var(--color-bg-white);
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-montaga);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

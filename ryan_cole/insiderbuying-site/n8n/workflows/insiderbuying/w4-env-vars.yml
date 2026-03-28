@@ -1,0 +1,28 @@
+# W4 SEC Alerts — Required Environment Variables
+# Add these to /docker/n8n/docker-compose.yml under environment:
+#
+# Claude AI (scoring + analysis)
+# ANTHROPIC_API_KEY: "sk-ant-..."
+#
+# Financial Datasets (Form 4 enrichment)
+# FINANCIAL_DATASETS_API_KEY: "..."
+#
+# Supabase (read/write insider_alerts + user preferences)
+# SUPABASE_URL: "https://<project>.supabase.co"
+# SUPABASE_SERVICE_ROLE_KEY: "eyJ..."  # service role key, NOT anon key
+#
+# Airtable InsiderBuying base
+# AIRTABLE_API_KEY: "pat..."
+# AIRTABLE_BASE_ID: "app..."
+# INSIDER_ALERTS_TABLE_ID: "tbl..."
+# MONITOR_STATE_TABLE_ID: "tbl..."
+#
+# Email delivery
+# RESEND_API_KEY: "re_..."
+#
+# Push notifications
+# ONESIGNAL_APP_ID: "..."
+# ONESIGNAL_REST_API_KEY: "..."
+#
+# Error monitoring (Telegram)
+# TELEGRAM_ALERT_CHAT_ID: "-100..."

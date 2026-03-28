@@ -1,0 +1,107 @@
+{
+  "name": "EarlyInsider — W4 SEC Monitor (After Hours)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 * * * *" }] }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// After-hours guard: skip during NYSE market hours (W4-market handles that)\nconst { checkMarketHours } = require('/home/node/.n8n/code/insiderbuying/market-hours-guard.js');\nconst { isMarketHours } = checkMarketHours(new Date());\nif (isMarketHours) return [];\nreturn [{ json: { afterHours: true } }];"
+      },
+      "id": "guard-afterhours",
+      "name": "After Hours Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { runSecMonitor } = require('/home/node/.n8n/code/insiderbuying/sec-monitor.js');\nconst _https = require('https');\nconst _http = require('http');\nconst { URL } = require('url');\n\nfunction fetchFn(urlStr, opts = {}) {\n  return new Promise((resolve, reject) => {\n    const u = new URL(urlStr);\n    const mod = u.protocol === 'https:' ? _https : _http;\n    const reqOpts = { hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: opts.method || 'GET', headers: { ...opts.headers } };\n    if (opts.body) reqOpts.headers['Content-Type'] = reqOpts.headers['Content-Type'] || 'application/json';\n    const req = mod.request(reqOpts, (res) => {\n      const chunks = [];\n      res.on('data', (c) => chunks.push(c));\n      res.on('end', () => {\n        const body = Buffer.concat(chunks).toString();\n        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, json: () => Promise.resolve(JSON.parse(body)), text: () => Promise.resolve(body) });\n      });\n    });\n    req.on('error', reject);\n    if (opts.body) req.write(typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body));\n    req.end();\n  });\n}\n\nfunction sleep(ms) { return new Promise(r => setTimeout(r, ms)); }\n\nconst filings = await runSecMonitor({ fetchFn, sleep, env: $env });\nreturn filings.map(f => ({ json: f }));"
+      },
+      "id": "code-sec-monitor",
+      "name": "sec-monitor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { scoreAlert } = require('/home/node/.n8n/code/insiderbuying/score-alert.js');\nconst _https = require('https');\nconst _http = require('http');\nconst { URL } = require('url');\n\nfunction fetchFn(urlStr, opts = {}) {\n  return new Promise((resolve, reject) => {\n    const u = new URL(urlStr);\n    const mod = u.protocol === 'https:' ? _https : _http;\n    const reqOpts = { hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: opts.method || 'GET', headers: { ...opts.headers } };\n    if (opts.body) reqOpts.headers['Content-Type'] = reqOpts.headers['Content-Type'] || 'application/json';\n    const req = mod.request(reqOpts, (res) => {\n      const chunks = [];\n      res.on('data', (c) => chunks.push(c));\n      res.on('end', () => {\n        const body = Buffer.concat(chunks).toString();\n        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, json: () => Promise.resolve(JSON.parse(body)), text: () => Promise.resolve(body) });\n      });\n    });\n    req.on('error', reject);\n    if (opts.body) req.write(typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body));\n    req.end();\n  });\n}\n\nconst filing = $input.first().json;\nconst scored = await scoreAlert(filing, { fetchFn, env: $env });\nreturn [{ json: scored }];"
+      },
+      "id": "code-score",
+      "name": "score-alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { analyzeAlert } = require('/home/node/.n8n/code/insiderbuying/analyze-alert.js');\nconst _https = require('https');\nconst _http = require('http');\nconst { URL } = require('url');\n\nfunction fetchFn(urlStr, opts = {}) {\n  return new Promise((resolve, reject) => {\n    const u = new URL(urlStr);\n    const mod = u.protocol === 'https:' ? _https : _http;\n    const reqOpts = { hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: opts.method || 'GET', headers: { ...opts.headers } };\n    if (opts.body) reqOpts.headers['Content-Type'] = reqOpts.headers['Content-Type'] || 'application/json';\n    const req = mod.request(reqOpts, (res) => {\n      const chunks = [];\n      res.on('data', (c) => chunks.push(c));\n      res.on('end', () => {\n        const body = Buffer.concat(chunks).toString();\n        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, json: () => Promise.resolve(JSON.parse(body)), text: () => Promise.resolve(body) });\n      });\n    });\n    req.on('error', reject);\n    if (opts.body) req.write(typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body));\n    req.end();\n  });\n}\n\nconst filing = $input.first().json;\nconst analyzed = await analyzeAlert(filing, { fetchFn, env: $env });\nreturn [{ json: analyzed }];"
+      },
+      "id": "code-analyze",
+      "name": "analyze-alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "score-check",
+              "leftValue": "={{ $json.significance_score }}",
+              "rightValue": 6,
+              "operator": { "type": "number", "operation": "gte" }
+            }
+          ]
+        }
+      },
+      "id": "if-score",
+      "name": "Score >= 6?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { deliverAlert } = require('/home/node/.n8n/code/insiderbuying/deliver-alert.js');\nconst _https = require('https');\nconst _http = require('http');\nconst { URL } = require('url');\n\nfunction fetchFn(urlStr, opts = {}) {\n  return new Promise((resolve, reject) => {\n    const u = new URL(urlStr);\n    const mod = u.protocol === 'https:' ? _https : _http;\n    const reqOpts = { hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: opts.method || 'GET', headers: { ...opts.headers } };\n    if (opts.body) reqOpts.headers['Content-Type'] = reqOpts.headers['Content-Type'] || 'application/json';\n    const req = mod.request(reqOpts, (res) => {\n      const chunks = [];\n      res.on('data', (c) => chunks.push(c));\n      res.on('end', () => {\n        const body = Buffer.concat(chunks).toString();\n        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, json: () => Promise.resolve(JSON.parse(body)), text: () => Promise.resolve(body) });\n      });\n    });\n    req.on('error', reject);\n    if (opts.body) req.write(typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body));\n    req.end();\n  });\n}\n\nfunction sleep(ms) { return new Promise(r => setTimeout(r, ms)); }\n\nconst filing = $input.first().json;\nconst result = await deliverAlert(filing, { fetchFn, sleep, env: $env });\nreturn [{ json: result }];"
+      },
+      "id": "code-deliver",
+      "name": "deliver-alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, -100]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "After Hours Guard", "type": "main", "index": 0 }]] },
+    "After Hours Guard": { "main": [[{ "node": "sec-monitor", "type": "main", "index": 0 }]] },
+    "sec-monitor": { "main": [[{ "node": "score-alert", "type": "main", "index": 0 }]] },
+    "score-alert": { "main": [[{ "node": "analyze-alert", "type": "main", "index": 0 }]] },
+    "analyze-alert": { "main": [[{ "node": "Score >= 6?", "type": "main", "index": 0 }]] },
+    "Score >= 6?": {
+      "main": [
+        [{ "node": "deliver-alert", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "maxConcurrency": 1
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

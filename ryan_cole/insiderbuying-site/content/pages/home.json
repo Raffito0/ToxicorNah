@@ -1,0 +1,30 @@
+{
+  "type": "HomePage",
+  "heroHeadline": "SEC Insider Trades. Seconds, Not Days.",
+  "heroSubheadline": "Every Form 4 filing across 17,325+ public companies — parsed, scored for conviction, and delivered to your inbox in under 60 seconds.",
+  "heroTrustLine": "All data sourced directly from SEC EDGAR.",
+  "heroPrimaryCta": "See Recent Insider Trades",
+  "heroSecondaryCta": "How It Works",
+  "alertFeedHeader": "SEC Form 4 Feed",
+  "alertFeedSubline": "Insider transactions filed with the SEC today. Parsed and scored in real time.",
+  "howItWorksHeader": "Three Steps. Under 60 Seconds.",
+  "howItWorksSteps": [
+    { "title": "Monitor", "desc": "17,325+ public companies. Every Form 3, Form 4, and Schedule 13D filed with the SEC. Continuous monitoring, no gaps." },
+    { "title": "Analyze", "desc": "80% of insider filings are routine compensation or pre-scheduled 10b5-1 plans. Our scoring model isolates the 20% that signal genuine conviction — and tells you why." },
+    { "title": "Deliver", "desc": "Filing to inbox: under 60 seconds. The average retail investor sees the same data 24-48 hours later. 25% of abnormal returns from insider purchases accrue within 5 trading days." }
+  ],
+  "statsHeader": "The Academic Case for Insider Signal Intelligence",
+  "stats": [
+    { "value": "10.2%", "label": "Annual Outperformance", "desc": "Corporate insider purchase portfolios outperformed the market by 10.2% per year over the study period.", "source": "Source: Jeng, Metrick & Zeckhauser, Harvard/Wharton, 1999" },
+    { "value": "25%", "label": "Returns in First 5 Days", "desc": "One quarter of abnormal returns following insider purchases accrue within the first 5 trading days of the filing. Speed of delivery is not a feature — it is the thesis.", "source": "Source: Jeng, Metrick & Zeckhauser, Harvard/Wharton, 1999" },
+    { "value": "60%", "label": "Predictive of 1-Year Returns", "desc": "Aggregate insider trading activity predicts up to 60% of variation in one-year-ahead market returns.", "source": "Source: Seyhun, Journal of Law and Economics, 1992" }
+  ],
+  "reportsHeader": "Institutional-Grade Research at Analyst Pricing",
+  "reportsSubheadline": "Single-stock deep dives, sector analysis, and dividend safety reports. SEC insider data cross-referenced with fundamentals. Each report includes an explicit verdict.",
+  "pricingHeader": "Choose Your Signal Level",
+  "pricingSubheadline": "All plans include the SEC EDGAR real-time feed. Billed annually.",
+  "pricingLossFraming": "Last week: 847 Form 4 filings. 23 triggered high-conviction alerts. Free users received the digest on Monday.",
+  "ctaHeadline": "142 Form 4 Filings Today. Your Pipeline: Empty.",
+  "ctaSubheadline": "Set up your watchlist in 60 seconds. The next filing that matters to your portfolio will arrive before you finish reading this sentence.",
+  "ctaButtonText": "Start Monitoring Free"
+}
