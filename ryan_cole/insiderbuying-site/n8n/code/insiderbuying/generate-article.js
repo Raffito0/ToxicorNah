@@ -1165,6 +1165,13 @@ async function generateArticle(input, helpers) {
     }
   }
 
+  // Step 2.5: Content freshness check (before outline generation)
+  const freshness = await checkContentFreshness(ticker || keyword.ticker || '', nocodbOpts);
+  const effectiveArticleType = freshness.effectiveArticleType;
+  if (!freshness.fresh) {
+    console.log(`[generate-article] ${ticker}: recent article found (${freshness.lastPublished}), using contrarian angle`);
+  }
+
   // Step 3: Call Dexter (via webhook)
   let dexterData = {};
   if (env.DEXTER_WEBHOOK_URL && fetchFn) {
@@ -1308,6 +1315,21 @@ async function generateArticle(input, helpers) {
     retryFeedback = allFailures.join('; ');
   }
 
+  // Step 8.5: Visual placeholder replacement
+  const r2Env = {
+    R2_ACCOUNT_ID: env.R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID: env.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: env.R2_SECRET_ACCESS_KEY,
+    R2_PUBLIC_URL: env.R2_PUBLIC_URL,
+  };
+  article = await replaceVisualPlaceholders(article, dexterData, fetchFn, r2Env);
+
+  // Step 8.55: Append Schema.org JSON-LD
+  article.body_html = article.body_html + '\n' + generateSchema({
+    ...article,
+    published_at: new Date().toISOString(),
+  });
+
   // Step 8.6: Ensure unique slug
   const existingSlugsRes = await nocodbGet(
     `/Articles?fields=slug&where=(slug,like,${article.slug}%)`,
@@ -1354,6 +1376,181 @@ async function generateArticle(input, helpers) {
 }
 
 // ---------------------------------------------------------------------------
+// Section 03 — Schema.org JSON-LD
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a Schema.org JSON-LD <script> block for the article.
+ * @param {Object} article
+ * @returns {string}
+ */
+function generateSchema(article) {
+  const schemaObj = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Article',
+        'name': article.title || '',
+        'headline': article.title || '',
+        'description': article.meta_description || '',
+        'datePublished': article.published_at || new Date().toISOString(),
+        'dateModified': article.published_at || new Date().toISOString(),
+        'author': { '@id': '#ryan-chen' },
+        'url': `https://earlyinsider.com/articles/${article.slug || ''}`,
+      },
+      {
+        '@id': '#ryan-chen',
+        '@type': 'Person',
+        'name': 'Ryan Chen',
+        'jobTitle': 'Independent Finance Analyst',
+        'description': 'Former Goldman Sachs equity research analyst covering technology and financial services sectors.',
+      },
+      {
+        '@type': 'FinancialProduct',
+        'name': 'EarlyInsider Insider Intelligence Alerts',
+        'description': 'Real-time insider transaction alerts and analysis for retail investors.',
+        'url': 'https://earlyinsider.com/alerts',
+      },
+    ],
+  };
+  return `<script type="application/ld+json">\n${JSON.stringify(schemaObj, null, 2)}\n</script>`;
+}
+
+// ---------------------------------------------------------------------------
+// Section 03 — Content Freshness Check
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if an article for this ticker was published in the last 30 days.
+ * @param {string} ticker
+ * @param {Object} nocodbOpts - { token, baseUrl, fetchFn }
+ * @returns {Promise<{ fresh: boolean, effectiveArticleType: string, lastPublished?: string }>}
+ */
+async function checkContentFreshness(ticker, nocodbOpts) {
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const where = `(ticker,eq,${ticker})~and(published_at,gt,${thirtyDaysAgo})`;
+    const path = `/Articles?where=${encodeURIComponent(where)}&limit=1`;
+    const result = await nocodbGet(path, nocodbOpts.token, nocodbOpts);
+    const records = (result && result.list) ? result.list : [];
+    if (records.length === 0) {
+      return { fresh: true, effectiveArticleType: 'insider_buying' };
+    }
+    return { fresh: false, effectiveArticleType: 'contrarian', lastPublished: records[0].published_at };
+  } catch (e) {
+    // Safe default: treat as fresh so generation proceeds
+    return { fresh: true, effectiveArticleType: 'insider_buying' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Section 03 — R2 Chart Upload
+// ---------------------------------------------------------------------------
+
+/**
+ * Upload a PNG chart buffer to Cloudflare R2.
+ * @param {Buffer} buffer - PNG image data
+ * @param {string} key - R2 object key, e.g. "charts/aapl-4-1711234567.png"
+ * @param {Function} fetchFn
+ * @param {Object} env - { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_PUBLIC_URL }
+ * @returns {Promise<string>} Public R2 URL
+ */
+async function uploadChart(buffer, key, fetchFn, env) {
+  const crypto = require('crypto');
+  const host = `${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+  const url = `https://${host}/${key}`;
+  const now = new Date();
+  const dateStr = now.toISOString().replace(/[:-]/g, '').replace(/\.\d+/, '');
+  const dateDay = dateStr.slice(0, 8);
+  const region = 'auto';
+  const service = 's3';
+  const scope = `${dateDay}/${region}/${service}/aws4_request`;
+
+  const payloadHash = crypto.createHash('sha256').update(buffer).digest('hex');
+  const canonicalHeaders = [
+    'content-type:image/png',
+    `host:${host}`,
+    `x-amz-content-sha256:${payloadHash}`,
+    `x-amz-date:${dateStr}`,
+  ].join('\n');
+  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+  const canonicalRequest = ['PUT', `/${key}`, '', canonicalHeaders, '', signedHeaders, payloadHash].join('\n');
+  const stringToSign = ['AWS4-HMAC-SHA256', dateStr, scope,
+    crypto.createHash('sha256').update(canonicalRequest).digest('hex')].join('\n');
+
+  function hmac(k, d) { return crypto.createHmac('sha256', k).update(d).digest(); }
+  const kDate = hmac(`AWS4${env.R2_SECRET_ACCESS_KEY}`, dateDay);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, service);
+  const kSigning = hmac(kService, 'aws4_request');
+  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+  const authorization = `AWS4-HMAC-SHA256 Credential=${env.R2_ACCESS_KEY_ID}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  const res = await fetchFn(url, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'image/png',
+      'Host': host,
+      'x-amz-content-sha256': payloadHash,
+      'x-amz-date': dateStr,
+      'Authorization': authorization,
+    },
+    body: buffer,
+  });
+  if (!res.ok) throw new Error(`R2 upload failed: ${res.status}`);
+  return `${env.R2_PUBLIC_URL}/${key}`;
+}
+
+// ---------------------------------------------------------------------------
+// Section 03 — Visual Placeholder Replacement
+// ---------------------------------------------------------------------------
+
+const VISUAL_TEMPLATE_MAP = {
+  '{{VISUAL_1}}': { templateId: 4, description: 'Insider Transaction Table' },
+  '{{VISUAL_2}}': { templateId: 5, description: 'Price Chart with buy marker' },
+  '{{VISUAL_3}}': { templateId: 6, description: 'Revenue Trend' },
+};
+
+/**
+ * Replace {{VISUAL_N}} tokens with real chart <img> tags.
+ * @param {Object} article - Article object with body_html
+ * @param {Object} filingData - Insider filing data for chart generation
+ * @param {Function} fetchFn
+ * @param {Object} env - R2 credentials
+ * @param {Object} [templates] - { renderTemplate(templateId, data): Promise<Buffer> }
+ * @returns {Promise<Object>} Updated article object
+ */
+async function replaceVisualPlaceholders(article, filingData, fetchFn, env, templates) {
+  const ticker = (article.primary_keyword || article.slug || 'unknown').split('-')[0].toLowerCase();
+  const ts = Date.now();
+
+  for (const [token, meta] of Object.entries(VISUAL_TEMPLATE_MAP)) {
+    if (!article.body_html.includes(token)) {
+      console.warn(`Missing placeholder: ${token}`);
+      continue;
+    }
+    try {
+      let buffer;
+      if (templates && typeof templates.renderTemplate === 'function') {
+        buffer = await templates.renderTemplate(meta.templateId, { filingData, article });
+      } else {
+        // visual-templates.js not available — leave placeholder (graceful degradation)
+        continue;
+      }
+      const key = `charts/${ticker}-${meta.templateId}-${ts}.png`;
+      const url = await uploadChart(buffer, key, fetchFn, env);
+      article.body_html = article.body_html.replace(
+        token,
+        `<img src="${url}" alt="${meta.description}" class="article-chart" />`,
+      );
+    } catch (e) {
+      console.warn(`Failed to replace ${token}: ${e.message}`);
+    }
+  }
+  return article;
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -1380,6 +1577,10 @@ module.exports = {
   aiDetectionScore,
   sanitizeHtml,
   ensureUniqueSlug,
+  generateSchema,
+  checkContentFreshness,
+  uploadChart,
+  replaceVisualPlaceholders,
 
   // Orchestration (integration tested)
   pickKeyword,
