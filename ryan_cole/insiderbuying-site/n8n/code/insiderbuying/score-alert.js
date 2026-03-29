@@ -127,6 +127,188 @@ async function computeTrackRecord(insiderName, nocodb, { fetchFn } = {}) {
   return { past_buy_count: rows.length, hit_rate, avg_gain_30d };
 }
 
+// ─── computeBaseScore ────────────────────────────────────────────────────────
+
+const ROLE_WEIGHT = {
+  'ceo': 2.5, 'chief executive officer': 2.5,
+  'cfo': 2.0, 'chief financial officer': 2.0,
+  'president': 2.0,
+  'coo': 1.8, 'chief operating officer': 1.8,
+  'director': 1.0,
+};
+
+/**
+ * Deterministic 5-factor weighted base score for a filing.
+ * Returns 0 for excluded transaction codes (G/F).
+ * Returns a number in [1, 10] rounded to one decimal.
+ * Never throws — null fields are skipped gracefully.
+ */
+function computeBaseScore(filing) {
+  if (!filing) return 1;
+
+  const {
+    transactionValue, transactionCode, canonicalRole,
+    marketCapUsd, clusterCount7Days, clusterCount14Days,
+    historicalAvgReturn, historicalCount,
+  } = filing;
+
+  if (transactionCode === 'G' || transactionCode === 'F') return 0;
+
+  let score = 5.0;
+
+  // Factor 1 — Transaction Value (~30%)
+  // Guard: negative/zero treated as missing data — skip factor without penalty
+  if (transactionValue != null && transactionValue > 0) {
+    if (transactionValue >= 10_000_000)      score += 3.0;
+    else if (transactionValue >= 5_000_000)  score += 2.4;
+    else if (transactionValue >= 2_500_000)  score += 1.9;
+    else if (transactionValue >= 1_000_000)  score += 1.5;
+    else if (transactionValue >= 500_000)    score += 1.2;
+    else if (transactionValue >= 250_000)    score += 0.9;
+    else if (transactionValue >= 100_000)    score += 0.6;
+    else                                     score -= 1.0;
+  }
+
+  // Factor 2 — Insider Role (~25%)
+  const roleKey = (canonicalRole || '').toLowerCase().trim();
+  score += ROLE_WEIGHT[roleKey] ?? 0.5;
+
+  // Factor 3 — Market Cap (~20%)
+  if (marketCapUsd == null) {
+    console.warn('[score-alert] marketCapUsd null — skipping market cap factor');
+  } else if (marketCapUsd >= 100_000_000_000) score += 0.6;   // mega-cap >= $100B
+  else if (marketCapUsd >= 10_000_000_000)    score += 0.8;   // large-cap $10B-$100B
+  else if (marketCapUsd >= 2_000_000_000)     score += 1.0;   // mid-cap $2B-$10B
+  else                                        score += 1.5;   // small/micro-cap < $2B
+
+  // Factor 4 — Cluster Signal (~15%)
+  if (clusterCount7Days != null) {
+    if (clusterCount7Days >= 3)      score += 0.5;
+    else if (clusterCount7Days >= 2) score += 0.3;
+  } else if (clusterCount14Days != null) {
+    if (clusterCount14Days >= 3) score += 0.2;
+  }
+
+  // Factor 5 — Track Record (~5%)
+  if (historicalAvgReturn != null && historicalCount != null && historicalCount >= 2) {
+    if (historicalAvgReturn > 20 && historicalCount >= 3)              score += 0.5;
+    else if (historicalAvgReturn > 10 && historicalCount >= 2)         score += 0.3;
+  }
+
+  return Math.round(Math.max(1, Math.min(10, score)) * 10) / 10;
+}
+
+// ─── callDeepSeekForRefinement ───────────────────────────────────────────────
+
+const REFINEMENT_FALLBACK_REASON = 'AI refinement failed after 2 attempts — using base score';
+
+/**
+ * Builds direction-aware refinement prompt for the AI ±1 adjustment layer.
+ * @internal
+ */
+function _buildRefinementPrompt(filing, baseScore) {
+  const direction = filing.direction === 'D' ? 'sell' : 'buy';
+  const ticker = filing.ticker || 'unknown';
+  const name = filing.insider_name || 'insider';
+  const value = filing.transactionValue ? `$${(filing.transactionValue / 1_000_000).toFixed(1)}M` : 'unknown value';
+
+  let factors;
+  if (direction === 'buy') {
+    factors = `1. Is this the insider's first purchase in 2+ years after a long period of no buying?
+2. Did the insider buy into a recent earnings miss or analyst downgrade (buying a dip)?
+3. Did the insider significantly increase their position size vs. their typical trade size?
+4. Is there an unusual timing signal (bought right before a product launch or deal announcement window)?`;
+  } else {
+    factors = `1. Is this the insider's first sale in 2+ years after a long period of no selling?
+2. Did the insider sell into strength (stock near all-time highs) suggesting bearish conviction?
+3. Is the sell size unusually large relative to their typical sale history?
+4. Is there a timing signal suggesting informed selling rather than routine tax planning?`;
+  }
+
+  return `You are evaluating an insider ${direction} trade for ${name} at ${ticker} (${value}).
+The deterministic base score is ${baseScore} / 10.
+
+Assess only the following qualitative factors (answer YES/NO mentally, do not state them):
+${factors}
+
+Based on these factors, apply a constrained adjustment:
+- +1 if 2 or more factors clearly indicate exceptional conviction
+- -1 if 2 or more factors clearly indicate this is routine / low-conviction
+- 0 otherwise
+
+Respond with ONLY a JSON object, no prose, no markdown:
+{"adjustment": 0, "reason": "one sentence explanation"}`;
+}
+
+/**
+ * Strips markdown code fences from a string.
+ * @internal
+ */
+function _stripFences(text) {
+  return text.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
+}
+
+/**
+ * Calls DeepSeek for a constrained ±1 AI adjustment to the base score.
+ *
+ * @param {object} filing   - Filing object (needs: is10b5Plan, direction, ticker, insider_name, transactionValue)
+ * @param {number} baseScore - Score from computeBaseScore(), e.g. 7.3
+ * @param {object} deps     - { client: AIClient, sleep: fn }
+ * @returns {{ base_score, ai_adjustment, ai_reason, final_score }}
+ */
+async function callDeepSeekForRefinement(filing, baseScore, deps = {}) {
+  const { client, sleep } = deps;
+
+  // 10b5-1 plan: skip AI entirely, apply cap
+  if (filing.is10b5Plan) {
+    const final_score = parseFloat(Math.min(5, Math.max(1, baseScore)).toFixed(1));
+    return {
+      base_score: baseScore,
+      ai_adjustment: 0,
+      ai_reason: '10b5-1 plan — cap applied, refinement skipped',
+      final_score,
+    };
+  }
+
+  const prompt = _buildRefinementPrompt(filing, baseScore);
+
+  let rawText = null;
+  let parsed = null;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      if (attempt > 0 && sleep) await sleep(2000);
+      // null first arg = no system prompt, user-turn only
+      const response = await client.complete(null, prompt, { temperature: 0.0 });
+      rawText = _stripFences((response.content || '').trim());
+      // continue jumps to attempt=1 where sleep fires — delay is still applied
+      if (!rawText) continue;
+      parsed = JSON.parse(rawText);
+      break;
+    } catch {
+      rawText = null;
+      parsed = null;
+    }
+  }
+
+  if (!parsed || typeof parsed.adjustment !== 'number') {
+    console.warn('[score-alert] ' + REFINEMENT_FALLBACK_REASON);
+    const final_score = parseFloat(Math.min(10, Math.max(1, baseScore)).toFixed(1));
+    return { base_score: baseScore, ai_adjustment: 0, ai_reason: REFINEMENT_FALLBACK_REASON, final_score };
+  }
+
+  // Clamp adjustment to valid range
+  const ai_adjustment = Math.max(-1, Math.min(1, Math.round(parsed.adjustment)));
+  const ai_reason = (parsed.reason && typeof parsed.reason === 'string' && parsed.reason.trim())
+    ? parsed.reason.trim()
+    : 'No reason provided';
+
+  const raw = baseScore + ai_adjustment;
+  const final_score = parseFloat(Math.min(10, Math.max(1, raw)).toFixed(1));
+
+  return { base_score: baseScore, ai_adjustment, ai_reason, final_score };
+}
+
 // ─── 3.2 buildHaikuPrompt ───────────────────────────────────────────────────
 
 /**
@@ -254,16 +436,80 @@ async function callHaiku(prompt, deepseekClient) {
   }
 }
 
+// ─── emitScoreLog ───────────────────────────────────────────────────────────
+
+/**
+ * Emits a structured JSON log line for every scoring decision.
+ * Required fields: ticker, insiderName, transactionCode, direction, finalScore, timestamp.
+ * Optional: baseScore, aiAdjustment (scored alerts), skipReason (G/F), overrideReason (M/X).
+ */
+function emitScoreLog(data) {
+  const log = {
+    ticker: data.ticker,
+    insiderName: data.insider_name || null,
+    transactionCode: data.transactionCode,
+    direction: data.direction || null,
+    finalScore: data.finalScore !== undefined ? data.finalScore : null,
+    timestamp: new Date().toISOString(),
+  };
+  if (data.baseScore !== undefined)    log.baseScore = data.baseScore;
+  if (data.aiAdjustment !== undefined) log.aiAdjustment = data.aiAdjustment;
+  if (data.skipReason)                 log.skipReason = data.skipReason;
+  if (data.overrideReason)             log.overrideReason = data.overrideReason;
+  console.log(JSON.stringify(log));
+}
+
+// ─── detectSameDaySell ───────────────────────────────────────────────────────
+
+const EXERCISE_SELL_THRESHOLD = 0.80;
+
+/**
+ * Detects the "exercise-and-sell" pattern: insider exercises options and
+ * immediately sells >= 80% of exercised shares on the same calendar day.
+ *
+ * Returns 0 if exercise-and-sell confirmed (financial housekeeping, not conviction).
+ * Returns undefined if: partial sell, no matching sell found, or NocoDB unavailable.
+ *
+ * @param {object} filing - must have: insiderCik, transactionDate, sharesExercised
+ * @param {object} deps   - must have: nocodb
+ */
+async function detectSameDaySell(filing, deps = {}) {
+  const { nocodb, alertsTableId = 'Alerts' } = deps;
+  const { insiderCik, transactionDate, sharesExercised } = filing || {};
+
+  if (!nocodb || !insiderCik || !transactionDate) return undefined;
+
+  try {
+    const where = `(insiderCik,eq,${insiderCik})~and(transactionDate,eq,${transactionDate})~and(transactionCode,eq,S)`;
+    const { list } = await nocodb.list(alertsTableId, { where });
+
+    if (!list || list.length === 0) return undefined;
+
+    const exercised = Number(sharesExercised) || 0;
+    if (exercised <= 0) return undefined;
+
+    for (const row of list) {
+      const sold = Number(row.transactionShares) || 0;
+      if (sold >= exercised * EXERCISE_SELL_THRESHOLD) return 0;
+    }
+
+    return undefined;
+  } catch (err) {
+    console.warn(`[score-alert] detectSameDaySell failed: ${err.message}`);
+    return undefined;
+  }
+}
+
 // ─── 3.3 runScoreAlert ──────────────────────────────────────────────────────
 
 /**
  * Main n8n node entry point.
- * Iterates over all filings sequentially, scores each with DeepSeek,
- * and returns the enriched filing array.
+ * Iterates over all filings sequentially. Filters G/F codes and exercise-and-sell trades.
+ * Each remaining filing is scored via computeBaseScore + callDeepSeekForRefinement.
  *
  * @param {Array} filings - Array of filing objects from sec-monitor.js
  * @param {Object} helpers - { nocodb, deepseekApiKey, fetchFn }
- * @returns {Array} filings enriched with significance_score, score_reasoning, track_record
+ * @returns {Array} Scored filings (G/F and exercise-and-sell excluded)
  */
 async function runScoreAlert(filings, helpers = {}) {
   const { nocodb, fetchFn, deepseekApiKey } = helpers;
@@ -274,6 +520,12 @@ async function runScoreAlert(filings, helpers = {}) {
   const results = [];
 
   for (const filing of filings) {
+    // Belt-and-suspenders G/F filter (upstream unit 09 is primary)
+    if (filing.transactionCode === 'G' || filing.transactionCode === 'F') {
+      emitScoreLog({ ...filing, skipReason: 'gift/tax', finalScore: null });
+      continue;
+    }
+
     // Step 1: compute track record (graceful on any failure)
     const trackRecord = await computeTrackRecord(
       filing.insider_name,
@@ -281,14 +533,36 @@ async function runScoreAlert(filings, helpers = {}) {
       { fetchFn }
     );
 
-    // Step 2: build prompt and call DeepSeek
-    const prompt = buildHaikuPrompt(filing, trackRecord);
-    const { score, reasoning } = await callHaiku(prompt, deepseek);
+    // Step 2: deterministic base score + AI refinement
+    const baseScore = computeBaseScore(filing);
+    const refinement = await callDeepSeekForRefinement(filing, baseScore, {
+      client: deepseek,
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    });
+
+    // Step 3: exercise-and-sell detection for option exercise codes
+    if (filing.transactionCode === 'M' || filing.transactionCode === 'X') {
+      const sameDayResult = await detectSameDaySell(filing, { nocodb });
+      if (sameDayResult === 0) {
+        emitScoreLog({ ...filing, overrideReason: 'exercise-and-sell', finalScore: 0 });
+        continue;
+      }
+    }
+
+    // Step 4: emit structured log and push result
+    emitScoreLog({
+      ...filing,
+      baseScore: refinement.base_score,
+      aiAdjustment: refinement.ai_adjustment,
+      finalScore: refinement.final_score,
+    });
 
     results.push({
       ...filing,
-      significance_score: score,
-      score_reasoning: reasoning,
+      significance_score: refinement.final_score,
+      score_reasoning: refinement.ai_reason,
+      base_score: refinement.base_score,
+      ai_adjustment: refinement.ai_adjustment,
       track_record: trackRecord,
     });
   }
@@ -333,4 +607,8 @@ module.exports = {
   parseHaikuResponse,
   callHaiku,
   runScoreAlert,
+  computeBaseScore,
+  callDeepSeekForRefinement,
+  detectSameDaySell,
+  emitScoreLog,
 };

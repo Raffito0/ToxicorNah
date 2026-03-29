@@ -16,6 +16,9 @@ const {
   parseHaikuResponse,
   callHaiku,
   runScoreAlert,
+  computeBaseScore,
+  callDeepSeekForRefinement,
+  detectSameDaySell,
 } = require('../../n8n/code/insiderbuying/score-alert');
 
 const { NocoDB } = require('../../n8n/code/insiderbuying/nocodb-client');
@@ -499,5 +502,700 @@ describe('runScoreAlert', () => {
       deepseekApiKey: DEEPSEEK_KEY,
     });
     expect(results).toEqual([]);
+  });
+});
+
+// ─── computeBaseScore ────────────────────────────────────────────────────────
+
+describe('computeBaseScore', () => {
+  // Neutral base: unknown role (+0.5), null market cap (skip), no cluster, no track record
+  const NEUTRAL = {
+    transactionCode: 'P',
+    canonicalRole: 'Unknown',
+    marketCapUsd: null,
+    clusterCount7Days: null,
+    clusterCount14Days: null,
+    historicalAvgReturn: null,
+    historicalCount: null,
+  };
+
+  // ─ Early exit ─
+  test('returns 0 for gift (G) transaction code', () => {
+    expect(computeBaseScore({ ...NEUTRAL, transactionValue: 5_000_000, transactionCode: 'G' })).toBe(0);
+  });
+
+  test('returns 0 for tax withholding (F) transaction code', () => {
+    expect(computeBaseScore({ ...NEUTRAL, transactionValue: 5_000_000, transactionCode: 'F' })).toBe(0);
+  });
+
+  test('sale (S) is not excluded — scores normally', () => {
+    const score = computeBaseScore({ ...NEUTRAL, transactionValue: 5_000_000, transactionCode: 'S' });
+    expect(score).toBeGreaterThan(0);
+  });
+
+  // ─ Factor 1: Transaction Value ─
+  describe('Factor 1 — Transaction Value', () => {
+    test('>= $10M → adjustment +3.0 (base 5.0 + 3.0 + 0.5 unknown = 8.5)', () => {
+      expect(computeBaseScore({ ...NEUTRAL, transactionValue: 10_000_000 })).toBe(8.5);
+    });
+
+    test('$5M → adjustment +2.4 (5.0 + 2.4 + 0.5 = 7.9)', () => {
+      expect(computeBaseScore({ ...NEUTRAL, transactionValue: 5_000_000 })).toBe(7.9);
+    });
+
+    test('$100K → adjustment +0.6 (5.0 + 0.6 + 0.5 = 6.1)', () => {
+      expect(computeBaseScore({ ...NEUTRAL, transactionValue: 100_000 })).toBe(6.1);
+    });
+
+    test('$50K (below threshold) → adjustment -1.0 (5.0 - 1.0 + 0.5 = 4.5)', () => {
+      expect(computeBaseScore({ ...NEUTRAL, transactionValue: 50_000 })).toBe(4.5);
+    });
+  });
+
+  // ─ Factor 2: Insider Role ─
+  // Isolate with $100K (+0.6), null market cap
+  describe('Factor 2 — Insider Role', () => {
+    const f1 = { ...NEUTRAL, transactionValue: 100_000 }; // 5.0 + 0.6 = 5.6 before F2
+
+    test('CEO → adjustment +2.5 (5.6 + 2.5 = 8.1)', () => {
+      expect(computeBaseScore({ ...f1, canonicalRole: 'CEO' })).toBe(8.1);
+    });
+
+    test('Director → adjustment +1.0 (5.6 + 1.0 = 6.6)', () => {
+      expect(computeBaseScore({ ...f1, canonicalRole: 'Director' })).toBe(6.6);
+    });
+
+    test('unknown title → adjustment +0.5 default (5.6 + 0.5 = 6.1)', () => {
+      expect(computeBaseScore({ ...f1, canonicalRole: 'VP of Snacks' })).toBe(6.1);
+    });
+  });
+
+  // ─ Factor 3: Market Cap ─
+  // Isolate with $100K (+0.6), Director (+1.0) → 5.0+0.6+1.0 = 6.6 before F3
+  describe('Factor 3 — Market Cap', () => {
+    const f1f2 = { ...NEUTRAL, transactionValue: 100_000, canonicalRole: 'Director' };
+
+    test('small-cap $500M → adjustment +1.5 (6.6 + 1.5 = 8.1)', () => {
+      expect(computeBaseScore({ ...f1f2, marketCapUsd: 500_000_000 })).toBe(8.1);
+    });
+
+    test('mega-cap $100B → adjustment +0.6 (6.6 + 0.6 = 7.2)', () => {
+      expect(computeBaseScore({ ...f1f2, marketCapUsd: 100_000_000_000 })).toBe(7.2);
+    });
+
+    test('null marketCapUsd → factor skipped, no throw, no adjustment', () => {
+      expect(() => computeBaseScore({ ...f1f2, marketCapUsd: null })).not.toThrow();
+      expect(computeBaseScore({ ...f1f2, marketCapUsd: null })).toBe(6.6);
+    });
+
+    test('null marketCapUsd → emits console.warn', () => {
+      const spy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      computeBaseScore({ ...f1f2, marketCapUsd: null });
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining('marketCapUsd null'));
+      spy.mockRestore();
+    });
+  });
+
+  // ─ Factor 4: Cluster Signal ─
+  // Isolate with $100K (+0.6), Director (+1.0), null market cap → base 6.6
+  describe('Factor 4 — Cluster Signal', () => {
+    const f1f2f3 = { ...NEUTRAL, transactionValue: 100_000, canonicalRole: 'Director' };
+
+    test('clusterCount7Days >= 3 → adjustment +0.5 (6.6 + 0.5 = 7.1)', () => {
+      expect(computeBaseScore({ ...f1f2f3, clusterCount7Days: 3 })).toBe(7.1);
+    });
+
+    test('clusterCount7Days = 2 → adjustment +0.3 (6.6 + 0.3 = 6.9)', () => {
+      expect(computeBaseScore({ ...f1f2f3, clusterCount7Days: 2 })).toBe(6.9);
+    });
+
+    test('null 7-day, clusterCount14Days >= 3 → adjustment +0.2 (6.6 + 0.2 = 6.8)', () => {
+      expect(computeBaseScore({ ...f1f2f3, clusterCount7Days: null, clusterCount14Days: 3 })).toBe(6.8);
+    });
+
+    test('both cluster counts null → no adjustment (6.6)', () => {
+      expect(computeBaseScore({ ...f1f2f3, clusterCount7Days: null, clusterCount14Days: null })).toBe(6.6);
+    });
+  });
+
+  // ─ Factor 5: Track Record ─
+  // Isolate with $100K (+0.6), Director (+1.0), null market cap, no cluster → base 6.6
+  describe('Factor 5 — Track Record', () => {
+    const f1f2f3f4 = { ...NEUTRAL, transactionValue: 100_000, canonicalRole: 'Director' };
+
+    test('avgReturn=25, count=4 → adjustment +0.5 (6.6 + 0.5 = 7.1)', () => {
+      expect(computeBaseScore({ ...f1f2f3f4, historicalAvgReturn: 25, historicalCount: 4 })).toBe(7.1);
+    });
+
+    test('avgReturn=15, count=2 → adjustment +0.3 (6.6 + 0.3 = 6.9)', () => {
+      expect(computeBaseScore({ ...f1f2f3f4, historicalAvgReturn: 15, historicalCount: 2 })).toBe(6.9);
+    });
+
+    test('avgReturn=15, count=1 → 0 bonus (below 2-trade minimum, stays at 6.6)', () => {
+      expect(computeBaseScore({ ...f1f2f3f4, historicalAvgReturn: 15, historicalCount: 1 })).toBe(6.6);
+    });
+
+    test('null historicalAvgReturn → factor skipped, no throw (6.6)', () => {
+      expect(() => computeBaseScore({ ...f1f2f3f4, historicalAvgReturn: null })).not.toThrow();
+      expect(computeBaseScore({ ...f1f2f3f4, historicalAvgReturn: null })).toBe(6.6);
+    });
+  });
+
+  // ─ Clamping and output format ─
+  describe('Clamping and output format', () => {
+    test('score exceeding 10 is clamped to 10', () => {
+      // CEO+$10M+micro-cap+cluster3 = 5+3+2.5+1.5+0.5 = 12.5 → 10
+      expect(computeBaseScore({
+        transactionCode: 'P', transactionValue: 10_000_000, canonicalRole: 'CEO',
+        marketCapUsd: 200_000_000, clusterCount7Days: 3,
+        clusterCount14Days: null, historicalAvgReturn: null, historicalCount: null,
+      })).toBe(10);
+    });
+
+    test('output has at most one decimal place', () => {
+      const score = computeBaseScore({ ...NEUTRAL, transactionValue: 500_000, canonicalRole: 'Director', marketCapUsd: null });
+      expect(score.toString()).toMatch(/^\d+(\.\d)?$/);
+    });
+
+    test('output is always a number (never NaN, never null)', () => {
+      const score = computeBaseScore({ ...NEUTRAL, transactionValue: 100_000 });
+      expect(typeof score).toBe('number');
+      expect(isNaN(score)).toBe(false);
+    });
+  });
+
+  // ─ Fixture filings ─
+  describe('Fixture filings', () => {
+    test('Fixture 1: CEO, $5M purchase, mid-cap, no cluster → >= 8', () => {
+      const score = computeBaseScore({
+        transactionCode: 'P', transactionValue: 5_000_000, canonicalRole: 'CEO',
+        marketCapUsd: 5_000_000_000, clusterCount7Days: null, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      });
+      expect(score).toBeGreaterThanOrEqual(8);
+    });
+
+    test('Fixture 2: Director, $100K purchase, small-cap, no cluster → >= 5', () => {
+      const score = computeBaseScore({
+        transactionCode: 'P', transactionValue: 100_000, canonicalRole: 'Director',
+        marketCapUsd: 500_000_000, clusterCount7Days: null, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      });
+      expect(score).toBeGreaterThanOrEqual(5);
+    });
+
+    test('Fixture 3: CFO, $1M purchase, large-cap, cluster 3 in 7 days → >= 7', () => {
+      const score = computeBaseScore({
+        transactionCode: 'P', transactionValue: 1_000_000, canonicalRole: 'CFO',
+        marketCapUsd: 50_000_000_000, clusterCount7Days: 3, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      });
+      expect(score).toBeGreaterThanOrEqual(7);
+    });
+
+    test('Fixture 4: CEO, $3M sale, small-cap → >= 7 (sells score same as buys)', () => {
+      const score = computeBaseScore({
+        transactionCode: 'S', transactionValue: 3_000_000, canonicalRole: 'CEO',
+        marketCapUsd: 500_000_000, clusterCount7Days: null, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      });
+      expect(score).toBeGreaterThanOrEqual(7);
+    });
+
+    test('Fixture 5: President, $500K, micro-cap, track record 25% over 3 trades → >= 8', () => {
+      const score = computeBaseScore({
+        transactionCode: 'P', transactionValue: 500_000, canonicalRole: 'President',
+        marketCapUsd: 100_000_000, clusterCount7Days: null, clusterCount14Days: null,
+        historicalAvgReturn: 25, historicalCount: 3,
+      });
+      expect(score).toBeGreaterThanOrEqual(8);
+    });
+
+    test('Fixture 6: Unknown role, $100K, mega-cap → between 4 and 7', () => {
+      const score = computeBaseScore({
+        transactionCode: 'P', transactionValue: 100_000, canonicalRole: 'Unknown Title',
+        marketCapUsd: 500_000_000_000, clusterCount7Days: null, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      });
+      expect(score).toBeGreaterThanOrEqual(4);
+      expect(score).toBeLessThanOrEqual(7);
+    });
+
+    test('Fixture 7: CEO, $10M, micro-cap, cluster 3+ → 10 (capped at max)', () => {
+      const score = computeBaseScore({
+        transactionCode: 'P', transactionValue: 10_000_000, canonicalRole: 'CEO',
+        marketCapUsd: 100_000_000, clusterCount7Days: 3, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      });
+      expect(score).toBe(10);
+    });
+
+    test('Fixture 8: Director, $50K, large-cap → small score (penalty dominates) <= 6', () => {
+      const score = computeBaseScore({
+        transactionCode: 'P', transactionValue: 50_000, canonicalRole: 'Director',
+        marketCapUsd: 50_000_000_000, clusterCount7Days: null, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      });
+      expect(score).toBeLessThanOrEqual(6);
+    });
+
+    test('Fixture 9: CEO, $5M, all enriched null fields — does not throw', () => {
+      expect(() => computeBaseScore({
+        transactionCode: 'P', transactionValue: 5_000_000, canonicalRole: 'CEO',
+        marketCapUsd: null, clusterCount7Days: null, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      })).not.toThrow();
+    });
+
+    test('Fixture 9: CEO, $5M, null fields → lower than Fixture 1 (no market cap bonus)', () => {
+      const withCap = computeBaseScore({
+        transactionCode: 'P', transactionValue: 5_000_000, canonicalRole: 'CEO',
+        marketCapUsd: 5_000_000_000, clusterCount7Days: null, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      });
+      const withoutCap = computeBaseScore({
+        transactionCode: 'P', transactionValue: 5_000_000, canonicalRole: 'CEO',
+        marketCapUsd: null, clusterCount7Days: null, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      });
+      expect(withoutCap).toBeLessThanOrEqual(withCap);
+    });
+
+    test('Fixture 10: all minimum values → between 1 and 5', () => {
+      const score = computeBaseScore({
+        transactionCode: 'P', transactionValue: 1_000, canonicalRole: 'Unknown Role',
+        marketCapUsd: null, clusterCount7Days: null, clusterCount14Days: null,
+        historicalAvgReturn: null, historicalCount: null,
+      });
+      expect(score).toBeGreaterThanOrEqual(1);
+      expect(score).toBeLessThanOrEqual(5);
+    });
+  });
+
+  // ─ Edge cases (guard fixes) ─
+  describe('Edge cases', () => {
+    test('null filing returns 1 without throwing', () => {
+      expect(() => computeBaseScore(null)).not.toThrow();
+      expect(computeBaseScore(null)).toBe(1);
+    });
+
+    test('undefined filing returns 1 without throwing', () => {
+      expect(() => computeBaseScore(undefined)).not.toThrow();
+      expect(computeBaseScore(undefined)).toBe(1);
+    });
+
+    test('negative transactionValue — Factor 1 skipped (no bonus, no penalty)', () => {
+      // negative value = bad data, not a real purchase. Should not penalize.
+      const score = computeBaseScore({ ...NEUTRAL, transactionValue: -500_000 });
+      // Base 5.0 + unknown role 0.5 + null cap skipped = 5.5
+      expect(score).toBe(5.5);
+    });
+
+    test('zero transactionValue — Factor 1 skipped (no bonus, no penalty)', () => {
+      const score = computeBaseScore({ ...NEUTRAL, transactionValue: 0 });
+      expect(score).toBe(5.5);
+    });
+  });
+});
+
+// ─── callDeepSeekForRefinement ───────────────────────────────────────────────
+
+describe('callDeepSeekForRefinement', () => {
+  const sleep = jest.fn().mockResolvedValue(undefined);
+  beforeEach(() => sleep.mockClear());
+
+  function makeClient(responses) {
+    let i = 0;
+    return {
+      complete: jest.fn().mockImplementation(() => {
+        const r = responses[i++];
+        if (r instanceof Error) return Promise.reject(r);
+        return Promise.resolve({ content: r });
+      }),
+    };
+  }
+
+  const BASE_FILING = {
+    direction: 'A', is10b5Plan: false,
+    ticker: 'NVDA', insider_name: 'Jensen Huang',
+    transactionValue: 5_000_000,
+  };
+
+  // ─ Response parsing ─
+  describe('response parsing', () => {
+    test('adjustment +1 — applied correctly', async () => {
+      const client = makeClient(['{"adjustment": 1, "reason": "first buy in years"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 7.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(1);
+      expect(result.final_score).toBe(8.0);
+      expect(result.base_score).toBe(7.0);
+    });
+
+    test('adjustment 0 — score unchanged', async () => {
+      const client = makeClient(['{"adjustment": 0, "reason": "routine cluster trade"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 6.5, { client, sleep });
+      expect(result.ai_adjustment).toBe(0);
+      expect(result.final_score).toBe(6.5);
+    });
+
+    test('adjustment -1 — applied correctly', async () => {
+      const client = makeClient(['{"adjustment": -1, "reason": "heavy selling context"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 5.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(-1);
+      expect(result.final_score).toBe(4.0);
+    });
+
+    test('JSON wrapped in markdown fences — stripped and parsed', async () => {
+      const client = makeClient(['```json\n{"adjustment": 0, "reason": "ok"}\n```']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 5.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(0);
+    });
+
+    test('out-of-range adjustment +2 — clamped to +1', async () => {
+      const client = makeClient(['{"adjustment": 2, "reason": "very high"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 5.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(1);
+      expect(result.final_score).toBe(6.0);
+    });
+
+    test('out-of-range adjustment -2 — clamped to -1', async () => {
+      const client = makeClient(['{"adjustment": -2, "reason": "very low"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 5.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(-1);
+      expect(result.final_score).toBe(4.0);
+    });
+  });
+
+  // ─ Retry and fallback ─
+  describe('retry and fallback', () => {
+    test('invalid JSON on first call, valid on second — uses second result', async () => {
+      const client = makeClient(['not-json', '{"adjustment": 1, "reason": "retry worked"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 5.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(1);
+      expect(client.complete).toHaveBeenCalledTimes(2);
+    });
+
+    test('empty string on first call, valid on second — triggers retry', async () => {
+      const client = makeClient(['', '{"adjustment": 0, "reason": "ok"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 5.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(0);
+      expect(client.complete).toHaveBeenCalledTimes(2);
+    });
+
+    test('both calls return invalid JSON — fallback (adjustment=0)', async () => {
+      const client = makeClient(['bad', 'also-bad']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 5.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(0);
+      expect(result.final_score).toBe(5.0);
+      expect(result.ai_reason).toMatch(/failed/i);
+    });
+
+    test('network error on first call, valid on second — recovers', async () => {
+      const client = makeClient([new Error('network'), '{"adjustment": 1, "reason": "ok"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 5.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(1);
+    });
+
+    test('network error on both calls — fallback (adjustment=0)', async () => {
+      const client = makeClient([new Error('network'), new Error('network again')]);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 5.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(0);
+      expect(result.final_score).toBe(5.0);
+    });
+  });
+
+  // ─ 10b5-1 plan cap ─
+  describe('10b5-1 plan handling', () => {
+    test('is10b5Plan=true — DeepSeek never called', async () => {
+      const client = makeClient([]);
+      const filing = { ...BASE_FILING, is10b5Plan: true };
+      await callDeepSeekForRefinement(filing, 7.0, { client, sleep });
+      expect(client.complete).not.toHaveBeenCalled();
+    });
+
+    test('is10b5Plan=true, base_score=4 — untouched (under cap)', async () => {
+      const client = makeClient([]);
+      const filing = { ...BASE_FILING, is10b5Plan: true };
+      const result = await callDeepSeekForRefinement(filing, 4.0, { client, sleep });
+      expect(result.final_score).toBe(4.0);
+    });
+
+    test('is10b5Plan=true, base_score=5 — exactly at cap (untouched)', async () => {
+      const filing = { ...BASE_FILING, is10b5Plan: true };
+      const result = await callDeepSeekForRefinement(filing, 5.0, { client: makeClient([]), sleep });
+      expect(result.final_score).toBe(5.0);
+    });
+
+    test('is10b5Plan=true, base_score=7 — capped to 5', async () => {
+      const filing = { ...BASE_FILING, is10b5Plan: true };
+      const result = await callDeepSeekForRefinement(filing, 7.0, { client: makeClient([]), sleep });
+      expect(result.final_score).toBe(5.0);
+      expect(result.ai_adjustment).toBe(0);
+    });
+
+    test('is10b5Plan=false, +1 at score 10 — clamped to 10', async () => {
+      const client = makeClient(['{"adjustment": 1, "reason": "high"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 10.0, { client, sleep });
+      expect(result.final_score).toBe(10);
+    });
+  });
+
+  // ─ Output shape ─
+  describe('output shape', () => {
+    test('result always has base_score, ai_adjustment, ai_reason, final_score', async () => {
+      const client = makeClient(['{"adjustment": 0, "reason": "ok"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 6.0, { client, sleep });
+      expect(result).toHaveProperty('base_score');
+      expect(result).toHaveProperty('ai_adjustment');
+      expect(result).toHaveProperty('ai_reason');
+      expect(result).toHaveProperty('final_score');
+    });
+
+    test('on success, ai_reason contains DeepSeek reason string', async () => {
+      const client = makeClient(['{"adjustment": 1, "reason": "first buy in years"}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 6.0, { client, sleep });
+      expect(result.ai_reason).toBe('first buy in years');
+    });
+
+    test('on fallback, ai_adjustment=0 and ai_reason is a non-empty explanation', async () => {
+      const client = makeClient(['bad', 'also-bad']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 6.0, { client, sleep });
+      expect(result.ai_adjustment).toBe(0);
+      expect(result.ai_reason.length).toBeGreaterThan(0);
+    });
+
+    test('whitespace-only reason field — ai_reason substituted with default', async () => {
+      const client = makeClient(['{"adjustment": 0, "reason": "   "}']);
+      const result = await callDeepSeekForRefinement(BASE_FILING, 6.0, { client, sleep });
+      expect(result.ai_reason).toBe('No reason provided');
+    });
+  });
+});
+
+// ─── detectSameDaySell ───────────────────────────────────────────────────────
+
+describe('detectSameDaySell', () => {
+  function makeNocoSell(sharesSold) {
+    const fn = jest.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({
+        list: [{ transactionCode: 'S', transactionShares: sharesSold, insiderCik: 'cik001', transactionDate: '2024-01-15' }],
+        pageInfo: { isLastPage: true },
+      }),
+    });
+    return makeNocoDB(fn);
+  }
+  function makeNocoEmpty() {
+    const fn = jest.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ list: [], pageInfo: { isLastPage: true } }),
+    });
+    return makeNocoDB(fn);
+  }
+
+  const EXERCISE_FILING = {
+    transactionCode: 'M', insiderCik: 'cik001',
+    transactionDate: '2024-01-15', sharesExercised: 1000,
+  };
+
+  test('full exercise-and-sell (>=80% sold) returns 0', async () => {
+    const nocodb = makeNocoSell(900); // 900 >= 800 = 80% of 1000
+    const result = await detectSameDaySell(EXERCISE_FILING, { nocodb });
+    expect(result).toBe(0);
+  });
+
+  test('partial sell (30% sold) returns undefined (normal score)', async () => {
+    const nocodb = makeNocoSell(300); // 300 < 800 = 80% of 1000
+    const result = await detectSameDaySell(EXERCISE_FILING, { nocodb });
+    expect(result).toBeUndefined();
+  });
+
+  test('no same-day sell found returns undefined', async () => {
+    const nocodb = makeNocoEmpty();
+    const result = await detectSameDaySell(EXERCISE_FILING, { nocodb });
+    expect(result).toBeUndefined();
+  });
+
+  test('different insiderCik — no match returns undefined', async () => {
+    const nocodb = makeNocoEmpty();
+    const filing = { ...EXERCISE_FILING, insiderCik: 'differentCik' };
+    const result = await detectSameDaySell(filing, { nocodb });
+    expect(result).toBeUndefined();
+  });
+
+  test('NocoDB throws network error — logs WARN and returns undefined', async () => {
+    const nocodb = { list: jest.fn().mockRejectedValue(new Error('network')) };
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await detectSameDaySell(EXERCISE_FILING, { nocodb });
+    expect(result).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  test('missing nocodb dep — returns undefined without throwing', async () => {
+    const result = await detectSameDaySell(EXERCISE_FILING, {});
+    expect(result).toBeUndefined();
+  });
+
+  test('different transactionDate — no match returns undefined', async () => {
+    const nocodb = makeNocoEmpty();
+    const filing = { ...EXERCISE_FILING, transactionDate: '2024-02-01' };
+    const result = await detectSameDaySell(filing, { nocodb });
+    expect(result).toBeUndefined();
+  });
+});
+
+// ─── runScoreAlert filtering chain (S03) ────────────────────────────────────
+
+describe('runScoreAlert filtering chain', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  function makeHelpers(adjustmentJson = '{"adjustment": 0, "reason": "ok"}') {
+    const fn = jest.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ list: [], pageInfo: { isLastPage: true } }),
+    });
+    const mockClient = {
+      complete: jest.fn().mockResolvedValue({ content: adjustmentJson }),
+    };
+    createDeepSeekClient.mockReturnValue(mockClient);
+    return { nocodb: makeNocoDB(fn), fetchFn: fn, deepseekApiKey: DEEPSEEK_KEY };
+  }
+
+  const SCORED_FILING = {
+    ...SAMPLE_FILING,
+    transactionCode: 'P', canonicalRole: 'CEO', marketCapUsd: 5_000_000_000,
+    transactionValue: 1_000_000, insiderCik: 'cik001', direction: 'A',
+    is10b5Plan: false,
+  };
+
+  test('G transaction — excluded from results (skipped)', async () => {
+    const helpers = makeHelpers();
+    const results = await runScoreAlert([{ ...SCORED_FILING, transactionCode: 'G' }], helpers);
+    expect(results).toHaveLength(0);
+  });
+
+  test('F transaction — excluded from results (skipped)', async () => {
+    const helpers = makeHelpers();
+    const results = await runScoreAlert([{ ...SCORED_FILING, transactionCode: 'F' }], helpers);
+    expect(results).toHaveLength(0);
+  });
+
+  test('S transaction (sale) — proceeds to scoring', async () => {
+    const helpers = makeHelpers();
+    const results = await runScoreAlert([{ ...SCORED_FILING, transactionCode: 'S', direction: 'D' }], helpers);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toHaveProperty('significance_score');
+  });
+
+  test('P transaction (purchase) — proceeds to scoring', async () => {
+    const helpers = makeHelpers();
+    const results = await runScoreAlert([SCORED_FILING], helpers);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toHaveProperty('significance_score');
+  });
+
+  test('M transaction with full sell — excluded from results', async () => {
+    const fn = jest.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({
+        list: [{ transactionCode: 'S', transactionShares: 900, insiderCik: 'cik001', transactionDate: '2024-01-12' }],
+        pageInfo: { isLastPage: true },
+      }),
+    });
+    createDeepSeekClient.mockReturnValue({
+      complete: jest.fn().mockResolvedValue({ content: '{"adjustment": 0, "reason": "ok"}' }),
+    });
+    const filing = { ...SCORED_FILING, transactionCode: 'M', sharesExercised: 1000, transactionDate: '2024-01-12' };
+    const results = await runScoreAlert([filing], { nocodb: makeNocoDB(fn), fetchFn: fn, deepseekApiKey: DEEPSEEK_KEY });
+    expect(results).toHaveLength(0);
+  });
+
+  test('scored result has base_score, ai_adjustment, final_score fields', async () => {
+    const helpers = makeHelpers('{"adjustment": 1, "reason": "strong signal"}');
+    const results = await runScoreAlert([SCORED_FILING], helpers);
+    expect(results[0]).toHaveProperty('base_score');
+    expect(results[0]).toHaveProperty('ai_adjustment');
+    expect(results[0]).toHaveProperty('significance_score');
+  });
+});
+
+// ─── structured score logging (S03) ─────────────────────────────────────────
+
+describe('structured score logging', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  function makeHelpers() {
+    const fn = jest.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ list: [], pageInfo: { isLastPage: true } }),
+    });
+    createDeepSeekClient.mockReturnValue({
+      complete: jest.fn().mockResolvedValue({ content: '{"adjustment": 0, "reason": "ok"}' }),
+    });
+    return { nocodb: makeNocoDB(fn), fetchFn: fn, deepseekApiKey: DEEPSEEK_KEY };
+  }
+
+  const SCORED_FILING = {
+    ...SAMPLE_FILING,
+    transactionCode: 'P', canonicalRole: 'CEO', marketCapUsd: 5_000_000_000,
+    transactionValue: 1_000_000, insiderCik: 'cik001', direction: 'A', is10b5Plan: false,
+  };
+
+  test('scored alert emits structured log with required fields', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const helpers = makeHelpers();
+    await runScoreAlert([SCORED_FILING], helpers);
+    // Find a JSON log with finalScore
+    const jsonCalls = logSpy.mock.calls.map(c => c[0]).filter(s => {
+      try { const o = JSON.parse(s); return 'finalScore' in o; } catch { return false; }
+    });
+    expect(jsonCalls.length).toBeGreaterThan(0);
+    const log = JSON.parse(jsonCalls[0]);
+    expect(log).toHaveProperty('ticker');
+    expect(log).toHaveProperty('transactionCode');
+    expect(log).toHaveProperty('finalScore');
+    expect(log).toHaveProperty('timestamp');
+    logSpy.mockRestore();
+  });
+
+  test('skipped alert (G) emits log with skipReason', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const helpers = makeHelpers();
+    await runScoreAlert([{ ...SCORED_FILING, transactionCode: 'G' }], helpers);
+    const jsonCalls = logSpy.mock.calls.map(c => c[0]).filter(s => {
+      try { const o = JSON.parse(s); return 'skipReason' in o; } catch { return false; }
+    });
+    expect(jsonCalls.length).toBeGreaterThan(0);
+    const log = JSON.parse(jsonCalls[0]);
+    expect(log.skipReason).toMatch(/gift/i);
+    logSpy.mockRestore();
+  });
+
+  test('exercise-and-sell alert emits log with overrideReason and finalScore=0', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const fn = jest.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({
+        list: [{ transactionCode: 'S', transactionShares: 900, insiderCik: 'cik001', transactionDate: '2024-01-15' }],
+        pageInfo: { isLastPage: true },
+      }),
+    });
+    createDeepSeekClient.mockReturnValue({
+      complete: jest.fn().mockResolvedValue({ content: '{"adjustment": 0, "reason": "ok"}' }),
+    });
+    const helpers = { nocodb: makeNocoDB(fn), fetchFn: fn, deepseekApiKey: DEEPSEEK_KEY };
+    await runScoreAlert([{
+      ...SCORED_FILING, transactionCode: 'M', sharesExercised: 1000,
+      insiderCik: 'cik001', transactionDate: '2024-01-15',
+    }], helpers);
+    const jsonCalls = logSpy.mock.calls.map(c => c[0]).filter(s => {
+      try { const o = JSON.parse(s); return 'overrideReason' in o; } catch { return false; }
+    });
+    expect(jsonCalls.length).toBeGreaterThan(0);
+    const log = JSON.parse(jsonCalls[0]);
+    expect(log.overrideReason).toBe('exercise-and-sell');
+    expect(log.finalScore).toBe(0);
+    logSpy.mockRestore();
   });
 });
