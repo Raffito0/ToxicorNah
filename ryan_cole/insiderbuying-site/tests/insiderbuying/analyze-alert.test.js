@@ -1,5 +1,14 @@
 'use strict';
 
+// ---------------------------------------------------------------------------
+// Mock ai-client BEFORE requiring analyze-alert
+// ---------------------------------------------------------------------------
+jest.mock('../../n8n/code/insiderbuying/ai-client', () => ({
+  createDeepSeekClient: jest.fn(),
+}));
+
+const { createDeepSeekClient } = require('../../n8n/code/insiderbuying/ai-client');
+
 const {
   buildAnalysisPrompt,
   validateAnalysis,
@@ -8,18 +17,7 @@ const {
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function makeFetch(responseText, ok = true, status = 200) {
-  return jest.fn().mockResolvedValue({
-    ok,
-    status,
-    json: async () => ({
-      content: [{ type: 'text', text: responseText }],
-    }),
-  });
-}
-
-const noSleep = jest.fn().mockResolvedValue(undefined);
-const ANTHROPIC_KEY = 'test-anthropic';
+const DEEPSEEK_KEY = 'test-deepseek';
 
 const GOOD_ANALYSIS = [
   'This is the first paragraph of the analysis discussing the trade signal.',
@@ -51,14 +49,53 @@ const SAMPLE_FILING = {
   dedup_key: 'AAPL-TimothyDCook-2026-03-15-50000',
 };
 
+function makeMockClient(content, throws = null) {
+  const complete = throws
+    ? jest.fn().mockRejectedValue(throws)
+    : jest.fn().mockResolvedValue({
+        content: content != null ? content : GOOD_ANALYSIS,
+        usage: { inputTokens: 500, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        cached: false,
+        estimatedCost: 0.0005,
+      });
+  return { complete };
+}
+
 function makeHelpers(overrides = {}) {
   return {
-    anthropicApiKey: ANTHROPIC_KEY,
-    fetchFn: makeFetch(GOOD_ANALYSIS),
-    _sleep: noSleep,
+    deepSeekApiKey: DEEPSEEK_KEY,
+    fetchFn: jest.fn(),
     ...overrides,
   };
 }
+
+// ─── source code checks ─────────────────────────────────────────────────────
+
+const path = require('path');
+const fs = require('fs');
+const src = fs.readFileSync(
+  path.resolve(__dirname, '../../n8n/code/insiderbuying/analyze-alert.js'),
+  'utf8',
+);
+
+describe('source code checks', () => {
+  test('no anthropic.com URL in source', () => {
+    expect(src).not.toContain('anthropic.com');
+  });
+
+  test('no claude-sonnet model string in source', () => {
+    expect(src).not.toContain('claude-sonnet');
+  });
+
+  test('no x-api-key header in source', () => {
+    expect(src).not.toContain('x-api-key');
+  });
+
+  test('imports createDeepSeekClient from ai-client', () => {
+    expect(src).toContain("require('./ai-client')");
+    expect(src).toContain('createDeepSeekClient');
+  });
+});
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -70,102 +107,119 @@ describe('analyze-alert', () => {
   // ── Score gate ──────────────────────────────────────────────────────────
 
   test('analyze() returns null when score < 4 (no API call)', async () => {
+    const mockClient = makeMockClient(GOOD_ANALYSIS);
+    createDeepSeekClient.mockReturnValue(mockClient);
     const helpers = makeHelpers();
     const filing = { ...SAMPLE_FILING, significance_score: 3 };
     const result = await analyze(filing, helpers);
 
     expect(result).toBeNull();
-    expect(helpers.fetchFn).not.toHaveBeenCalled();
+    expect(mockClient.complete).not.toHaveBeenCalled();
+    expect(createDeepSeekClient).not.toHaveBeenCalled();
   });
 
   test('analyze() returns null when score is 0', async () => {
+    const mockClient = makeMockClient(GOOD_ANALYSIS);
+    createDeepSeekClient.mockReturnValue(mockClient);
     const helpers = makeHelpers();
     const filing = { ...SAMPLE_FILING, significance_score: 0 };
     const result = await analyze(filing, helpers);
 
     expect(result).toBeNull();
-    expect(helpers.fetchFn).not.toHaveBeenCalled();
+    expect(mockClient.complete).not.toHaveBeenCalled();
+    expect(createDeepSeekClient).not.toHaveBeenCalled();
   });
 
   test('analyze() IS called when score >= 4', async () => {
+    const mockClient = makeMockClient(GOOD_ANALYSIS);
+    createDeepSeekClient.mockReturnValue(mockClient);
     const helpers = makeHelpers();
     const filing = { ...SAMPLE_FILING, significance_score: 4 };
     const result = await analyze(filing, helpers);
 
-    expect(helpers.fetchFn).toHaveBeenCalled();
+    expect(mockClient.complete).toHaveBeenCalled();
     expect(result).toBeTruthy();
   });
 
   test('analyze() IS called when score is exactly 4', async () => {
+    const mockClient = makeMockClient(GOOD_ANALYSIS);
+    createDeepSeekClient.mockReturnValue(mockClient);
     const helpers = makeHelpers();
     const filing = { ...SAMPLE_FILING, significance_score: 4 };
     await analyze(filing, helpers);
 
-    expect(helpers.fetchFn).toHaveBeenCalledTimes(1);
+    expect(mockClient.complete).toHaveBeenCalledTimes(1);
   });
 
-  // ── Model ───────────────────────────────────────────────────────────────
+  // ── Provider ─────────────────────────────────────────────────────────────
 
-  test('analyze() uses model claude-sonnet-4-6', async () => {
+  test('analyze() calls createDeepSeekClient with fetchFn and deepSeekApiKey', async () => {
+    const mockClient = makeMockClient(GOOD_ANALYSIS);
+    createDeepSeekClient.mockReturnValue(mockClient);
     const helpers = makeHelpers();
     await analyze(SAMPLE_FILING, helpers);
 
-    const callArgs = helpers.fetchFn.mock.calls[0];
-    const body = JSON.parse(callArgs[1].body);
-    expect(body.model).toBe('claude-sonnet-4-6');
+    expect(createDeepSeekClient).toHaveBeenCalledWith(helpers.fetchFn, DEEPSEEK_KEY);
+  });
+
+  test('analyze() calls client.complete with null system prompt and full prompt', async () => {
+    const mockClient = makeMockClient(GOOD_ANALYSIS);
+    createDeepSeekClient.mockReturnValue(mockClient);
+    const helpers = makeHelpers();
+    await analyze(SAMPLE_FILING, helpers);
+
+    expect(mockClient.complete).toHaveBeenCalledWith(null, expect.any(String));
+  });
+
+  test('analyze() returns result.content directly (prose, no JSON parsing)', async () => {
+    const mockClient = makeMockClient(GOOD_ANALYSIS);
+    createDeepSeekClient.mockReturnValue(mockClient);
+    const helpers = makeHelpers();
+    const result = await analyze(SAMPLE_FILING, helpers);
+
+    expect(result).toBe(GOOD_ANALYSIS);
   });
 
   // ── Validation & retry ─────────────────────────────────────────────────
 
   test('response with < 50 characters triggers one retry', async () => {
-    const shortResponse = 'Too short.';
-    const fetchFn = jest.fn()
-      .mockResolvedValueOnce({
-        ok: true, status: 200,
-        json: async () => ({ content: [{ type: 'text', text: shortResponse }] }),
-      })
-      .mockResolvedValueOnce({
-        ok: true, status: 200,
-        json: async () => ({ content: [{ type: 'text', text: GOOD_ANALYSIS }] }),
-      });
+    const mockClient = { complete: jest.fn() };
+    mockClient.complete
+      .mockResolvedValueOnce({ content: 'Too short.', usage: {}, cached: false, estimatedCost: 0 })
+      .mockResolvedValueOnce({ content: GOOD_ANALYSIS, usage: {}, cached: false, estimatedCost: 0 });
+    createDeepSeekClient.mockReturnValue(mockClient);
 
-    const helpers = makeHelpers({ fetchFn });
+    const helpers = makeHelpers();
     const result = await analyze(SAMPLE_FILING, helpers);
 
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(mockClient.complete).toHaveBeenCalledTimes(2);
     expect(result).toBe(GOOD_ANALYSIS);
   });
 
   test('response with only 1 paragraph triggers one retry', async () => {
     const singleParagraph = 'This is a single paragraph without any breaks and it is long enough to pass the character check but has no paragraph separation at all.';
-    const fetchFn = jest.fn()
-      .mockResolvedValueOnce({
-        ok: true, status: 200,
-        json: async () => ({ content: [{ type: 'text', text: singleParagraph }] }),
-      })
-      .mockResolvedValueOnce({
-        ok: true, status: 200,
-        json: async () => ({ content: [{ type: 'text', text: GOOD_ANALYSIS }] }),
-      });
+    const mockClient = { complete: jest.fn() };
+    mockClient.complete
+      .mockResolvedValueOnce({ content: singleParagraph, usage: {}, cached: false, estimatedCost: 0 })
+      .mockResolvedValueOnce({ content: GOOD_ANALYSIS, usage: {}, cached: false, estimatedCost: 0 });
+    createDeepSeekClient.mockReturnValue(mockClient);
 
-    const helpers = makeHelpers({ fetchFn });
+    const helpers = makeHelpers();
     const result = await analyze(SAMPLE_FILING, helpers);
 
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(mockClient.complete).toHaveBeenCalledTimes(2);
     expect(result).toBe(GOOD_ANALYSIS);
   });
 
   test('after failed retry, ai_analysis = null (no throw)', async () => {
     const bad = 'Bad.';
-    const fetchFn = jest.fn().mockResolvedValue({
-      ok: true, status: 200,
-      json: async () => ({ content: [{ type: 'text', text: bad }] }),
-    });
+    const mockClient = makeMockClient(bad);
+    createDeepSeekClient.mockReturnValue(mockClient);
 
-    const helpers = makeHelpers({ fetchFn });
+    const helpers = makeHelpers();
     const result = await analyze(SAMPLE_FILING, helpers);
 
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(mockClient.complete).toHaveBeenCalledTimes(2);
     expect(result).toBeNull();
   });
 
@@ -210,56 +264,22 @@ describe('analyze-alert', () => {
 
   // ── Error handling ─────────────────────────────────────────────────────
 
+  test('AI client error returns null (no throw)', async () => {
+    const mockClient = makeMockClient(null, new Error('DeepSeek API error'));
+    createDeepSeekClient.mockReturnValue(mockClient);
+    const helpers = makeHelpers();
+    const result = await analyze(SAMPLE_FILING, helpers);
+
+    expect(result).toBeNull();
+  });
+
   test('network error returns null (no throw)', async () => {
-    const fetchFn = jest.fn().mockRejectedValue(new Error('ECONNREFUSED'));
-    const helpers = makeHelpers({ fetchFn });
+    const mockClient = makeMockClient(null, new Error('ECONNRESET'));
+    createDeepSeekClient.mockReturnValue(mockClient);
+    const helpers = makeHelpers();
     const result = await analyze(SAMPLE_FILING, helpers);
 
     expect(result).toBeNull();
-  });
-
-  test('429 rate limit waits 5s and retries once', async () => {
-    const fetchFn = jest.fn()
-      .mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({}) })
-      .mockResolvedValueOnce({
-        ok: true, status: 200,
-        json: async () => ({ content: [{ type: 'text', text: GOOD_ANALYSIS }] }),
-      });
-
-    const helpers = makeHelpers({ fetchFn });
-    const result = await analyze(SAMPLE_FILING, helpers);
-
-    expect(fetchFn).toHaveBeenCalledTimes(2);
-    expect(helpers._sleep).toHaveBeenCalledWith(5000);
-    expect(result).toBe(GOOD_ANALYSIS);
-  });
-
-  test('429 twice returns null', async () => {
-    const fetchFn = jest.fn().mockResolvedValue({
-      ok: false, status: 429, json: async () => ({}),
-    });
-
-    const helpers = makeHelpers({ fetchFn });
-    const result = await analyze(SAMPLE_FILING, helpers);
-
-    expect(fetchFn).toHaveBeenCalledTimes(2);
-    expect(result).toBeNull();
-  });
-
-  test('500/503 retries once after 2s delay', async () => {
-    const fetchFn = jest.fn()
-      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
-      .mockResolvedValueOnce({
-        ok: true, status: 200,
-        json: async () => ({ content: [{ type: 'text', text: GOOD_ANALYSIS }] }),
-      });
-
-    const helpers = makeHelpers({ fetchFn });
-    const result = await analyze(SAMPLE_FILING, helpers);
-
-    expect(fetchFn).toHaveBeenCalledTimes(2);
-    expect(helpers._sleep).toHaveBeenCalledWith(2000);
-    expect(result).toBe(GOOD_ANALYSIS);
   });
 
   // ── validateAnalysis unit tests ────────────────────────────────────────

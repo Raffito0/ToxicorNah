@@ -1,5 +1,7 @@
 'use strict';
 
+const { createDeepSeekClient } = require('./ai-client');
+
 // ─── Prompt builder ─────────────────────────────────────────────────────────
 
 function buildAnalysisPrompt(filing) {
@@ -48,44 +50,13 @@ function validateAnalysis(text) {
   return paragraphs.length >= 2;
 }
 
-// ─── API call ───────────────────────────────────────────────────────────────
-
-async function callClaude(prompt, helpers) {
-  const response = await helpers.fetchFn('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': helpers.anthropicApiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1536,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
-
-  if (!response.ok) {
-    const err = new Error(`Anthropic API error: ${response.status}`);
-    err.status = response.status;
-    throw err;
-  }
-
-  const data = await response.json();
-  const text = data?.content?.[0]?.text;
-  if (!text) {
-    throw new Error('Anthropic API returned empty content');
-  }
-  return text;
-}
-
 // ─── Main function ──────────────────────────────────────────────────────────
 
 /**
  * Generate AI prose analysis for a qualifying filing.
  *
  * @param {object} filing - Enriched filing object from score-alert.js
- * @param {object} helpers - { anthropicApiKey, fetchFn, _sleep }
+ * @param {object} helpers - { deepSeekApiKey, fetchFn }
  * @returns {Promise<string|null>} - Prose analysis string, or null on skip/failure
  */
 async function analyze(filing, helpers) {
@@ -95,10 +66,12 @@ async function analyze(filing, helpers) {
   }
 
   const prompt = buildAnalysisPrompt(filing);
+  const client = createDeepSeekClient(helpers.fetchFn, helpers.deepSeekApiKey);
 
   try {
     // First attempt
-    let text = await callWithRetry(prompt, helpers);
+    let result = await client.complete(null, prompt);
+    let text = result.content;
 
     // Validate
     if (validateAnalysis(text)) {
@@ -110,7 +83,8 @@ async function analyze(filing, helpers) {
       `[analyze-alert] Validation failed for ${filing.dedup_key}, retrying. ` +
       `Response: ${(text || '').slice(0, 200)}`
     );
-    text = await callClaude(prompt, helpers);
+    result = await client.complete(null, prompt);
+    text = result.content;
 
     if (validateAnalysis(text)) {
       return text;
@@ -127,34 +101,13 @@ async function analyze(filing, helpers) {
   }
 }
 
-/**
- * Call Claude with error-specific retry logic.
- * Handles 429 (rate limit) with 5s wait and 500/503 with immediate retry.
- */
-async function callWithRetry(prompt, helpers) {
-  try {
-    return await callClaude(prompt, helpers);
-  } catch (err) {
-    if (err.status === 429) {
-      await helpers._sleep(5000);
-      return await callClaude(prompt, helpers);
-    }
-    if (err.status === 500 || err.status === 503) {
-      await helpers._sleep(2000);
-      return await callClaude(prompt, helpers);
-    }
-    throw err;
-  }
-}
-
 // ─── n8n Code node wrapper (commented) ──────────────────────────────────────
 //
 // Usage inside an n8n Code node:
 //
 //   const helpers = {
-//     anthropicApiKey: $env.ANTHROPIC_API_KEY,
+//     deepSeekApiKey: $env.DEEPSEEK_API_KEY,
 //     fetchFn: (url, opts) => fetch(url, opts),
-//     _sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
 //   };
 //   for (const item of $input.all()) {
 //     item.json.ai_analysis = await analyze(item.json, helpers);
@@ -167,6 +120,5 @@ async function callWithRetry(prompt, helpers) {
 module.exports = {
   buildAnalysisPrompt,
   validateAnalysis,
-  callClaude,
   analyze,
 };
