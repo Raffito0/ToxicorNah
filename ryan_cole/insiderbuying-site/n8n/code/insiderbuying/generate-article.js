@@ -10,6 +10,8 @@
 
 'use strict';
 
+const { createClaudeClient } = require('./ai-client');
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -172,16 +174,6 @@ function buildToolSchema() {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Extract Tool Use Result from Claude response
-// ---------------------------------------------------------------------------
-
-function extractToolResult(response) {
-  if (!response || !response.content || response.content.length === 0) return null;
-  const block = response.content.find((c) => c.type === 'tool_use');
-  if (!block) return null;
-  return block.input || null;
-}
 
 // ---------------------------------------------------------------------------
 // Quality Gate (14 checks)
@@ -746,42 +738,6 @@ async function validateTickerApi(ticker, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Claude API Call with Tool Use
-// ---------------------------------------------------------------------------
-
-async function callClaudeToolUse(systemPrompt, opts = {}) {
-  const { fetchFn, apiKey, maxTokens = 8000 } = opts;
-  if (!fetchFn || !apiKey) throw new Error('fetchFn and apiKey required');
-
-  const tool = buildToolSchema();
-
-  const res = await fetchFn('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6-20250514',
-      max_tokens: maxTokens,
-      temperature: 0.6,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: 'Generate the article now.' }],
-      tools: [tool],
-      tool_choice: { type: 'tool', name: 'generate_article' },
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Claude API error ${res.status}: ${text.slice(0, 200)}`);
-  }
-
-  return res.json();
-}
-
-// ---------------------------------------------------------------------------
 // Write Article to NocoDB
 // ---------------------------------------------------------------------------
 
@@ -1010,6 +966,7 @@ async function generateArticle(input, helpers) {
   const systemPrompt = interpolateTemplate(systemPromptTemplate, templateVars);
 
   // Step 6-7: Claude API call with Tool Use + retry
+  const claude = createClaudeClient(fetchFn, env.ANTHROPIC_API_KEY);
   let article = null;
   let retryFeedback = '';
   const MAX_RETRIES = 2;
@@ -1019,13 +976,26 @@ async function generateArticle(input, helpers) {
       ? systemPrompt
       : `${systemPrompt}\n\nQuality gate failed on previous attempt: ${retryFeedback}. Fix these specific issues and regenerate.`;
 
-    const response = await callClaudeToolUse(prompt, {
-      fetchFn,
-      apiKey: env.ANTHROPIC_API_KEY,
-      maxTokens: params.maxTokens,
-    });
+    let result;
+    try {
+      result = await claude.completeToolUse(
+        prompt,
+        'Generate the article now.',
+        [buildToolSchema()],
+        { type: 'tool', name: 'generate_article' },
+        {
+          temperature: 0.6,
+          maxTokens: params.maxTokens,
+          cache: true,
+        },
+      );
+    } catch (err) {
+      console.log(`[generate-article] Claude refusal or error: ${err.message}`);
+      await updateKeywordStatus(keyword.id, 'skipped', nocodbOpts);
+      return { status: 'skipped', reason: 'Claude safety refusal' };
+    }
 
-    article = extractToolResult(response);
+    article = result.toolResult;
     if (!article) {
       // Safety refusal or unexpected response
       await updateKeywordStatus(keyword.id, 'skipped', nocodbOpts);
@@ -1148,7 +1118,6 @@ module.exports = {
   determineArticleParams,
   interpolateTemplate,
   buildToolSchema,
-  extractToolResult,
   qualityGate,
   seoScore,
   aiDetectionScore,
@@ -1159,7 +1128,6 @@ module.exports = {
   pickKeyword,
   lockKeyword,
   validateTickerApi,
-  callClaudeToolUse,
   writeArticle,
   updateKeywordStatus,
   triggerDownstream,
