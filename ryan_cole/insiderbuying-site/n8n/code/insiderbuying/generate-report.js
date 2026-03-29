@@ -155,13 +155,23 @@ function buildReportPrompt(data, reportType) {
 
 /**
  * Populate premium report HTML template with content.
- * @param {string} content - AI-generated report content (markdown)
- * @param {string} reportTitle - Report title
- * @param {string} date - Report date string (e.g., 'March 28, 2026')
- * @returns {string} HTML string ready for PDF rendering
+ * Polymorphic: accepts either legacy (content, reportTitle, date) or new (sections, charts, config).
  */
-function buildReportHTML(content, reportTitle, date) {
-  // Convert basic markdown to HTML
+function buildReportHTML(sectionsOrContent, chartsOrTitle, configOrDate) {
+  if (typeof sectionsOrContent === 'string') {
+    return _buildReportHTMLLegacy(sectionsOrContent, chartsOrTitle, configOrDate);
+  }
+  return _buildReportHTMLFromSections(sectionsOrContent, chartsOrTitle, configOrDate);
+}
+
+/**
+ * Legacy HTML builder — used by old tests and simple integrations.
+ * @param {string} content - markdown content
+ * @param {string} reportTitle
+ * @param {string} date
+ * @returns {string}
+ */
+function _buildReportHTMLLegacy(content, reportTitle, date) {
   var htmlContent = content
     .replace(/^### (.*$)/gm, '<h3>$1</h3>')
     .replace(/^## (.*$)/gm, '<h2>$1</h2>')
@@ -174,7 +184,7 @@ function buildReportHTML(content, reportTitle, date) {
     .replace(/\n\n/g, '</p><p>')
     .replace(/^(?!<[hulo])/gm, '');
 
-  var html = '<!DOCTYPE html>'
+  return '<!DOCTYPE html>'
     + '<html><head><meta charset="utf-8">'
     + '<style>'
     + 'body { font-family: Georgia, "Times New Roman", serif; color: #1a1a2e; line-height: 1.7; margin: 0; padding: 0; }'
@@ -206,8 +216,72 @@ function buildReportHTML(content, reportTitle, date) {
     + '</div>'
     + '<div class="footer">InsiderBuying.ai | Institutional-Grade Insider Intelligence</div>'
     + '</body></html>';
+}
 
-  return html;
+/**
+ * Full premium report HTML builder from sequential sections + charts.
+ * Page order: cover → exec summary → insider intelligence → price chart + banner → remaining sections.
+ * @param {Object} sections - keyed by section id, values are plain text strings
+ * @param {Object} charts - keyed by chart name ('cover','price','revenue','valuation','peer'), values are base64 data URIs or placeholder HTML
+ * @param {Object} config - from getReportConfig()
+ * @returns {string}
+ */
+function _buildReportHTMLFromSections(sections, charts, config) {
+  var slug = sections.slug || 'report';
+
+  function chartImg(src) {
+    if (!src) return '';
+    if (src.startsWith('data:')) return '<img src="' + src + '" style="width:100%;display:block;" />';
+    return src; // placeholder HTML
+  }
+
+  var css = '<style>'
+    + 'body { font-family: Arial, Helvetica, sans-serif; color: #1a1a2e; margin: 0; padding: 0; }'
+    + '@page { @top-center { content: "EarlyInsider.com | Insider Intelligence Report"; font-size: 10px; color: #64748b; } }'
+    + '@page :first { @top-center { content: none; } }'
+    + 'section { break-before: page; padding: 30px 50px; }'
+    + '.cover-page { break-before: avoid; padding: 0; }'
+    + 'h2 { color: #0a1628; font-size: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; margin-top: 0; }'
+    + 'p { margin: 12px 0; line-height: 1.7; }'
+    + '.continue-reading-banner { background: #0a1628; color: white; padding: 24px 40px; text-align: center; margin-top: 20px; }'
+    + '.continue-reading-banner p { margin: 0 0 10px 0; font-size: 18px; font-weight: 700; color: white; }'
+    + '.continue-reading-banner a { color: #60a5fa; font-size: 14px; }'
+    + '</style>';
+
+  var remainingOrder = [
+    'financial_analysis', 'valuation_analysis', 'bull_case', 'bear_case',
+    'peer_comparison', 'catalysts_timeline', 'investment_thesis', 'company_overview',
+  ];
+
+  function sectionHtml(id, title, extraHtml) {
+    var text = sections[id] || '';
+    return '<section id="' + id + '">'
+      + '<h2>' + title + '</h2>'
+      + '<p>' + escapeHTML(text) + '</p>'
+      + (extraHtml || '')
+      + '</section>';
+  }
+
+  var remainingHtml = remainingOrder.map(function(id) {
+    var title = id.replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
+    return sectionHtml(id, title, '');
+  }).join('\n');
+
+  var banner = '<div class="continue-reading-banner">'
+    + '<p>CONTINUE READING - Full report: $' + config.price + '</p>'
+    + '<a href="https://earlyinsider.com/reports/' + slug + '">Get Full Access</a>'
+    + '</div>';
+
+  return '<!DOCTYPE html><html><head><meta charset="utf-8">' + css + '</head><body>'
+    + '<div class="cover-page">' + chartImg(charts.cover) + '</div>'
+    + sectionHtml('exec_summary', 'Executive Summary', '')
+    + sectionHtml('insider_intelligence', 'Insider Intelligence', '')
+    + '<section id="price_chart">'
+    + chartImg(charts.price)
+    + banner
+    + '</section>'
+    + remainingHtml
+    + '</body></html>';
 }
 
 /**
@@ -504,6 +578,113 @@ async function generateReport(data, fetchFn) {
 }
 
 // ---------------------------------------------------------------------------
+// Section 05 — Price Tier Configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps report type to price and cover template.
+ * @param {string} reportType - 'single' | 'complex' | 'sector' | 'bundle'
+ * @returns {{ price: number, coverTemplate: 'A' | 'B' | 'C' }}
+ * @throws if reportType is unrecognized
+ */
+function getReportConfig(reportType) {
+  var configs = {
+    'single':  { price: 14.99, coverTemplate: 'A' },
+    'complex': { price: 19.99, coverTemplate: 'A' },
+    'sector':  { price: 19.99, coverTemplate: 'B' },
+    'bundle':  { price: 24.99, coverTemplate: 'C' },
+  };
+  var cfg = configs[reportType];
+  if (!cfg) throw new Error('Unrecognized report type: ' + reportType);
+  return cfg;
+}
+
+// ---------------------------------------------------------------------------
+// Section 05 — Chart Resolution (Promise.allSettled results → base64 or placeholder)
+// ---------------------------------------------------------------------------
+
+/**
+ * Converts Promise.allSettled results into base64 data URIs or placeholder HTML.
+ * Never throws — rejected charts become placeholder divs.
+ * @param {Array} settledResults - array of { status, value | reason }
+ * @returns {string[]} array of data URIs or placeholder HTML strings
+ */
+function resolveCharts(settledResults) {
+  return (settledResults || []).map(function(result) {
+    if (result.status === 'fulfilled' && result.value) {
+      var b64 = Buffer.from(result.value).toString('base64');
+      return 'data:image/png;base64,' + b64;
+    }
+    var reason = result.reason && result.reason.message ? result.reason.message : String(result.reason || 'unknown');
+    console.warn('[generate-report] Chart generation failed: ' + reason);
+    return '<div class="chart-unavailable">Chart temporarily unavailable</div>';
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Section 05 — WeasyPrint PDF Generation
+// ---------------------------------------------------------------------------
+
+var WEASYPRINT_URL = 'http://host.docker.internal:3456/weasyprint';
+
+/**
+ * Generates a PDF via the screenshot server's WeasyPrint endpoint.
+ * @param {string} htmlString - full HTML from buildReportHTML()
+ * @param {Object} config - from getReportConfig()
+ * @param {Function} [fetchFn] - injectable fetch for testing
+ * @returns {Promise<Buffer>}
+ * @throws if response buffer exceeds 8MB
+ */
+async function generateReportPDF(htmlString, config, fetchFn) {
+  if (!fetchFn) fetchFn = fetch;
+
+  var res = await fetchFn(WEASYPRINT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/html' },
+    body: htmlString,
+  });
+
+  if (!res.ok) throw new Error('WeasyPrint error: ' + res.status);
+
+  var arrayBuf = await res.arrayBuffer();
+  var buffer = Buffer.from(arrayBuf);
+
+  var MAX_SIZE = 8 * 1024 * 1024;
+  if (buffer.length > MAX_SIZE) {
+    throw new Error('PDF too large: ' + (buffer.length / 1024 / 1024).toFixed(1) + 'MB exceeds 8MB limit');
+  }
+
+  return buffer;
+}
+
+// ---------------------------------------------------------------------------
+// Section 05 — 5-Page Preview Extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts the first min(pageCount, 5) pages from a full PDF using pdf-lib.
+ * @param {Buffer} fullPdfBuffer
+ * @returns {Promise<Buffer>}
+ */
+async function generatePreviewPDF(fullPdfBuffer) {
+  var pdfLib = require('pdf-lib');
+  var PDFDocument = pdfLib.PDFDocument;
+
+  var sourceDoc = await PDFDocument.load(fullPdfBuffer);
+  var pageCount = Math.min(sourceDoc.getPageCount(), 5);
+  var previewDoc = await PDFDocument.create();
+
+  if (pageCount > 0) {
+    var indices = Array.from({ length: pageCount }, function(_, i) { return i; });
+    var pages = await previewDoc.copyPages(sourceDoc, indices);
+    pages.forEach(function(p) { previewDoc.addPage(p); });
+  }
+
+  var bytes = await previewDoc.save();
+  return Buffer.from(bytes);
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -523,4 +704,10 @@ module.exports = {
   generateReport: generateReport,
   REPORT_SECTIONS: REPORT_SECTIONS,
   BEAR_CASE_SYSTEM_PROMPT: BEAR_CASE_SYSTEM_PROMPT,
+
+  // Section 05
+  getReportConfig: getReportConfig,
+  resolveCharts: resolveCharts,
+  generateReportPDF: generateReportPDF,
+  generatePreviewPDF: generatePreviewPDF,
 };
