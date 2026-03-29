@@ -1,0 +1,26 @@
+{
+  "plugin_root": "C:\\Users\\rafca\\.claude\\plugins\\cache\\piercelamb-deep-implement",
+  "sections_dir": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\ryan_cole\\insiderbuying-planning\\09-data-pipeline\\sections",
+  "target_dir": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\ryan_cole\\insiderbuying-site",
+  "state_dir": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\ryan_cole\\insiderbuying-planning\\09-data-pipeline\\implementation",
+  "git_root": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\ryan_cole",
+  "commit_style": "simple",
+  "test_command": "uv run pytest",
+  "sections": [
+    "section-01-edgar-rss-discovery",
+    "section-02-form4-xml-parser",
+    "section-03-transaction-classification",
+    "section-04-finnhub-integration",
+    "section-05-alphavantage-secmonitor-rewrite"
+  ],
+  "sections_state": {},
+  "pre_commit": {
+    "present": false,
+    "type": "none",
+    "config_file": null,
+    "native_hook": null,
+    "may_modify_files": false,
+    "detected_formatters": []
+  },
+  "created_at": "2026-03-29T03:20:12.337006+00:00"
+}
