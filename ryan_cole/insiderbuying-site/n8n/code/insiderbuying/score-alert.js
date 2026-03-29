@@ -3,12 +3,12 @@
 // ─── score-alert.js ─────────────────────────────────────────────────────────
 // Significance scoring node for the W4 InsiderBuying.ai pipeline.
 // Runs after sec-monitor.js, before analyze-alert.js.
-// Computes a 1-10 significance score using Claude Haiku plus insider track
+// Computes a 1-10 significance score using DeepSeek plus insider track
 // record from NocoDB Insider_History and Yahoo Finance 30-day price returns.
 // ────────────────────────────────────────────────────────────────────────────
 
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
-const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
+const { createDeepSeekClient } = require('./ai-client');
+
 const YAHOO_API = 'https://query1.finance.yahoo.com/v8/finance/chart';
 const HISTORY_MONTHS = 24;
 
@@ -237,62 +237,37 @@ function parseHaikuResponse(rawText) {
 const HAIKU_DEFAULT = { score: 5, reasoning: 'Scoring unavailable' };
 
 /**
- * Calls Anthropic Haiku API with prompt. Retries up to 2 times on failure.
- * Returns { score, reasoning } or default { score: 5, ... } on exhausted retries.
+ * Calls DeepSeek via ai-client with prompt.
+ * Returns { score, reasoning } or HAIKU_DEFAULT on any error.
+ * Retry logic is delegated to the ai-client layer.
+ *
+ * @param {string} prompt
+ * @param {object} deepseekClient - AIClient instance from createDeepSeekClient()
  */
-async function callHaiku(prompt, anthropicApiKey, { fetchFn, _sleep } = {}) {
-  const body = JSON.stringify({
-    model: HAIKU_MODEL,
-    max_tokens: 256,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-api-key': anthropicApiKey,
-    'anthropic-version': '2023-06-01',
-  };
-
-  for (let attempt = 0; attempt <= 2; attempt++) {
-    try {
-      if (attempt > 0 && _sleep) await _sleep(1000 * attempt);
-
-      const resp = await fetchFn(ANTHROPIC_API, { method: 'POST', headers, body });
-
-      if (!resp.ok) {
-        if (attempt === 2) return { ...HAIKU_DEFAULT };
-        continue;
-      }
-
-      const data = await resp.json();
-      const rawText = data?.content?.[0]?.text;
-      if (!rawText) {
-        if (attempt === 2) return { ...HAIKU_DEFAULT };
-        continue;
-      }
-
-      return parseHaikuResponse(rawText);
-    } catch {
-      if (attempt === 2) return { ...HAIKU_DEFAULT };
-    }
+async function callHaiku(prompt, deepseekClient) {
+  try {
+    const result = await deepseekClient.complete(null, prompt, { temperature: 0.3 });
+    return parseHaikuResponse(result.content);
+  } catch (err) {
+    console.log(`[score-alert] scoring failed: ${err.message}`);
+    return { ...HAIKU_DEFAULT };
   }
-
-  return { ...HAIKU_DEFAULT };
 }
 
 // ─── 3.3 runScoreAlert ──────────────────────────────────────────────────────
 
 /**
  * Main n8n node entry point.
- * Iterates over all filings sequentially, scores each with Haiku,
+ * Iterates over all filings sequentially, scores each with DeepSeek,
  * and returns the enriched filing array.
  *
  * @param {Array} filings - Array of filing objects from sec-monitor.js
- * @param {Object} helpers - { nocodb, anthropicApiKey, fetchFn, _sleep }
+ * @param {Object} helpers - { nocodb, deepseekApiKey, fetchFn }
  * @returns {Array} filings enriched with significance_score, score_reasoning, track_record
  */
 async function runScoreAlert(filings, helpers = {}) {
-  const { nocodb, anthropicApiKey, fetchFn, _sleep } = helpers;
+  const { nocodb, fetchFn, deepseekApiKey } = helpers;
+  const deepseek = createDeepSeekClient(fetchFn, deepseekApiKey);
 
   if (!filings || filings.length === 0) return [];
 
@@ -306,9 +281,9 @@ async function runScoreAlert(filings, helpers = {}) {
       { fetchFn }
     );
 
-    // Step 2: build prompt and call Haiku
+    // Step 2: build prompt and call DeepSeek
     const prompt = buildHaikuPrompt(filing, trackRecord);
-    const { score, reasoning } = await callHaiku(prompt, anthropicApiKey, { fetchFn, _sleep });
+    const { score, reasoning } = await callHaiku(prompt, deepseek);
 
     results.push({
       ...filing,
@@ -342,9 +317,8 @@ async function runScoreAlert(filings, helpers = {}) {
 //   );
 //   const helpers = {
 //     nocodb,
-//     anthropicApiKey: $env.ANTHROPIC_API_KEY,
+//     deepseekApiKey: $env.DEEPSEEK_API_KEY,
 //     fetchFn: (url, opts) => fetch(url, opts),
-//     _sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
 //   };
 //   const results = await runScoreAlert(filings, helpers);
 //   return results.map(item => ({ json: item }));

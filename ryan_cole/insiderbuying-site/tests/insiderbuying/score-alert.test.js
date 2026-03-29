@@ -1,5 +1,14 @@
 'use strict';
 
+// ---------------------------------------------------------------------------
+// Mock ai-client BEFORE requiring score-alert
+// ---------------------------------------------------------------------------
+jest.mock('../../n8n/code/insiderbuying/ai-client', () => ({
+  createDeepSeekClient: jest.fn(),
+}));
+
+const { createDeepSeekClient } = require('../../n8n/code/insiderbuying/ai-client');
+
 const {
   normalizeInsiderName,
   computeTrackRecord,
@@ -34,7 +43,19 @@ const noSleep = jest.fn().mockResolvedValue(undefined);
 const NOCODB_BASE_URL = 'http://localhost:8080';
 const NOCODB_TOKEN = 'test-token';
 const NOCODB_PROJECT_ID = 'test-project-id';
-const ANTHROPIC_KEY = 'test-anthropic';
+const DEEPSEEK_KEY = 'test-deepseek';
+
+function makeMockDeepSeekClient(content = null, throws = null) {
+  const complete = throws
+    ? jest.fn().mockRejectedValue(throws)
+    : jest.fn().mockResolvedValue({
+        content: content || '{"score": 8, "reasoning": "Large C-Suite purchase signals confidence."}',
+        usage: { inputTokens: 200, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        cached: false,
+        estimatedCost: 0.0001,
+      });
+  return { complete };
+}
 
 function makeNocoDB(fetchFn) {
   return new NocoDB(NOCODB_BASE_URL, NOCODB_TOKEN, NOCODB_PROJECT_ID, fetchFn);
@@ -333,73 +354,110 @@ describe('score clamping and rounding', () => {
   });
 });
 
+// ─── source code checks ─────────────────────────────────────────────────────
+
+const path = require('path');
+const fs = require('fs');
+const srcPath = path.resolve(__dirname, '../../n8n/code/insiderbuying/score-alert.js');
+const src = fs.readFileSync(srcPath, 'utf8');
+
+describe('source code checks', () => {
+  test('no anthropic.com URL in source', () => {
+    expect(src).not.toContain('anthropic.com');
+  });
+
+  test('no claude-haiku model string in source', () => {
+    expect(src).not.toContain('claude-haiku');
+  });
+
+  test('no x-api-key header in source', () => {
+    expect(src).not.toContain('x-api-key');
+  });
+
+  test('imports createDeepSeekClient from ai-client', () => {
+    expect(src).toContain("require('./ai-client')");
+    expect(src).toContain('createDeepSeekClient');
+  });
+});
+
 // ─── 3.2 callHaiku ──────────────────────────────────────────────────────────────
 
 describe('callHaiku', () => {
-  test('calls Anthropic messages endpoint with correct model', async () => {
-    const fetchFn = makeFetch({
-      content: [{ type: 'text', text: HAIKU_JSON_RESPONSE }],
-    });
-    const result = await callHaiku('test prompt', ANTHROPIC_KEY, { fetchFn, _sleep: noSleep });
-    const [url, opts] = fetchFn.mock.calls[0];
-    expect(url).toContain('anthropic.com');
-    expect(JSON.parse(opts.body).model).toContain('haiku');
-  });
+  beforeEach(() => jest.clearAllMocks());
 
-  test('returns parsed score and reasoning on success', async () => {
-    const fetchFn = makeFetch({
-      content: [{ type: 'text', text: HAIKU_JSON_RESPONSE }],
-    });
-    const result = await callHaiku('test prompt', ANTHROPIC_KEY, { fetchFn, _sleep: noSleep });
+  test('calls deepseekClient.complete with prompt and returns parsed score', async () => {
+    const client = makeMockDeepSeekClient('{"score": 8, "reasoning": "Large C-Suite purchase."}');
+    const result = await callHaiku('test prompt', client);
+    expect(client.complete).toHaveBeenCalledWith(null, 'test prompt', { temperature: 0.3 });
     expect(result.score).toBe(8);
     expect(result.reasoning).toContain('C-Suite');
   });
 
-  test('retries on 429 and succeeds on 2nd attempt', async () => {
-    const fetchFn = jest.fn()
-      .mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({}) })
-      .mockResolvedValueOnce({
-        ok: true, status: 200,
-        json: async () => ({ content: [{ type: 'text', text: HAIKU_JSON_RESPONSE }] }),
-      });
-    const result = await callHaiku('test prompt', ANTHROPIC_KEY, { fetchFn, _sleep: noSleep });
-    expect(result.score).toBe(8);
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+  test('handles markdown-fenced JSON from DeepSeek', async () => {
+    const fenced = '```json\n{"score": 7, "reasoning": "Solid signal."}\n```';
+    const client = makeMockDeepSeekClient(fenced);
+    const result = await callHaiku('prompt', client);
+    expect(result.score).toBe(7);
+    expect(result.reasoning).toContain('Solid');
   });
 
-  test('defaults to score=5 after 2 retries exhausted', async () => {
-    const fetchFn = jest.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
-    const result = await callHaiku('test prompt', ANTHROPIC_KEY, { fetchFn, _sleep: noSleep });
+  test('returns HAIKU_DEFAULT on client error', async () => {
+    const client = makeMockDeepSeekClient(null, new Error('API failure'));
+    const result = await callHaiku('prompt', client);
     expect(result).toEqual({ score: 5, reasoning: 'Scoring unavailable' });
-    expect(fetchFn).toHaveBeenCalledTimes(3); // initial + 2 retries
   });
 
-  test('defaults to score=5 on network error after retries', async () => {
-    const fetchFn = jest.fn().mockRejectedValue(new Error('ECONNREFUSED'));
-    const result = await callHaiku('test prompt', ANTHROPIC_KEY, { fetchFn, _sleep: noSleep });
+  test('returns HAIKU_DEFAULT on network error', async () => {
+    const client = makeMockDeepSeekClient(null, new Error('ECONNRESET'));
+    const result = await callHaiku('prompt', client);
     expect(result).toEqual({ score: 5, reasoning: 'Scoring unavailable' });
+  });
+
+  test('returns HAIKU_DEFAULT on invalid JSON response', async () => {
+    const client = makeMockDeepSeekClient('not valid json at all');
+    const result = await callHaiku('prompt', client);
+    expect(result).toEqual({ score: 5, reasoning: 'Scoring unavailable' });
+  });
+
+  test('complete() called exactly once per callHaiku() call (no internal retry loop)', async () => {
+    const client = makeMockDeepSeekClient('{"score": 6, "reasoning": "Test."}');
+    await callHaiku('prompt', client);
+    expect(client.complete).toHaveBeenCalledTimes(1);
   });
 });
 
 // ─── 3.3 runScoreAlert integration ──────────────────────────────────────────────
 
 describe('runScoreAlert', () => {
-  test('returns scored filing with significance_score, score_reasoning, track_record', async () => {
-    const nocodbFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ list: [], pageInfo: { isLastPage: true } }) });
-    const nocodb = makeNocoDB(nocodbFn);
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    const haikuFn = jest.fn().mockResolvedValue({
+  function makeRunHelpers(completeContent = '{"score": 7, "reasoning": "Good signal."}') {
+    const nocodbFn = jest.fn().mockResolvedValue({
       ok: true, status: 200,
-      json: async () => ({ content: [{ type: 'text', text: '{"score": 7, "reasoning": "Good signal."}' }] }),
+      json: async () => ({ list: [], pageInfo: { isLastPage: true } }),
     });
+    const nocodb = makeNocoDB(nocodbFn);
+    const mockClient = makeMockDeepSeekClient(completeContent);
+    createDeepSeekClient.mockReturnValue(mockClient);
+    return { nocodb, nocodbFn, mockClient };
+  }
 
+  test('calls createDeepSeekClient with fetchFn and deepseekApiKey', async () => {
+    const { nocodb } = makeRunHelpers();
+    const fetchFn = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ list: [], pageInfo: { isLastPage: true } }) });
+    await runScoreAlert([SAMPLE_FILING], { nocodb, fetchFn, deepseekApiKey: DEEPSEEK_KEY });
+    expect(createDeepSeekClient).toHaveBeenCalledWith(fetchFn, DEEPSEEK_KEY);
+  });
+
+  test('returns scored filing with significance_score, score_reasoning, track_record', async () => {
+    const { nocodb } = makeRunHelpers();
     const result = await runScoreAlert([SAMPLE_FILING], {
       nocodb,
-      anthropicApiKey: ANTHROPIC_KEY,
-      fetchFn: haikuFn,
-      _sleep: noSleep,
+      fetchFn: jest.fn().mockResolvedValue({ ok: true, json: async () => ({ list: [], pageInfo: { isLastPage: true } }) }),
+      deepseekApiKey: DEEPSEEK_KEY,
     });
-
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       ticker: 'AAPL',
@@ -411,42 +469,24 @@ describe('runScoreAlert', () => {
 
   test('processes multiple filings sequentially', async () => {
     const filing2 = { ...SAMPLE_FILING, ticker: 'MSFT', insider_name: 'Satya Nadella' };
-    const nocodbFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ list: [], pageInfo: { isLastPage: true } }) });
-    const nocodb = makeNocoDB(nocodbFn);
-
-    const haikuFn = jest.fn().mockResolvedValue({
-      ok: true, status: 200,
-      json: async () => ({ content: [{ type: 'text', text: '{"score": 6, "reasoning": "Moderate."}' }] }),
-    });
-
+    const { nocodb } = makeRunHelpers('{"score": 6, "reasoning": "Moderate."}');
     const results = await runScoreAlert([SAMPLE_FILING, filing2], {
       nocodb,
-      anthropicApiKey: ANTHROPIC_KEY,
-      fetchFn: haikuFn,
-      _sleep: noSleep,
+      fetchFn: jest.fn().mockResolvedValue({ ok: true, json: async () => ({ list: [], pageInfo: { isLastPage: true } }) }),
+      deepseekApiKey: DEEPSEEK_KEY,
     });
-
     expect(results).toHaveLength(2);
     expect(results[0].ticker).toBe('AAPL');
     expect(results[1].ticker).toBe('MSFT');
   });
 
   test('preserves all original filing fields in output', async () => {
-    const nocodbFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ list: [], pageInfo: { isLastPage: true } }) });
-    const nocodb = makeNocoDB(nocodbFn);
-
-    const haikuFn = jest.fn().mockResolvedValue({
-      ok: true, status: 200,
-      json: async () => ({ content: [{ type: 'text', text: '{"score": 5, "reasoning": "Test."}' }] }),
-    });
-
+    const { nocodb } = makeRunHelpers('{"score": 5, "reasoning": "Test."}');
     const results = await runScoreAlert([SAMPLE_FILING], {
       nocodb,
-      anthropicApiKey: ANTHROPIC_KEY,
-      fetchFn: haikuFn,
-      _sleep: noSleep,
+      fetchFn: jest.fn().mockResolvedValue({ ok: true, json: async () => ({ list: [], pageInfo: { isLastPage: true } }) }),
+      deepseekApiKey: DEEPSEEK_KEY,
     });
-
     expect(results[0].is_cluster_buy).toBe(false);
     expect(results[0].cluster_id).toBeNull();
     expect(results[0].transaction_type).toBe('P - Purchase');
@@ -455,9 +495,8 @@ describe('runScoreAlert', () => {
   test('handles empty filings array', async () => {
     const results = await runScoreAlert([], {
       nocodb: makeNocoDB(jest.fn()),
-      anthropicApiKey: ANTHROPIC_KEY,
       fetchFn: jest.fn(),
-      _sleep: noSleep,
+      deepseekApiKey: DEEPSEEK_KEY,
     });
     expect(results).toEqual([]);
   });
