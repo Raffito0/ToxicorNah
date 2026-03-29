@@ -568,3 +568,119 @@ describe('parseForm4Xml() — edge cases', () => {
     expect(result.nonDerivativeTransactions[0].shares).toBe(1000);
   });
 });
+
+// ─── Section 3: Transaction Classification ────────────────────────────────────
+
+const {
+  classifyTransaction,
+  classifyInsiderRole,
+  filterScorable,
+  calculate10b5Plan,
+} = require('../../n8n/code/insiderbuying/edgar-parser');
+
+describe('classifyTransaction', () => {
+  test.each([
+    [{ transactionCode: 'P' }, 'purchase'],
+    [{ transactionCode: 'S' }, 'sale'],
+    [{ transactionCode: 'G' }, 'gift'],
+    [{ transactionCode: 'F' }, 'tax_withholding'],
+    [{ transactionCode: 'M' }, 'option_exercise'],
+    [{ transactionCode: 'X' }, 'option_exercise'],
+    [{ transactionCode: 'A' }, 'award'],
+    [{ transactionCode: 'D' }, 'disposition'],
+    [{ transactionCode: 'J' }, 'other'],
+    [{ transactionCode: '?' }, 'other'],
+  ])('code %s → %s', (tx, expected) => {
+    expect(classifyTransaction(tx)).toBe(expected);
+  });
+});
+
+describe('classifyInsiderRole', () => {
+  test.each([
+    ['Chief Executive Officer', 'CEO'],
+    ['Principal Executive Officer', 'CEO'],
+    ['CEO', 'CEO'],
+    ['Chief Financial Officer', 'CFO'],
+    ['Principal Financial Officer', 'CFO'],
+    ['CFO', 'CFO'],
+    ['President', 'President'],
+    ['Co-President', 'President'],
+    ['Chief Operating Officer', 'COO'],
+    ['COO', 'COO'],
+    ['Director', 'Director'],
+    ['Board Member', 'Director'],
+    ['Independent Director', 'Director'],
+    ['Non-Executive Director', 'Director'],
+    ['Vice President', 'VP'],
+    ['VP', 'VP'],
+    ['Senior Vice President', 'VP'],
+    ['SVP', 'VP'],
+    ['EVP', 'VP'],
+    ['Executive Vice President', 'VP'],
+    ['Treasurer', 'Other'],
+  ])('%s → %s', (title, expected) => {
+    expect(classifyInsiderRole(title)).toBe(expected);
+  });
+
+  test('null input → Other', () => {
+    expect(classifyInsiderRole(null)).toBe('Other');
+  });
+
+  test('undefined input → Other', () => {
+    expect(classifyInsiderRole(undefined)).toBe('Other');
+  });
+});
+
+describe('filterScorable', () => {
+  const makeTx = (code) => ({ transactionCode: code, shares: 100, pricePerShare: 10 });
+
+  test('whitelist: only P and S pass through', () => {
+    const txs = ['P', 'S', 'G', 'F', 'M', 'X', 'A', 'D'].map(makeTx);
+    const result = filterScorable(txs);
+    expect(result).toHaveLength(2);
+    expect(result.map((t) => t.transactionCode)).toEqual(['P', 'S']);
+  });
+
+  test('empty array → empty array', () => {
+    expect(filterScorable([])).toEqual([]);
+  });
+
+  test('all non-scorable codes → empty array', () => {
+    const txs = ['G', 'F'].map(makeTx);
+    expect(filterScorable(txs)).toEqual([]);
+  });
+
+  test('unknown future code Z is excluded (whitelist, not blacklist)', () => {
+    const txs = [makeTx('Z'), makeTx('P')];
+    const result = filterScorable(txs);
+    expect(result).toHaveLength(1);
+    expect(result[0].transactionCode).toBe('P');
+  });
+});
+
+describe('calculate10b5Plan', () => {
+  test('legacy element with value 1 → true', () => {
+    const xml = '<nonDerivativeTransaction><rule10b5One><value>1</value></rule10b5One></nonDerivativeTransaction>';
+    expect(calculate10b5Plan(xml)).toBe(true);
+  });
+
+  test('modern element with value true → true', () => {
+    const xml = '<nonDerivativeTransaction><rule10b51Transaction><value>true</value></rule10b51Transaction></nonDerivativeTransaction>';
+    expect(calculate10b5Plan(xml)).toBe(true);
+  });
+
+  test('modern element with value 1 (numeric form) → true', () => {
+    const xml = '<nonDerivativeTransaction><rule10b51Transaction><value>1</value></rule10b51Transaction></nonDerivativeTransaction>';
+    expect(calculate10b5Plan(xml)).toBe(true);
+  });
+
+  test('neither element present → false', () => {
+    const xml = '<nonDerivativeTransaction><transactionDate><value>2025-01-01</value></transactionDate></nonDerivativeTransaction>';
+    expect(calculate10b5Plan(xml)).toBe(false);
+  });
+
+  test('element present but value is 0 → false', () => {
+    const xml = '<nonDerivativeTransaction><rule10b51Transaction><value>0</value></rule10b51Transaction></nonDerivativeTransaction>';
+    expect(calculate10b5Plan(xml)).toBe(false);
+  });
+});
