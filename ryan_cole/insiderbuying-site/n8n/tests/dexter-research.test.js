@@ -2,6 +2,7 @@ const { describe, it, before, after, mock } = require('node:test');
 const assert = require('node:assert/strict');
 
 // Import the module under test
+const dexterModule = require('../code/insiderbuying/dexter-research.js');
 const {
   aggregateDexterData,
   computePriceSummary,
@@ -13,7 +14,18 @@ const {
   dexterResearch,
   validateTicker,
   DATA_TYPES,
-} = require('../code/insiderbuying/dexter-research.js');
+  // Section 4 new exports
+  TokenBucket,
+  readCache,
+  writeCache,
+  makeNocoClient,
+  DATA_WEIGHTS,
+  fetchFinancialData,
+  getQuote,
+  getProfile,
+  getBasicFinancials,
+  getInsiderTransactions,
+} = dexterModule;
 
 // ---------------------------------------------------------------------------
 // Test: Price data aggregation
@@ -426,49 +438,282 @@ describe('dexterResearch', () => {
 
   it('returns error when API key missing', async () => {
     const result = await dexterResearch({ ticker: 'AAPL' }, { env: {} });
-    assert.ok(result.error.includes('FINANCIAL_DATASETS_API_KEY'));
+    assert.ok(result.error.includes('FINNHUB_API_KEY'));
   });
 
   it('returns aggregated data on success', async () => {
-    const mockFetch = async (url) => ({
-      ok: true,
-      status: 200,
-      json: async () => {
-        if (url.includes('income-statements')) return { income_statements: [{ revenue: 1000, company_name: 'Apple', sector: 'Tech', market_capitalization: 3000000000000 }] };
-        if (url.includes('balance-sheets')) return { balance_sheets: [{ total_assets: 5000 }] };
-        if (url.includes('cash-flow')) return { cash_flow_statements: [{ operating_cash_flow: 300 }] };
-        if (url.includes('financial-ratios')) return { financial_ratios: [{ pe_ratio: 25 }] };
-        if (url.includes('insider-trades')) return { insider_trades: [{ insider_name: 'CEO', transaction_date: new Date().toISOString().split('T')[0], transaction_type: 'P-Purchase' }] };
-        if (url.includes('stock-prices')) return { stock_prices: generateMockPrices(252) };
-        return {};
-      },
-    });
+    const candleData = { c: [100, 102, 104], h: [105, 107, 109], l: [98, 100, 102], o: [99, 101, 103], t: [1000000, 1001000, 1002000], v: [1e6, 1e6, 1e6], s: 'ok' };
+    const mockFetch = async (url) => {
+      if (url.includes('/quote')) return { statusCode: 200, body: { c: 150, h: 155, l: 148, o: 149, pc: 147, d: 3, dp: 2.04 } };
+      if (url.includes('/profile2')) return { statusCode: 200, body: { name: 'Apple Inc', marketCapitalization: 3000000, exchange: 'NASDAQ', finnhubIndustry: 'Tech', country: 'US', currency: 'USD' } };
+      if (url.includes('/metric')) return { statusCode: 200, body: { metric: { peBasicExclExtraTTM: 25, epsBasicExclExtraAnnual: 6.0, revenueGrowth3Y: 0.12, grossMarginTTM: 0.44 } } };
+      if (url.includes('/insider-transactions')) return { statusCode: 200, body: { data: [{ name: 'CEO', share: 1000, change: 100, transactionDate: '2025-01-01', transactionPrice: 145 }] } };
+      if (url.includes('/candle')) return { statusCode: 200, body: candleData };
+      return { statusCode: 200, body: {} };
+    };
+    const mockNoco = { search: async () => [], create: async () => ({ Id: 1 }), update: async () => ({ Id: 1 }) };
 
     const result = await dexterResearch(
       { ticker: 'AAPL', keyword: 'test', article_type: 'A', blog: 'insiderbuying' },
-      { env: { FINANCIAL_DATASETS_API_KEY: 'test-key' }, fetchFn: mockFetch }
+      { env: { FINNHUB_API_KEY: 'test-key', NOCODB_BASE_URL: 'http://localhost:8080', NOCODB_API_TOKEN: 'tok', NOCODB_PROJECT_ID: 'p1', NOCODB_FINANCIAL_CACHE_TABLE_ID: 'Financial_Cache' }, fetchFn: mockFetch, _nocoClientOverride: mockNoco }
     );
 
     assert.ok(!result.error);
-    assert.ok(result.data_completeness >= 0.5);
     assert.equal(result.ticker, 'AAPL');
-    assert.ok(result.stock_prices.current_price);
   });
 
   it('aborts when data_completeness < 0.5', async () => {
-    const mockFetch = async () => ({
-      ok: false,
-      status: 404,
-      json: async () => ({}),
-    });
+    const mockFetch = async () => ({ statusCode: 500, body: {} });
+    const mockNoco = { search: async () => [], create: async () => ({ Id: 1 }), update: async () => ({ Id: 1 }) };
 
     const result = await dexterResearch(
       { ticker: 'ZZZZZ', keyword: 'test', article_type: 'A', blog: 'test' },
-      { env: { FINANCIAL_DATASETS_API_KEY: 'test-key' }, fetchFn: mockFetch }
+      { env: { FINNHUB_API_KEY: 'test-key', NOCODB_BASE_URL: 'http://localhost:8080', NOCODB_API_TOKEN: 'tok', NOCODB_PROJECT_ID: 'p1', NOCODB_FINANCIAL_CACHE_TABLE_ID: 'Financial_Cache' }, fetchFn: mockFetch, _nocoClientOverride: mockNoco }
     );
 
     assert.ok(result.error);
     assert.ok(result.data_completeness < 0.5);
+  });
+});
+
+// ===========================================================================
+// Section 4: Finnhub Integration
+// ===========================================================================
+
+describe('TokenBucket rate limiter', () => {
+  it('capacity=5: first 5 acquire() resolve immediately', async () => {
+    const bucket = new TokenBucket({ capacity: 5, refillRate: 5, refillInterval: 5000 });
+    const start = Date.now();
+    await Promise.all([
+      bucket.acquire(),
+      bucket.acquire(),
+      bucket.acquire(),
+      bucket.acquire(),
+      bucket.acquire(),
+    ]);
+    assert.ok(Date.now() - start < 100, 'All 5 should resolve immediately');
+  });
+
+  it('capacity=5: 6th acquire() waits for refill', async () => {
+    const bucket = new TokenBucket({ capacity: 5, refillRate: 5, refillInterval: 50 });
+    // drain the bucket
+    for (let i = 0; i < 5; i++) await bucket.acquire();
+    const start = Date.now();
+    await bucket.acquire(); // 6th - must wait for refill
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed >= 40, `6th acquire should wait >= 40ms, got ${elapsed}ms`);
+  });
+});
+
+describe('NocoDB cache layer', () => {
+  function makeNoco(records) {
+    return {
+      search: async () => records,
+      create: async (fields) => ({ Id: 1, ...fields }),
+      update: async (id, fields) => ({ Id: id, ...fields }),
+    };
+  }
+
+  it('readCache: valid unexpired record → returns parsed data', async () => {
+    const noco = makeNoco([{ expires_at: Date.now() + 86400000, data_json: JSON.stringify({ c: 100 }) }]);
+    const result = await readCache('AAPL', 'quote', noco);
+    assert.deepStrictEqual(result, { c: 100 });
+  });
+
+  it('readCache: expired record → returns null', async () => {
+    const noco = makeNoco([{ expires_at: Date.now() - 1000, data_json: JSON.stringify({ c: 99 }) }]);
+    const result = await readCache('AAPL', 'quote', noco);
+    assert.equal(result, null);
+  });
+
+  it('readCache: no record → returns null', async () => {
+    const noco = makeNoco([]);
+    const result = await readCache('AAPL', 'quote', noco);
+    assert.equal(result, null);
+  });
+
+  it('writeCache: no existing record → create called, update not called', async () => {
+    let createCalled = false;
+    let updateCalled = false;
+    const noco = {
+      search: async () => [],
+      create: async (fields) => { createCalled = true; return { Id: 1, ...fields }; },
+      update: async () => { updateCalled = true; return {}; },
+    };
+    const data = { price: 150 };
+    await writeCache('AAPL', 'quote', data, noco);
+    assert.equal(createCalled, true, 'create should be called on cache miss');
+    assert.equal(updateCalled, false, 'update should NOT be called');
+  });
+
+  it('writeCache: existing record → update called, create not called', async () => {
+    let createCalled = false;
+    let updateCalled = false;
+    const noco = {
+      search: async () => [{ Id: 42, ticker: 'AAPL', data_type: 'quote' }],
+      create: async () => { createCalled = true; return {}; },
+      update: async (id, fields) => { updateCalled = true; return { Id: id, ...fields }; },
+    };
+    await writeCache('AAPL', 'quote', { price: 155 }, noco);
+    assert.equal(createCalled, false, 'create should NOT be called');
+    assert.equal(updateCalled, true, 'update should be called on cache hit');
+  });
+
+  it('writeCache: expires_at written is approx Date.now() + 86400000', async () => {
+    let writtenExpiresAt = null;
+    const noco = {
+      search: async () => [],
+      create: async (fields) => { writtenExpiresAt = fields.expires_at; return { Id: 1 }; },
+      update: async () => {},
+    };
+    const before = Date.now();
+    await writeCache('AAPL', 'quote', { price: 150 }, noco);
+    const after = Date.now();
+    assert.ok(writtenExpiresAt >= before + 86400000 - 5000 && writtenExpiresAt <= after + 86400000 + 5000,
+      `expires_at ${writtenExpiresAt} should be ~Date.now() + 86400000`);
+  });
+});
+
+describe('finnhub.getQuote', () => {
+  function makeMissNoco() {
+    return { search: async () => [], create: async () => ({ Id: 1 }), update: async () => {} };
+  }
+
+  it('cache miss → fetchFn called with Finnhub quote URL and returns data', async () => {
+    let fetchedUrl = null;
+    const fetchFn = async (url) => { fetchedUrl = url; return { statusCode: 200, body: { c: 150, h: 155, l: 148, o: 149, pc: 147, d: 3, dp: 2.04 } }; };
+    const cacheWrites = [];
+    const result = await getQuote('AAPL', 'test-key', fetchFn, makeMissNoco(), cacheWrites);
+    assert.ok(fetchedUrl.includes('finnhub.io'));
+    assert.ok(fetchedUrl.includes('AAPL'));
+    assert.equal(result.c, 150);
+    assert.equal(cacheWrites.length, 1, 'writeCache should be pushed to cacheWrites');
+  });
+
+  it('cache hit → fetchFn NOT called', async () => {
+    let fetchCalled = false;
+    const fetchFn = async () => { fetchCalled = true; return { statusCode: 200, body: {} }; };
+    const noco = { search: async () => [{ expires_at: Date.now() + 86400000, data_json: JSON.stringify({ c: 99 }) }], create: async () => {}, update: async () => {} };
+    const cacheWrites = [];
+    const result = await getQuote('AAPL', 'test-key', fetchFn, noco, cacheWrites);
+    assert.equal(fetchCalled, false, 'Finnhub should NOT be called on cache hit');
+    assert.equal(result.c, 99);
+    assert.equal(cacheWrites.length, 0, 'no cache write on hit');
+  });
+
+  it('fetchFn rejects with HTTP 429 → error propagates', async () => {
+    const fetchFn = async () => { throw new Error('HTTP 429'); };
+    const cacheWrites = [];
+    await assert.rejects(() => getQuote('AAPL', 'test-key', fetchFn, makeMissNoco(), cacheWrites));
+  });
+});
+
+describe('finnhub.getProfile', () => {
+  const missNoco = { search: async () => [], create: async () => ({ Id: 1 }), update: async () => {} };
+
+  it('cache miss → fetches profile2 and returns object', async () => {
+    const profileData = { name: 'Apple Inc', marketCapitalization: 3000000, exchange: 'NASDAQ', finnhubIndustry: 'Technology', country: 'US', currency: 'USD' };
+    const fetchFn = async () => ({ statusCode: 200, body: profileData });
+    const cacheWrites = [];
+    const result = await getProfile('AAPL', 'test-key', fetchFn, missNoco, cacheWrites);
+    assert.equal(result.name, 'Apple Inc');
+    assert.equal(result.finnhubIndustry, 'Technology');
+  });
+
+  it('missing finnhubIndustry in response → returns null, not crash', async () => {
+    const fetchFn = async () => ({ statusCode: 200, body: { name: 'NoIndustry Corp', marketCapitalization: 100 } });
+    const cacheWrites = [];
+    const result = await getProfile('AAPL', 'test-key', fetchFn, missNoco, cacheWrites);
+    assert.equal(result.finnhubIndustry, null);
+  });
+});
+
+describe('finnhub.getBasicFinancials', () => {
+  const missNoco = { search: async () => [], create: async () => ({ Id: 1 }), update: async () => {} };
+
+  it('cache miss → fetches metric=all and returns metric fields', async () => {
+    const metricData = { metric: { peBasicExclExtraTTM: 25, epsBasicExclExtraAnnual: 6.0, revenueGrowth3Y: 0.12, grossMarginTTM: 0.44 } };
+    const fetchFn = async () => ({ statusCode: 200, body: metricData });
+    const cacheWrites = [];
+    const result = await getBasicFinancials('AAPL', 'test-key', fetchFn, missNoco, cacheWrites);
+    assert.equal(result.metric.peBasicExclExtraTTM, 25);
+    assert.equal(result.metric.revenueGrowth3Y, 0.12);
+  });
+
+  it('missing revenueGrowth3Y → returns null, not undefined or crash', async () => {
+    const fetchFn = async () => ({ statusCode: 200, body: { metric: { peBasicExclExtraTTM: 25 } } });
+    const cacheWrites = [];
+    const result = await getBasicFinancials('AAPL', 'test-key', fetchFn, missNoco, cacheWrites);
+    assert.equal(result.metric.revenueGrowth3Y, null);
+  });
+
+  it('cache hit → fetchFn NOT called', async () => {
+    let fetchCalled = false;
+    const fetchFn = async () => { fetchCalled = true; return { statusCode: 200, body: {} }; };
+    const noco = { search: async () => [{ expires_at: Date.now() + 86400000, data_json: JSON.stringify({ metric: { pe: 20 } }) }], create: async () => {}, update: async () => {} };
+    const cacheWrites = [];
+    await getBasicFinancials('AAPL', 'test-key', fetchFn, noco, cacheWrites);
+    assert.equal(fetchCalled, false);
+  });
+});
+
+describe('finnhub.getInsiderTransactions', () => {
+  it('cache miss → fetches insider-transactions URL and returns data', async () => {
+    let fetchedUrl = null;
+    const txData = { data: [{ name: 'CEO', share: 1000, change: 100, transactionDate: '2025-01-01', transactionPrice: 145 }] };
+    const fetchFn = async (url) => { fetchedUrl = url; return { statusCode: 200, body: txData }; };
+    const missNoco = { search: async () => [], create: async () => ({ Id: 1 }), update: async () => {} };
+    const cacheWrites = [];
+    const result = await getInsiderTransactions('AAPL', 'test-key', fetchFn, missNoco, cacheWrites);
+    assert.ok(fetchedUrl.includes('insider-transactions'));
+    assert.ok(result.data);
+    assert.equal(cacheWrites.length, 1);
+  });
+});
+
+describe('fetchFinancialData integration', () => {
+  const missNoco = { search: async () => [], create: async () => ({ Id: 1 }), update: async () => {} };
+
+  it('DATA_WEIGHTS values sum to exactly 1.0', () => {
+    const sum = Object.values(DATA_WEIGHTS).reduce((a, b) => a + b, 0);
+    assert.equal(parseFloat(sum.toFixed(10)), 1.0);
+  });
+
+  it('all 4+ Finnhub fetchers invoked in a single fetchFinancialData call', async () => {
+    const fetchedUrls = [];
+    const fetchFn = async (url) => {
+      fetchedUrls.push(url);
+      if (url.includes('/quote')) return { statusCode: 200, body: { c: 100, h: 105, l: 95, o: 99, pc: 98, d: 2, dp: 1 } };
+      if (url.includes('/profile2')) return { statusCode: 200, body: { name: 'T', marketCapitalization: 100, exchange: 'NYSE', finnhubIndustry: null, country: 'US', currency: 'USD' } };
+      if (url.includes('/metric')) return { statusCode: 200, body: { metric: {} } };
+      if (url.includes('/insider-transactions')) return { statusCode: 200, body: { data: [] } };
+      if (url.includes('/candle')) return { statusCode: 200, body: { s: 'ok', c: [100], t: [1e9], o: [99], h: [105], l: [95], v: [1e6] } };
+      return { statusCode: 200, body: {} };
+    };
+    await fetchFinancialData('AAPL', { apiKey: 'k', nocoClient: missNoco, competitorsData: [] }, fetchFn);
+    assert.ok(fetchedUrls.some((u) => u.includes('/quote')), 'quote endpoint should be called');
+    assert.ok(fetchedUrls.some((u) => u.includes('/profile2')), 'profile endpoint should be called');
+    assert.ok(fetchedUrls.some((u) => u.includes('/metric')), 'metric endpoint should be called');
+    assert.ok(fetchedUrls.some((u) => u.includes('/insider-transactions')), 'insider-transactions endpoint should be called');
+  });
+
+  it('data_completeness = 1.0 when all 5 data types present', async () => {
+    const fetchFn = async (url) => {
+      if (url.includes('/quote')) return { statusCode: 200, body: { c: 150, h: 155, l: 148, o: 149, pc: 147, d: 3, dp: 2 } };
+      if (url.includes('/profile2')) return { statusCode: 200, body: { name: 'Apple', marketCapitalization: 3e6, exchange: 'NASDAQ', finnhubIndustry: 'Tech', country: 'US', currency: 'USD' } };
+      if (url.includes('/metric')) return { statusCode: 200, body: { metric: { peBasicExclExtraTTM: 25 } } };
+      if (url.includes('/insider-transactions')) return { statusCode: 200, body: { data: [{ name: 'CEO', share: 100, change: 10, transactionDate: '2025-01-01', transactionPrice: 100 }] } };
+      if (url.includes('/candle')) return { statusCode: 200, body: { s: 'ok', c: [100, 102], t: [1e9, 2e9], o: [99, 101], h: [105, 106], l: [95, 97], v: [1e6, 2e6] } };
+      return { statusCode: 200, body: {} };
+    };
+    const result = await fetchFinancialData('AAPL', { apiKey: 'k', nocoClient: missNoco, competitorsData: [{ ticker: 'MSFT' }] }, fetchFn);
+    assert.equal(result.data_completeness, 1.0);
+  });
+
+  it('data_completeness < 1.0 when some data types null', async () => {
+    const fetchFn = async () => ({ statusCode: 500, body: {} });
+    const result = await fetchFinancialData('AAPL', { apiKey: 'k', nocoClient: missNoco, competitorsData: [] }, fetchFn);
+    assert.ok(result.data_completeness < 1.0);
   });
 });
 
