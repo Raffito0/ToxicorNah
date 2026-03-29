@@ -66,8 +66,8 @@ async function getQuote(ticker, fetchFn, env, nowFn) {
     return null;
   }
 
-  if (resp.status !== 200) {
-    console.warn(`[finnhub-client] getQuote HTTP ${resp.status} for ${key}`);
+  if (!resp || resp.status !== 200) {
+    console.warn(`[finnhub-client] getQuote HTTP ${resp && resp.status} for ${key}`);
     return null;
   }
 
@@ -98,8 +98,8 @@ async function getNextEarningsDate(ticker, fetchFn, env, nowFn) {
     return null;
   }
 
-  if (resp.status !== 200) {
-    console.warn(`[finnhub-client] getNextEarningsDate HTTP ${resp.status} for ${key}`);
+  if (!resp || resp.status !== 200) {
+    console.warn(`[finnhub-client] getNextEarningsDate HTTP ${resp && resp.status} for ${key}`);
     return null;
   }
 
