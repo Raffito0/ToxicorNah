@@ -1,0 +1,17 @@
+{
+  "id": "msg_score_test_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-20240307",
+  "usage": {
+    "input_tokens": 312,
+    "output_tokens": 89
+  },
+  "stop_reason": "end_turn",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"score\": 9, \"reasoning\": \"CEO purchase of $5M is a strong signal. No 10b5-1 plan. No prior sell pattern in 12 months.\"}"
+    }
+  ]
+}

@@ -11,9 +11,22 @@
     "postbuild": "next-sitemap"
   },
   "jest": {
-    "testEnvironment": "node",
-    "testMatch": [
-      "**/tests/**/*.test.js"
+    "projects": [
+      {
+        "displayName": "unit",
+        "testEnvironment": "node",
+        "testMatch": ["**/tests/**/*.test.js"],
+        "testPathIgnorePatterns": ["/tests/insiderbuying/e2e/"]
+      },
+      {
+        "displayName": "e2e",
+        "testEnvironment": "node",
+        "testMatch": ["**/tests/insiderbuying/e2e/**/*.test.js"],
+        "setupFilesAfterEnv": ["<rootDir>/tests/insiderbuying/e2e/setup.js"],
+        "clearMocks": true,
+        "runner": "jest-runner",
+        "maxWorkers": 1
+      }
     ]
   },
   "keywords": [],

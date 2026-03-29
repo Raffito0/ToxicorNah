@@ -1,0 +1,15 @@
+{
+  "ticker": "NVDA",
+  "company_name": "NVIDIA Corporation",
+  "insider_name": "Jensen Huang",
+  "insider_title": "Chief Executive Officer",
+  "insider_category": "CEO",
+  "transaction_type": "P",
+  "shares": 50000,
+  "price_per_share": 100.00,
+  "total_value": 5000000,
+  "filing_date": "2026-02-15",
+  "cik": "0001045810",
+  "is_10b5_plan": false,
+  "form_type": "4"
+}

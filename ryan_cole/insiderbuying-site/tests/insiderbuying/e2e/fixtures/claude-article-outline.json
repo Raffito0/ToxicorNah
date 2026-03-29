@@ -1,0 +1,30 @@
+{
+  "id": "msg_outline_test_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-20240229",
+  "usage": {
+    "input_tokens": 456,
+    "output_tokens": 234
+  },
+  "stop_reason": "tool_use",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_outline_001",
+      "name": "generate_outline",
+      "input": {
+        "title": "Why Jensen Huang's $5M Buy Could Signal NVDA's Next Leg Up",
+        "sections": [
+          { "heading": "The Trade at a Glance", "word_target": 150 },
+          { "heading": "Track Record of This Insider", "word_target": 200 },
+          { "heading": "What the Timing Tells Us", "word_target": 200 },
+          { "heading": "Risk Factors", "word_target": 150 },
+          { "heading": "Bottom Line", "word_target": 100 }
+        ],
+        "primary_keyword": "NVDA insider buying",
+        "target_word_count": 800
+      }
+    }
+  ]
+}
