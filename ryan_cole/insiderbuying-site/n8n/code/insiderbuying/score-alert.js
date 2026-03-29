@@ -4,7 +4,7 @@
 // Significance scoring node for the W4 InsiderBuying.ai pipeline.
 // Runs after sec-monitor.js, before analyze-alert.js.
 // Computes a 1-10 significance score using Claude Haiku plus insider track
-// record from Supabase history and Yahoo Finance 30-day price returns.
+// record from NocoDB Insider_History and Yahoo Finance 30-day price returns.
 // ────────────────────────────────────────────────────────────────────────────
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
@@ -71,40 +71,30 @@ async function fetch30DayReturn(ticker, filingDateStr, fetchFn) {
 // ─── 3.1 computeTrackRecord ─────────────────────────────────────────────────
 
 /**
- * Queries Supabase for past buys by this insider (past 24 months),
+ * Queries NocoDB Insider_History for past buys by this insider (past 24 months),
  * then fetches 30-day returns from Yahoo Finance for each.
  *
  * Returns { past_buy_count, hit_rate, avg_gain_30d }
  * hit_rate and avg_gain_30d are null if Yahoo data unavailable.
  */
-async function computeTrackRecord(insiderName, supabaseUrl, supabaseKey, { fetchFn } = {}) {
+async function computeTrackRecord(insiderName, nocodb, { fetchFn } = {}) {
   const cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - HISTORY_MONTHS);
   const cutoffStr = cutoff.toISOString().slice(0, 10);
 
   const normalizedName = normalizeInsiderName(insiderName);
-  // PostgREST ilike uses SQL LIKE syntax: % is wildcard, not *
-  const namePattern = `%${normalizedName.split(' ').join('%')}%`;
+  // Use ilike for case-insensitive matching (equivalent to Supabase ilike).
+  // Do not pre-encode — the NocoDB client's list() handles URL encoding.
+  const where = `(insider_name,ilike,%${normalizedName}%)~and(filing_date,gt,${cutoffStr})`;
 
   let rows = [];
   try {
-    const params = new URLSearchParams({
-      select: 'ticker,filing_date,total_value',
-      transaction_type: 'eq.buy',
-      'filing_date': `gte.${cutoffStr}`,
-      'insider_name': `ilike.${namePattern}`,
+    const result = await nocodb.list('Insider_History', {
+      where,
+      fields: 'ticker,filing_date,total_value',
+      limit: 100,
     });
-    const url = `${supabaseUrl}/rest/v1/insider_alerts?${params}`;
-    const resp = await fetchFn(url, {
-      headers: {
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-    });
-    if (!resp.ok) {
-      return { past_buy_count: 0, hit_rate: null, avg_gain_30d: null };
-    }
-    rows = await resp.json();
+    rows = result.list || [];
   } catch {
     return { past_buy_count: 0, hit_rate: null, avg_gain_30d: null };
   }
@@ -298,11 +288,11 @@ async function callHaiku(prompt, anthropicApiKey, { fetchFn, _sleep } = {}) {
  * and returns the enriched filing array.
  *
  * @param {Array} filings - Array of filing objects from sec-monitor.js
- * @param {Object} helpers - { supabaseUrl, supabaseKey, anthropicApiKey, fetchFn, _sleep }
+ * @param {Object} helpers - { nocodb, anthropicApiKey, fetchFn, _sleep }
  * @returns {Array} filings enriched with significance_score, score_reasoning, track_record
  */
 async function runScoreAlert(filings, helpers = {}) {
-  const { supabaseUrl, supabaseKey, anthropicApiKey, fetchFn, _sleep } = helpers;
+  const { nocodb, anthropicApiKey, fetchFn, _sleep } = helpers;
 
   if (!filings || filings.length === 0) return [];
 
@@ -312,8 +302,7 @@ async function runScoreAlert(filings, helpers = {}) {
     // Step 1: compute track record (graceful on any failure)
     const trackRecord = await computeTrackRecord(
       filing.insider_name,
-      supabaseUrl,
-      supabaseKey,
+      nocodb,
       { fetchFn }
     );
 
@@ -347,9 +336,12 @@ async function runScoreAlert(filings, helpers = {}) {
 // Entry block for n8n Code node:
 //
 //   const filings = $input.all().map(item => item.json);
+//   const nocodb = new NocoDB(
+//     $env.NOCODB_BASE_URL, $env.NOCODB_API_TOKEN, $env.NOCODB_PROJECT_ID,
+//     (url, opts) => fetch(url, opts)
+//   );
 //   const helpers = {
-//     supabaseUrl: $env.SUPABASE_URL,
-//     supabaseKey: $env.SUPABASE_SERVICE_ROLE_KEY,
+//     nocodb,
 //     anthropicApiKey: $env.ANTHROPIC_API_KEY,
 //     fetchFn: (url, opts) => fetch(url, opts),
 //     _sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),

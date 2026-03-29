@@ -12,6 +12,8 @@ const {
   deliverAlert,
 } = require('../../n8n/code/insiderbuying/deliver-alert');
 
+const { NocoDB } = require('../../n8n/code/insiderbuying/nocodb-client');
+
 // --- helpers ----------------------------------------------------------------
 
 function makeFetch(response, ok = true, status = 200) {
@@ -39,9 +41,9 @@ function makeFetchSeq(...calls) {
 const noSleep = jest.fn().mockResolvedValue(undefined);
 
 const BASE_ENV = {
-  AIRTABLE_API_KEY: 'at-key',
-  AIRTABLE_BASE_ID: 'appXXX',
-  INSIDER_ALERTS_TABLE_ID: 'tblAlerts',
+  NOCODB_API_TOKEN: 'test-token',
+  NOCODB_BASE_URL: 'http://localhost:8080',
+  NOCODB_PROJECT_ID: 'test-project-id',
   SUPABASE_URL: 'https://test.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: 'sb-key',
   RESEND_API_KEY: 'resend-key',
@@ -49,8 +51,12 @@ const BASE_ENV = {
   ONESIGNAL_REST_API_KEY: 'os-rest-key',
 };
 
+function makeNocoDB(fetchFn) {
+  return new NocoDB(BASE_ENV.NOCODB_BASE_URL, BASE_ENV.NOCODB_API_TOKEN, BASE_ENV.NOCODB_PROJECT_ID, fetchFn);
+}
+
 const SAMPLE_ALERT = {
-  airtable_record_id: 'recABC',
+  nocodb_record_id: 1,
   supabase_alert_id: 'uuid-123',
   ticker: 'AAPL',
   insider_name: 'Timothy D. Cook',
@@ -236,14 +242,16 @@ describe('6.2: Resend email', () => {
       { response: { error: 'rate limited' }, ok: false, status: 429 },
       // OneSignal succeeds
       { response: { id: 'notif-1', recipients: 5 } },
-      // Airtable delivery tracking
-      { response: {} },
+      // NocoDB delivery tracking
+      { response: { Id: 1 } },
     );
+    const nocodb = makeNocoDB(fetchFn);
 
     const result = await deliverAlert(SAMPLE_ALERT, {
       fetchFn,
       env: BASE_ENV,
       _sleep: noSleep,
+      nocodb,
     });
 
     expect(result.push_sent).toBe(5);
@@ -306,14 +314,16 @@ describe('6.3: OneSignal push', () => {
       { response: { data: [{ id: 'e1' }] } },
       // OneSignal FAILS
       { response: { error: 'invalid key' }, ok: false, status: 401 },
-      // Airtable delivery tracking
-      { response: {} },
+      // NocoDB delivery tracking
+      { response: { Id: 1 } },
     );
+    const nocodb = makeNocoDB(fetchFn);
 
     const result = await deliverAlert(SAMPLE_ALERT, {
       fetchFn,
       env: BASE_ENV,
       _sleep: noSleep,
+      nocodb,
     });
 
     expect(result.emails_sent).toBe(1);
@@ -324,45 +334,51 @@ describe('6.3: OneSignal push', () => {
 
 describe('6.4: Delivery tracking', () => {
   test('full success sets status=delivered with emails_sent and push_sent', async () => {
-    const fetchFn = makeFetch({});
-    await updateDeliveryStatus('recABC', {
+    const fetchFn = makeFetch({ Id: 1 });
+    const nocodb = makeNocoDB(fetchFn);
+    await updateDeliveryStatus(1, {
       status: 'delivered',
       emails_sent: 10,
       push_sent: 5,
       delivered_at: '2026-03-28T12:00:00Z',
-    }, { fetchFn, env: BASE_ENV });
+    }, { nocodb });
 
-    const body = JSON.parse(fetchFn.mock.calls[0][1].body);
-    expect(body.fields.status).toBe('delivered');
-    expect(body.fields.emails_sent).toBe(10);
-    expect(body.fields.push_sent).toBe(5);
-    expect(body.fields.delivered_at).toBe('2026-03-28T12:00:00Z');
+    const call = fetchFn.mock.calls[0];
+    const body = JSON.parse(call[1].body);
+    expect(body.status).toBe('delivered');
+    expect(body.emails_sent).toBe(10);
+    expect(body.push_sent).toBe(5);
+    expect(body.delivered_at).toBe('2026-03-28T12:00:00Z');
   });
 
   test('email failure sets status=delivery_failed with error_log', async () => {
-    const fetchFn = makeFetch({});
-    await updateDeliveryStatus('recABC', {
+    const fetchFn = makeFetch({ Id: 1 });
+    const nocodb = makeNocoDB(fetchFn);
+    await updateDeliveryStatus(1, {
       status: 'delivery_failed',
       error_log: 'Resend API returned 429',
       push_sent: 5,
-    }, { fetchFn, env: BASE_ENV });
+    }, { nocodb });
 
-    const body = JSON.parse(fetchFn.mock.calls[0][1].body);
-    expect(body.fields.status).toBe('delivery_failed');
-    expect(body.fields.error_log).toContain('Resend');
+    const call = fetchFn.mock.calls[0];
+    const body = JSON.parse(call[1].body);
+    expect(body.status).toBe('delivery_failed');
+    expect(body.error_log).toContain('Resend');
   });
 
   test('push failure sets status=delivery_failed with error_log', async () => {
-    const fetchFn = makeFetch({});
-    await updateDeliveryStatus('recABC', {
+    const fetchFn = makeFetch({ Id: 1 });
+    const nocodb = makeNocoDB(fetchFn);
+    await updateDeliveryStatus(1, {
       status: 'delivery_failed',
       error_log: 'OneSignal API returned 401',
       emails_sent: 10,
-    }, { fetchFn, env: BASE_ENV });
+    }, { nocodb });
 
-    const body = JSON.parse(fetchFn.mock.calls[0][1].body);
-    expect(body.fields.status).toBe('delivery_failed');
-    expect(body.fields.error_log).toContain('OneSignal');
+    const call = fetchFn.mock.calls[0];
+    const body = JSON.parse(call[1].body);
+    expect(body.status).toBe('delivery_failed');
+    expect(body.error_log).toContain('OneSignal');
   });
 });
 

@@ -3,19 +3,18 @@
 // ─── write-persistence.js ──────────────────────────────────────────────────
 // Persistence layer for the W4 InsiderBuying.ai pipeline.
 // Runs after scoring (score-alert.js) and AI analysis (analyze-alert.js).
-// Writes each filing individually to Airtable then Supabase, updates
+// Writes each filing individually to NocoDB then Supabase, updates
 // Monitor_State, creates cluster summaries, and handles error alerting.
 // ────────────────────────────────────────────────────────────────────────────
 
-// ─── 5.1 Create Airtable Record ────────────────────────────────────────────
+// ─── 5.1 Create NocoDB Record ────────────────────────────────────────────────
 
 /**
- * Create a record in Airtable Insider_Alerts for a scored+analyzed filing.
- * Returns the Airtable record ID on success, throws on failure.
+ * Create a record in NocoDB Insider_Alerts for a scored+analyzed filing.
+ * Returns the NocoDB integer Id on success, throws on failure.
  */
-async function createAirtableRecord(filing, opts) {
-  const { fetchFn, env } = opts;
-  const url = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${env.INSIDER_ALERTS_TABLE_ID}`;
+async function createNocoRecord(filing, opts) {
+  const { nocodb } = opts;
 
   const fields = {
     dedup_key: filing.dedup_key,
@@ -46,20 +45,11 @@ async function createAirtableRecord(filing, opts) {
     fields.cluster_id = filing.cluster_id;
   }
 
-  const res = await fetchFn(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.AIRTABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ fields }),
-  });
-
-  const data = await res.json();
-  if (!data.id) {
-    throw new Error(`Airtable create failed: ${JSON.stringify(data)}`);
+  const data = await nocodb.create('Insider_Alerts', fields);
+  if (!data.Id) {
+    throw new Error(`NocoDB create failed: ${JSON.stringify(data)}`);
   }
-  return data.id;
+  return data.Id;
 }
 
 // ─── 5.2 Insert to Supabase ────────────────────────────────────────────────
@@ -121,19 +111,18 @@ async function insertToSupabase(filing, opts) {
 // ─── 5.1+5.2 Combined per-filing write ──────────────────────────────────────
 
 /**
- * Write a single filing to Airtable then Supabase, cross-reference IDs.
+ * Write a single filing to NocoDB then Supabase, cross-reference IDs.
  * Mutates ctx (failureCount, firstError, failedFilings, successfulFilings).
  */
 async function writeFilingPersistence(filing, ctx, opts) {
-  const { fetchFn, env } = opts;
-  let airtableRecordId = null;
+  let nocoRecordId = null;
 
-  // Step 1: Create Airtable record
+  // Step 1: Create NocoDB record
   try {
-    airtableRecordId = await createAirtableRecord(filing, { fetchFn, env });
+    nocoRecordId = await createNocoRecord(filing, opts);
   } catch (err) {
     ctx.failureCount++;
-    if (!ctx.firstError) ctx.firstError = `Airtable create for ${filing.dedup_key}: ${err.message}`;
+    if (!ctx.firstError) ctx.firstError = `NocoDB create for ${filing.dedup_key}: ${err.message}`;
     ctx.failedFilings.push({ ...filing, _lastError: err.message });
     return;
   }
@@ -141,48 +130,36 @@ async function writeFilingPersistence(filing, ctx, opts) {
   // Step 2: Insert to Supabase
   let supabaseId = null;
   try {
-    supabaseId = await insertToSupabase(filing, { fetchFn, env });
+    supabaseId = await insertToSupabase(filing, opts);
   } catch (err) {
     ctx.failureCount++;
     if (!ctx.firstError) ctx.firstError = `Supabase insert for ${filing.dedup_key}: ${err.message}`;
-    ctx.failedFilings.push({ ...filing, airtable_record_id: airtableRecordId, _lastError: err.message });
-    // Attempt to mark Airtable record as failed
+    ctx.failedFilings.push({ ...filing, nocodb_record_id: nocoRecordId, _lastError: err.message });
+    // Attempt to mark NocoDB record as failed
     try {
-      await patchAirtableRecord(airtableRecordId, { status: 'failed' }, { fetchFn, env });
+      await patchNocoRecord(nocoRecordId, { status: 'failed' }, opts);
     } catch (_) { /* non-critical */ }
     return;
   }
 
-  // Step 3: Patch Airtable with supabase_id (non-critical)
+  // Step 3: Patch NocoDB with supabase_id (non-critical)
   if (supabaseId) {
     try {
-      await patchAirtableRecord(airtableRecordId, { supabase_id: supabaseId }, { fetchFn, env });
+      await patchNocoRecord(nocoRecordId, { supabase_id: supabaseId }, opts);
     } catch (err) {
-      console.warn(`[write-persistence] Failed to patch supabase_id on ${airtableRecordId}: ${err.message}`);
+      console.warn(`[write-persistence] Failed to patch supabase_id on ${nocoRecordId}: ${err.message}`);
     }
   }
 
   // Step 4: Success
-  ctx.successfulFilings.push({ ...filing, airtable_record_id: airtableRecordId, supabase_id: supabaseId });
+  ctx.successfulFilings.push({ ...filing, nocodb_record_id: nocoRecordId, supabase_id: supabaseId });
 }
 
-// ─── Helper: PATCH Airtable record ──────────────────────────────────────────
+// ─── Helper: PATCH NocoDB record ────────────────────────────────────────────
 
-async function patchAirtableRecord(recordId, fields, opts) {
-  const { fetchFn, env } = opts;
-  const url = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${env.INSIDER_ALERTS_TABLE_ID}/${recordId}`;
-  const res = await fetchFn(url, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${env.AIRTABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ fields }),
-  });
-  if (res && !res.ok) {
-    const errBody = await res.text().catch(() => '');
-    throw new Error(`Airtable PATCH failed (${res.status}): ${errBody}`);
-  }
+async function patchNocoRecord(recordId, fields, opts) {
+  const { nocodb } = opts;
+  await nocodb.update('Insider_Alerts', recordId, fields);
 }
 
 // ─── 5.3 Monitor_State Update ───────────────────────────────────────────────
@@ -193,18 +170,12 @@ async function patchAirtableRecord(recordId, fields, opts) {
  * excluding dead-letter filings (retry_count > 3).
  */
 async function updateMonitorState(workflowName, successfulFilings, failedFilings, firstError, opts) {
-  const { fetchFn, env } = opts;
+  const { nocodb } = opts;
 
   // Fetch the Monitor_State record for this workflow
-  const stateUrl =
-    `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${env.MONITOR_STATE_TABLE_ID}` +
-    `?filterByFormula=${encodeURIComponent(`{name}='${workflowName}'`)}`;
-
-  const stateRes = await fetchFn(stateUrl, {
-    headers: { Authorization: `Bearer ${env.AIRTABLE_API_KEY}` },
-  });
-  const stateData = await stateRes.json();
-  const stateRecord = stateData.records && stateData.records[0];
+  const where = `(name,eq,${workflowName})`;
+  const stateResult = await nocodb.list('Monitor_State', { where, limit: 1 });
+  const stateRecord = stateResult.list && stateResult.list[0];
   if (!stateRecord) {
     console.warn(`[write-persistence] No Monitor_State record found for workflow '${workflowName}'`);
     return;
@@ -242,29 +213,19 @@ async function updateMonitorState(workflowName, successfulFilings, failedFilings
     fields.last_run_error = firstError;
   }
 
-  await fetchFn(
-    `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${env.MONITOR_STATE_TABLE_ID}/${stateRecord.id}`,
-    {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${env.AIRTABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ fields }),
-    },
-  );
+  await nocodb.update('Monitor_State', stateRecord.Id, fields);
 }
 
 // ─── 5.3 Dead-Letter Handler ────────────────────────────────────────────────
 
 /**
- * Mark a filing as dead_letter in Airtable and send Telegram notification.
+ * Mark a filing as dead_letter in NocoDB and send Telegram notification.
  */
-async function handleDeadLetter(filing, airtableRecordId, workflowName, opts) {
+async function handleDeadLetter(filing, nocoRecordId, workflowName, opts) {
   const { fetchFn, env } = opts;
 
-  // PATCH Airtable status
-  await patchAirtableRecord(airtableRecordId, { status: 'dead_letter' }, { fetchFn, env });
+  // PATCH NocoDB status
+  await patchNocoRecord(nocoRecordId, { status: 'dead_letter' }, opts);
 
   // Send Telegram notification
   if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_MONITORING_CHAT_ID) {
@@ -284,11 +245,11 @@ async function handleDeadLetter(filing, airtableRecordId, workflowName, opts) {
 // ─── 5.4 Cluster Alert Creation ─────────────────────────────────────────────
 
 /**
- * Create or update a cluster summary record in Airtable + Supabase.
+ * Create or update a cluster summary record in NocoDB + Supabase.
  * Returns { created: bool, triggerW5: bool }.
  */
 async function createOrUpdateClusterSummary(clusterId, clusterFilings, opts) {
-  const { fetchFn, env } = opts;
+  const { nocodb } = opts;
 
   // Calculate cluster score
   const maxScore = Math.max(...clusterFilings.map((f) => f.significance_score || 0));
@@ -302,16 +263,10 @@ async function createOrUpdateClusterSummary(clusterId, clusterFilings, opts) {
     .join('; ');
   const analysisText = `Cluster buy alert: ${clusterSize} insiders at ${ticker} buying within 7 days. ${memberSummaries}.`;
 
-  // Check for existing cluster summary in Airtable
-  const searchUrl =
-    `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${env.INSIDER_ALERTS_TABLE_ID}` +
-    `?filterByFormula=${encodeURIComponent(`AND({transaction_type}='cluster',{cluster_id}='${clusterId}')`)}`;
-
-  const searchRes = await fetchFn(searchUrl, {
-    headers: { Authorization: `Bearer ${env.AIRTABLE_API_KEY}` },
-  });
-  const searchData = await searchRes.json();
-  const existing = searchData.records && searchData.records[0];
+  // Check for existing cluster summary in NocoDB
+  const where = `(transaction_type,eq,cluster)~and(cluster_id,eq,${clusterId})`;
+  const searchResult = await nocodb.list('Insider_Alerts', { where, limit: 1 });
+  const existing = searchResult.list && searchResult.list[0];
 
   if (!existing) {
     // Create new cluster summary
@@ -331,29 +286,18 @@ async function createOrUpdateClusterSummary(clusterId, clusterFilings, opts) {
       status: 'processed',
     };
 
-    const createRes = await fetchFn(
-      `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${env.INSIDER_ALERTS_TABLE_ID}`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${env.AIRTABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ fields }),
-      },
-    );
-    const createData = await createRes.json();
+    const createData = await nocodb.create('Insider_Alerts', fields);
 
     // Also insert to Supabase
     const supabaseId = await insertToSupabase(
       { ...fields, raw_filing_data: JSON.stringify({ cluster_members: memberSummaries }) },
-      { fetchFn, env },
+      opts,
     );
 
-    // Patch Airtable with supabase_id
-    if (supabaseId && createData.id) {
+    // Patch NocoDB with supabase_id
+    if (supabaseId && createData.Id) {
       try {
-        await patchAirtableRecord(createData.id, { supabase_id: supabaseId }, { fetchFn, env });
+        await patchNocoRecord(createData.Id, { supabase_id: supabaseId }, opts);
       } catch (_) { /* non-critical */ }
     }
 
@@ -361,12 +305,12 @@ async function createOrUpdateClusterSummary(clusterId, clusterFilings, opts) {
   }
 
   // Update existing cluster summary
-  const oldScore = existing.fields.significance_score || 0;
+  const oldScore = existing.significance_score || 0;
 
   // Use max of old size + new members or new total — dedup prevents double-writes,
   // so additive is safe in the normal flow. Reruns with same filings won't re-insert
   // due to Supabase dedup_key constraint.
-  const newSize = (existing.fields.cluster_size || 0) + clusterFilings.length;
+  const newSize = (existing.cluster_size || 0) + clusterFilings.length;
 
   const updateFields = {
     cluster_size: newSize,
@@ -374,17 +318,7 @@ async function createOrUpdateClusterSummary(clusterId, clusterFilings, opts) {
     ai_analysis: analysisText,
   };
 
-  await fetchFn(
-    `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${env.INSIDER_ALERTS_TABLE_ID}/${existing.id}`,
-    {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${env.AIRTABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ fields: updateFields }),
-    },
-  );
+  await nocodb.update('Insider_Alerts', existing.Id, updateFields);
 
   // Only re-trigger W5 if score increased by >= 2
   const scoreDelta = newScore - oldScore;
@@ -410,9 +344,9 @@ async function runPostProcessing(
 
   // Handle dead-letter filings (retry_count > 3)
   for (const f of failedFilings) {
-    if (f.retry_count && f.retry_count > 3 && f.airtable_record_id) {
+    if (f.retry_count && f.retry_count > 3 && f.nocodb_record_id) {
       try {
-        await handleDeadLetter(f, f.airtable_record_id, workflowName, { fetchFn, env });
+        await handleDeadLetter(f, f.nocodb_record_id, workflowName, opts);
       } catch (err) {
         console.warn(`[write-persistence] Dead-letter handling failed for ${f.dedup_key}: ${err.message}`);
       }
@@ -420,10 +354,7 @@ async function runPostProcessing(
   }
 
   // Update Monitor_State
-  await updateMonitorState(workflowName, successfulFilings, failedFilings, firstError, {
-    fetchFn,
-    env,
-  });
+  await updateMonitorState(workflowName, successfulFilings, failedFilings, firstError, opts);
 
   // Telegram alert if too many failures
   if (failureCount > 5 && env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_MONITORING_CHAT_ID) {
@@ -448,7 +379,7 @@ async function runPostProcessing(
   const clusterResults = [];
   for (const [cid, filings] of clusterGroups) {
     try {
-      const result = await createOrUpdateClusterSummary(cid, filings, { fetchFn, env });
+      const result = await createOrUpdateClusterSummary(cid, filings, opts);
       clusterResults.push({ clusterId: cid, ...result });
     } catch (err) {
       console.warn(`[write-persistence] Cluster summary failed for ${cid}: ${err.message}`);
@@ -461,12 +392,12 @@ async function runPostProcessing(
 // ─── Exports ────────────────────────────────────────────────────────────────
 
 module.exports = {
-  createAirtableRecord,
+  createNocoRecord,
   insertToSupabase,
   writeFilingPersistence,
   updateMonitorState,
   handleDeadLetter,
   createOrUpdateClusterSummary,
   runPostProcessing,
-  patchAirtableRecord,
+  patchNocoRecord,
 };

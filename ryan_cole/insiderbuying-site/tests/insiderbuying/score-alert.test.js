@@ -9,6 +9,8 @@ const {
   runScoreAlert,
 } = require('../../n8n/code/insiderbuying/score-alert');
 
+const { NocoDB } = require('../../n8n/code/insiderbuying/nocodb-client');
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function makeFetch(response, ok = true, status = 200) {
@@ -29,9 +31,14 @@ function makeFetchSeq(...calls) {
 
 const noSleep = jest.fn().mockResolvedValue(undefined);
 
-const SUPABASE_URL = 'https://test.supabase.co';
-const SUPABASE_KEY = 'test-key';
+const NOCODB_BASE_URL = 'http://localhost:8080';
+const NOCODB_TOKEN = 'test-token';
+const NOCODB_PROJECT_ID = 'test-project-id';
 const ANTHROPIC_KEY = 'test-anthropic';
+
+function makeNocoDB(fetchFn) {
+  return new NocoDB(NOCODB_BASE_URL, NOCODB_TOKEN, NOCODB_PROJECT_ID, fetchFn);
+}
 
 const SAMPLE_FILING = {
   ticker: 'AAPL',
@@ -50,7 +57,7 @@ const SAMPLE_FILING = {
 
 const HAIKU_JSON_RESPONSE = '{"score": 8, "reasoning": "Large C-Suite purchase signals confidence."}';
 
-// ─── 3.1 normalizeInsiderName ───────────────────────────────────────────────
+// ─── 3.1 normalizeInsiderName ───────────────────────────────────────────────────
 
 describe('normalizeInsiderName', () => {
   test('strips middle initial and lowercases', () => {
@@ -80,38 +87,38 @@ describe('normalizeInsiderName', () => {
   });
 });
 
-// ─── 3.1 computeTrackRecord ─────────────────────────────────────────────────
+// ─── 3.1 computeTrackRecord ─────────────────────────────────────────────────────
 
 describe('computeTrackRecord', () => {
-  test('returns zero-nulls when no Supabase history', async () => {
-    const fetchFn = makeFetch([]);
-    const result = await computeTrackRecord('John Smith', SUPABASE_URL, SUPABASE_KEY, { fetchFn });
+  test('returns zero-nulls when no NocoDB history', async () => {
+    const fetchFn = makeFetch({ list: [], pageInfo: { isLastPage: true } });
+    const nocodb = makeNocoDB(fetchFn);
+    const result = await computeTrackRecord('John Smith', nocodb, { fetchFn });
     expect(result).toEqual({ past_buy_count: 0, hit_rate: null, avg_gain_30d: null });
   });
 
-  test('returns past_buy_count matching Supabase rows', async () => {
+  test('returns past_buy_count matching NocoDB rows', async () => {
     const rows = [
-      { ticker: 'AAPL', filing_date: '2023-06-01', total_value: 500000 },
-      { ticker: 'AAPL', filing_date: '2023-09-01', total_value: 300000 },
+      { Id: 1, ticker: 'AAPL', filing_date: '2023-06-01', total_value: 500000 },
+      { Id: 2, ticker: 'AAPL', filing_date: '2023-09-01', total_value: 300000 },
     ];
-    // Supabase returns rows; Yahoo returns no useful data (empty) → skip price step
     const fetchFn = jest.fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => rows })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ list: rows, pageInfo: { isLastPage: true } }) })
       // Yahoo calls fail gracefully
       .mockResolvedValue({ ok: false, status: 429, json: async () => ({}) });
+    const nocodb = makeNocoDB(fetchFn);
 
-    const result = await computeTrackRecord('John Smith', SUPABASE_URL, SUPABASE_KEY, { fetchFn });
+    const result = await computeTrackRecord('John Smith', nocodb, { fetchFn });
     expect(result.past_buy_count).toBe(2);
   });
 
   test('computes hit_rate: 2 of 3 buys gained >5% → 0.67', async () => {
     const rows = [
-      { ticker: 'AAPL', filing_date: '2023-01-01', total_value: 100000 },
-      { ticker: 'AAPL', filing_date: '2023-04-01', total_value: 200000 },
-      { ticker: 'AAPL', filing_date: '2023-07-01', total_value: 150000 },
+      { Id: 1, ticker: 'AAPL', filing_date: '2023-01-01', total_value: 100000 },
+      { Id: 2, ticker: 'AAPL', filing_date: '2023-04-01', total_value: 200000 },
+      { Id: 3, ticker: 'AAPL', filing_date: '2023-07-01', total_value: 150000 },
     ];
 
-    // Build Yahoo response factory: price at filing_date=100, price at +30d varies
     function makeYahoo(startPrice, endPrice) {
       const now = Date.now() / 1000;
       return {
@@ -126,57 +133,68 @@ describe('computeTrackRecord', () => {
     }
 
     const fetchFn = jest.fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => rows })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ list: rows, pageInfo: { isLastPage: true } }) })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeYahoo(100, 107) }) // +7% hit
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeYahoo(100, 103) }) // +3% miss
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeYahoo(100, 112) }); // +12% hit
+    const nocodb = makeNocoDB(fetchFn);
 
-    const result = await computeTrackRecord('John Smith', SUPABASE_URL, SUPABASE_KEY, { fetchFn });
+    const result = await computeTrackRecord('John Smith', nocodb, { fetchFn });
     expect(result.past_buy_count).toBe(3);
     expect(result.hit_rate).toBeCloseTo(2 / 3, 2);
   });
 
   test('Yahoo Finance network error → returns null track record without throwing', async () => {
-    const rows = [{ ticker: 'AAPL', filing_date: '2023-01-01', total_value: 100000 }];
+    const rows = [{ Id: 1, ticker: 'AAPL', filing_date: '2023-01-01', total_value: 100000 }];
     const fetchFn = jest.fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => rows })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ list: rows, pageInfo: { isLastPage: true } }) })
       .mockRejectedValueOnce(new Error('network timeout'));
+    const nocodb = makeNocoDB(fetchFn);
 
-    const result = await computeTrackRecord('John Smith', SUPABASE_URL, SUPABASE_KEY, { fetchFn });
+    const result = await computeTrackRecord('John Smith', nocodb, { fetchFn });
     expect(result).toEqual({ past_buy_count: 1, hit_rate: null, avg_gain_30d: null });
   });
 
   test('Yahoo Finance 429 → returns null without throwing', async () => {
-    const rows = [{ ticker: 'AAPL', filing_date: '2023-01-01', total_value: 100000 }];
+    const rows = [{ Id: 1, ticker: 'AAPL', filing_date: '2023-01-01', total_value: 100000 }];
     const fetchFn = jest.fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => rows })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ list: rows, pageInfo: { isLastPage: true } }) })
       .mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({}) });
+    const nocodb = makeNocoDB(fetchFn);
 
-    const result = await computeTrackRecord('John Smith', SUPABASE_URL, SUPABASE_KEY, { fetchFn });
+    const result = await computeTrackRecord('John Smith', nocodb, { fetchFn });
     expect(result.hit_rate).toBeNull();
     expect(result.avg_gain_30d).toBeNull();
   });
 
-  test('Supabase failure → returns zero-nulls without throwing', async () => {
+  test('NocoDB failure → returns zero-nulls without throwing', async () => {
     const fetchFn = jest.fn().mockRejectedValue(new Error('connection refused'));
-    const result = await computeTrackRecord('John Smith', SUPABASE_URL, SUPABASE_KEY, { fetchFn });
+    const nocodb = makeNocoDB(fetchFn);
+    const result = await computeTrackRecord('John Smith', nocodb, { fetchFn });
     expect(result).toEqual({ past_buy_count: 0, hit_rate: null, avg_gain_30d: null });
   });
 
-  test('Supabase URL uses % wildcards for ilike (not * globs)', async () => {
-    const fetchFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [] });
-    await computeTrackRecord('John Smith', SUPABASE_URL, SUPABASE_KEY, { fetchFn });
+  test('NocoDB where clause uses lowercase name with ilike operator', async () => {
+    const fetchFn = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ list: [], pageInfo: { isLastPage: true } }),
+    });
+    const nocodb = makeNocoDB(fetchFn);
+    await computeTrackRecord('John Smith', nocodb, { fetchFn });
     const url = fetchFn.mock.calls[0][0];
-    // URLSearchParams encodes % as %25, so %john%smith% appears as %25john%25smith%25 in the URL
     const decoded = decodeURIComponent(url);
-    expect(decoded).toContain('%john%smith%');
-    expect(url).not.toContain('*john*');
+    // NocoDB where clause uses (field,ilike,%value%) syntax for case-insensitive matching
+    expect(decoded).toContain('insider_name');
+    expect(decoded).toContain('ilike');
+    expect(decoded).toContain('john');
+    expect(decoded).toContain('smith');
   });
 
   test('one Yahoo failure does not abort remaining filings in loop', async () => {
     const rows = [
-      { ticker: 'AAPL', filing_date: '2023-01-01', total_value: 100000 },
-      { ticker: 'MSFT', filing_date: '2023-04-01', total_value: 200000 },
+      { Id: 1, ticker: 'AAPL', filing_date: '2023-01-01', total_value: 100000 },
+      { Id: 2, ticker: 'MSFT', filing_date: '2023-04-01', total_value: 200000 },
     ];
 
     function makeYahoo(startPrice, endPrice) {
@@ -193,11 +211,12 @@ describe('computeTrackRecord', () => {
     }
 
     const fetchFn = jest.fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => rows }) // Supabase
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ list: rows, pageInfo: { isLastPage: true } }) }) // NocoDB
       .mockRejectedValueOnce(new Error('AAPL Yahoo timeout'))           // AAPL Yahoo fails
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => makeYahoo(100, 115) }); // MSFT succeeds
+    const nocodb = makeNocoDB(fetchFn);
 
-    const result = await computeTrackRecord('John Smith', SUPABASE_URL, SUPABASE_KEY, { fetchFn });
+    const result = await computeTrackRecord('John Smith', nocodb, { fetchFn });
     // past_buy_count=2, but only 1 valid return (MSFT +15%)
     expect(result.past_buy_count).toBe(2);
     expect(result.hit_rate).toBeCloseTo(1.0); // 1/1 valid return
@@ -205,7 +224,7 @@ describe('computeTrackRecord', () => {
   });
 });
 
-// ─── 3.2 buildHaikuPrompt ───────────────────────────────────────────────────
+// ─── 3.2 buildHaikuPrompt ───────────────────────────────────────────────────────
 
 describe('buildHaikuPrompt', () => {
   const trackRecord = { past_buy_count: 3, hit_rate: 0.67, avg_gain_30d: 0.12 };
@@ -256,7 +275,7 @@ describe('buildHaikuPrompt', () => {
   });
 });
 
-// ─── 3.2 parseHaikuResponse ─────────────────────────────────────────────────
+// ─── 3.2 parseHaikuResponse ─────────────────────────────────────────────────────
 
 describe('parseHaikuResponse', () => {
   test('parses clean JSON response', () => {
@@ -290,7 +309,7 @@ describe('parseHaikuResponse', () => {
   });
 });
 
-// ─── 3.2 score clamping / rounding ──────────────────────────────────────────
+// ─── 3.2 score clamping / rounding ──────────────────────────────────────────────
 
 describe('score clamping and rounding', () => {
   test('score 11 is clamped to 10', () => {
@@ -314,7 +333,7 @@ describe('score clamping and rounding', () => {
   });
 });
 
-// ─── 3.2 callHaiku ──────────────────────────────────────────────────────────
+// ─── 3.2 callHaiku ──────────────────────────────────────────────────────────────
 
 describe('callHaiku', () => {
   test('calls Anthropic messages endpoint with correct model', async () => {
@@ -362,36 +381,22 @@ describe('callHaiku', () => {
   });
 });
 
-// ─── 3.3 runScoreAlert integration ──────────────────────────────────────────
+// ─── 3.3 runScoreAlert integration ──────────────────────────────────────────────
 
 describe('runScoreAlert', () => {
   test('returns scored filing with significance_score, score_reasoning, track_record', async () => {
-    const supabaseFetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [] });
-    const haikuResponse = {
-      content: [{ type: 'text', text: '{"score": 7, "reasoning": "Good signal."}' }],
-    };
-    const fetchFn = jest.fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [] }) // Supabase history
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => haikuResponse.content[0] }) // won't happen
-      .mockResolvedValue({ ok: true, status: 200, json: async () => haikuResponse }); // Haiku
+    const nocodbFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ list: [], pageInfo: { isLastPage: true } }) });
+    const nocodb = makeNocoDB(nocodbFn);
 
-    // Use separate fetchFn per service to simplify
-    const supabaseFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [] });
     const haikuFn = jest.fn().mockResolvedValue({
       ok: true, status: 200,
       json: async () => ({ content: [{ type: 'text', text: '{"score": 7, "reasoning": "Good signal."}' }] }),
     });
 
     const result = await runScoreAlert([SAMPLE_FILING], {
-      supabaseUrl: SUPABASE_URL,
-      supabaseKey: SUPABASE_KEY,
+      nocodb,
       anthropicApiKey: ANTHROPIC_KEY,
-      fetchFn: (url, opts) => {
-        if (url.includes('supabase') || url.includes('insider_alerts') || url.includes('finance.yahoo')) {
-          return supabaseFn(url, opts);
-        }
-        return haikuFn(url, opts);
-      },
+      fetchFn: haikuFn,
       _sleep: noSleep,
     });
 
@@ -406,23 +411,18 @@ describe('runScoreAlert', () => {
 
   test('processes multiple filings sequentially', async () => {
     const filing2 = { ...SAMPLE_FILING, ticker: 'MSFT', insider_name: 'Satya Nadella' };
-    const supabaseFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+    const nocodbFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ list: [], pageInfo: { isLastPage: true } }) });
+    const nocodb = makeNocoDB(nocodbFn);
+
     const haikuFn = jest.fn().mockResolvedValue({
       ok: true, status: 200,
       json: async () => ({ content: [{ type: 'text', text: '{"score": 6, "reasoning": "Moderate."}' }] }),
     });
-    const fetchFn = (url) => {
-      if (url.includes('supabase') || url.includes('finance.yahoo') || url.includes('insider_alerts')) {
-        return supabaseFn(url);
-      }
-      return haikuFn(url);
-    };
 
     const results = await runScoreAlert([SAMPLE_FILING, filing2], {
-      supabaseUrl: SUPABASE_URL,
-      supabaseKey: SUPABASE_KEY,
+      nocodb,
       anthropicApiKey: ANTHROPIC_KEY,
-      fetchFn,
+      fetchFn: haikuFn,
       _sleep: noSleep,
     });
 
@@ -432,18 +432,18 @@ describe('runScoreAlert', () => {
   });
 
   test('preserves all original filing fields in output', async () => {
-    const supabaseFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+    const nocodbFn = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ list: [], pageInfo: { isLastPage: true } }) });
+    const nocodb = makeNocoDB(nocodbFn);
+
     const haikuFn = jest.fn().mockResolvedValue({
       ok: true, status: 200,
       json: async () => ({ content: [{ type: 'text', text: '{"score": 5, "reasoning": "Test."}' }] }),
     });
-    const fetchFn = (url) => url.includes('anthropic') ? haikuFn(url) : supabaseFn(url);
 
     const results = await runScoreAlert([SAMPLE_FILING], {
-      supabaseUrl: SUPABASE_URL,
-      supabaseKey: SUPABASE_KEY,
+      nocodb,
       anthropicApiKey: ANTHROPIC_KEY,
-      fetchFn,
+      fetchFn: haikuFn,
       _sleep: noSleep,
     });
 
@@ -454,8 +454,7 @@ describe('runScoreAlert', () => {
 
   test('handles empty filings array', async () => {
     const results = await runScoreAlert([], {
-      supabaseUrl: SUPABASE_URL,
-      supabaseKey: SUPABASE_KEY,
+      nocodb: makeNocoDB(jest.fn()),
       anthropicApiKey: ANTHROPIC_KEY,
       fetchFn: jest.fn(),
       _sleep: noSleep,

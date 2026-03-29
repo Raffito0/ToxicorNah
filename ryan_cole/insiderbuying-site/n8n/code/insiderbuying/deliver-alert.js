@@ -3,7 +3,7 @@
 // ─── deliver-alert.js ──────────────────────────────────────────────────────
 // W5 Alert Delivery node for InsiderBuying.ai pipeline.
 // Sends email via Resend and push via OneSignal to eligible subscribers,
-// then updates Airtable with delivery tracking.
+// then updates NocoDB with delivery tracking.
 // ────────────────────────────────────────────────────────────────────────────
 
 const POSTAL_ADDRESS = '123 Market Street, Suite 100, San Francisco, CA 94105';
@@ -214,22 +214,14 @@ async function sendOneSignalPush(alertData, supabaseAlertId, opts) {
 // ─── 6.4 Delivery Tracking ──────────────────────────────────────────────────
 
 async function updateDeliveryStatus(recordId, fields, opts) {
-  const { fetchFn, env } = opts;
-  const url = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${env.INSIDER_ALERTS_TABLE_ID}/${recordId}`;
-  await fetchFn(url, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${env.AIRTABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ fields }),
-  });
+  const { nocodb } = opts;
+  await nocodb.update('Insider_Alerts', recordId, fields);
 }
 
 // ─── Main orchestrator ──────────────────────────────────────────────────────
 
 async function deliverAlert(alertData, opts) {
-  const { fetchFn, env, _sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = opts;
+  const { fetchFn, env, nocodb, _sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = opts;
 
   let totalEmailsSent = 0;
   let pushSentCount = 0;
@@ -279,15 +271,15 @@ async function deliverAlert(alertData, opts) {
     trackingFields.error_log = errors.join('; ');
   }
 
-  // Update Airtable delivery tracking
+  // Update NocoDB delivery tracking
   try {
-    await updateDeliveryStatus(alertData.airtable_record_id, trackingFields, { fetchFn, env });
+    await updateDeliveryStatus(alertData.nocodb_record_id, trackingFields, { nocodb });
   } catch (err) {
     console.warn(`[deliver-alert] Failed to update delivery status: ${err.message}`);
   }
 
   return {
-    airtable_record_id: alertData.airtable_record_id,
+    nocodb_record_id: alertData.nocodb_record_id,
     supabase_alert_id: alertData.supabase_alert_id,
     ticker: alertData.ticker,
     emails_sent: totalEmailsSent,
