@@ -401,6 +401,263 @@ function t8PeerRadar(data) {
 </html>`;
 }
 
+// ─── T9 — Market Movers (1200×675) ───────────────────────────────────────────
+
+const RANK_COLORS = ['#FFD700', '#C0C0C0', '#CD7F32'];
+
+function t9MarketMovers(data) {
+  const movers = data.movers || [];
+
+  const rows = movers.map((m, i) => {
+    const verdictKey = normalizeVerdict(m.verdict);
+    const rankColor = RANK_COLORS[i] || COLORS.textSecondary;
+    return `
+<div style="display:flex;align-items:center;gap:16px;padding:14px 20px;background:rgba(26,34,56,0.6);border-radius:8px;margin-bottom:8px;">
+  <span style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;border:2px solid ${rankColor};color:${rankColor};font-weight:700;font-size:14px;flex-shrink:0;">${escapeHtml(String(m.rank ?? i + 1))}</span>
+  <div style="width:80px;flex-shrink:0;font-size:18px;font-weight:800;color:${COLORS.textPrimary};">${escapeHtml(m.ticker ?? '')}</div>
+  <div style="flex:1;color:${COLORS.textSecondary};font-size:14px;">${escapeHtml(m.insiderName ?? '')}</div>
+  <div style="font-size:16px;font-weight:600;color:${COLORS.textPrimary};">${escapeHtml(m.amount ?? '')}</div>
+  <div style="width:80px;text-align:right;">${verdictBadge(verdictKey, 'small')}</div>
+</div>`;
+  }).join('');
+
+  const inner = `
+<div style="width:100%;height:100%;padding:40px;box-sizing:border-box;display:flex;flex-direction:column;">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:24px;">
+    <div style="font-size:22px;font-weight:700;color:${COLORS.textPrimary};">${escapeHtml(data.title ?? '')}</div>
+    <div style="font-size:13px;color:${COLORS.textSecondary};">${escapeHtml(data.weekLabel ?? '')}</div>
+  </div>
+  ${rows}
+</div>`;
+
+  return wrapTemplate(inner, 1200, 675);
+}
+
+// ─── T10 — Contrarian Card (1200×675) ────────────────────────────────────────
+
+function t10ContrarianCard(data) {
+  const verdictKey = normalizeVerdict(data.verdict);
+  const evidence = data.evidence || [];
+
+  const evidenceHtml = evidence.map(e =>
+    `<div style="display:flex;gap:16px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+      <div style="width:160px;flex-shrink:0;font-size:13px;color:${COLORS.textSecondary};">${escapeHtml(e.metric ?? '')}</div>
+      <div style="width:80px;flex-shrink:0;font-size:14px;font-weight:700;color:${COLORS.textPrimary};">${escapeHtml(e.value ?? '')}</div>
+      <div style="flex:1;font-size:13px;color:${COLORS.textSecondary};">${escapeHtml(e.interpretation ?? '')}</div>
+    </div>`
+  ).join('');
+
+  const inner = `
+<div style="width:100%;height:100%;padding:48px;box-sizing:border-box;display:flex;flex-direction:column;gap:24px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div style="font-size:28px;font-weight:800;color:${COLORS.textPrimary};">${escapeHtml(data.ticker ?? '')}</div>
+    ${verdictBadge(verdictKey)}
+  </div>
+  <div style="font-size:18px;font-style:italic;color:${COLORS.textSecondary};line-height:1.6;">${escapeHtml(data.narrative ?? '')}</div>
+  <div style="flex:1;">${evidenceHtml}</div>
+</div>`;
+
+  return wrapTemplate(inner, 1200, 675);
+}
+
+// ─── T11 — Newsletter Stats (1200×675) ───────────────────────────────────────
+
+function t11NewsletterStats(data) {
+  const topArticle = data.topArticle || {};
+
+  function statCard(label, value) {
+    return `
+<div style="flex:1;background:rgba(26,34,56,0.85);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:28px 24px;text-align:center;">
+  <div style="font-size:36px;font-weight:800;color:${COLORS.textPrimary};margin-bottom:8px;">${escapeHtml(value ?? '')}</div>
+  <div style="font-size:13px;color:${COLORS.textSecondary};">${escapeHtml(label)}</div>
+</div>`;
+  }
+
+  const inner = `
+<div style="width:100%;height:100%;padding:40px;box-sizing:border-box;display:flex;flex-direction:column;gap:24px;">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;">
+    <div style="font-size:20px;font-weight:700;color:${COLORS.textPrimary};">Newsletter Performance</div>
+    <div style="font-size:13px;color:${COLORS.textSecondary};">${escapeHtml(data.weekLabel ?? '')}</div>
+  </div>
+  <div style="display:flex;gap:20px;">
+    ${statCard('Subscribers', data.subscribers ?? '')}
+    ${statCard('Open Rate', data.openRate ?? '')}
+    ${statCard('Click Rate', data.clickRate ?? '')}
+  </div>
+  <div style="background:rgba(26,34,56,0.6);border-radius:8px;padding:20px;">
+    <div style="font-size:12px;color:${COLORS.textSecondary};margin-bottom:8px;">TOP ARTICLE THIS WEEK</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:16px;font-weight:600;color:${COLORS.textPrimary};">${escapeHtml(topArticle.title ?? '')}</div>
+      <div style="font-size:14px;color:${COLORS.blue};">${escapeHtml(topArticle.clicks ?? '')} clicks</div>
+    </div>
+  </div>
+</div>`;
+
+  return wrapTemplate(inner, 1200, 675);
+}
+
+// ─── T12 — Sector Activity Heatmap (1200×675) ────────────────────────────────
+
+function t12SectorHeatmap(data) {
+  const sectors = data.sectors || [];
+
+  const cells = sectors.map(s => {
+    const activity = Number(s.activity) || 0;
+    const opacity = (activity / 100).toFixed(2);
+    return `
+<div style="background:rgba(40,167,69,${opacity});border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:6px;">
+  <div style="font-size:12px;color:${COLORS.textSecondary};">${escapeHtml(s.name ?? '')}</div>
+  <div style="font-size:20px;font-weight:700;color:${COLORS.textPrimary};">${escapeHtml(s.topTicker ?? '')}</div>
+  <div style="font-size:11px;color:${COLORS.textSecondary};">${escapeHtml(String(activity))}% activity</div>
+</div>`;
+  }).join('');
+
+  const inner = `
+<div style="width:100%;height:100%;padding:40px;box-sizing:border-box;display:flex;flex-direction:column;gap:24px;">
+  <div style="font-size:20px;font-weight:700;color:${COLORS.textPrimary};">Sector Activity Heatmap</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;flex:1;">
+    ${cells}
+  </div>
+</div>`;
+
+  return wrapTemplate(inner, 1200, 675);
+}
+
+// ─── T13 — Article Hero (1200×630) ───────────────────────────────────────────
+
+function t13ArticleHero(data) {
+  const inner = `
+<div style="width:100%;height:100%;padding:64px 72px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(135deg,#0A1128 0%,#1A2238 100%);">
+  <div>
+    <span style="display:inline-block;padding:4px 14px;border-radius:20px;border:1px solid ${COLORS.blue};color:${COLORS.blue};font-size:12px;font-weight:700;letter-spacing:1px;margin-bottom:24px;">${escapeHtml(data.category ?? '')}</span>
+    <div style="font-size:48px;font-weight:800;color:${COLORS.textPrimary};line-height:1.15;max-width:900px;">${escapeHtml(data.title ?? '')}</div>
+    ${data.subtitle ? `<div style="font-size:20px;color:${COLORS.textSecondary};margin-top:16px;">${escapeHtml(data.subtitle)}</div>` : ''}
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div style="font-size:14px;color:${COLORS.textSecondary};">${escapeHtml(data.date ?? '')}</div>
+    ${data.authorName ? `<div style="font-size:13px;color:${COLORS.textSecondary};">${escapeHtml(data.authorName)}</div>` : ''}
+  </div>
+</div>`;
+
+  return wrapTemplate(inner, 1200, 630);
+}
+
+// ─── T14 — Alert Score Badge (400×400) ───────────────────────────────────────
+
+function t14AlertScoreBadge(data) {
+  const verdictKey = normalizeVerdict(data.verdict);
+  const verdictInfo = VERDICTS[verdictKey];
+  const score = Math.round(Number(data.score) || 0);
+
+  const inner = `
+<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
+  <div style="width:200px;height:200px;border-radius:50%;border:4px solid ${verdictInfo.color};display:flex;align-items:center;justify-content:center;background:rgba(26,34,56,0.9);">
+    <span style="font-size:80px;font-weight:800;color:${COLORS.textPrimary};">${escapeHtml(String(score))}</span>
+  </div>
+  <div style="font-size:18px;font-weight:700;color:${COLORS.textPrimary};">${escapeHtml(data.ticker ?? '')}</div>
+  <div>${verdictBadge(verdictKey)}</div>
+</div>`;
+
+  return wrapTemplate(inner, 400, 400);
+}
+
+// ─── T15 — Weekly Leaderboard (1200×675) ─────────────────────────────────────
+
+function t15WeeklyLeaderboard(data) {
+  const leaders = data.leaders || [];
+
+  const rows = leaders.map((l, i) => {
+    const verdictKey = normalizeVerdict(l.verdict);
+    const returnStr = String(l.returnPct ?? '');
+    const returnColor = returnStr.startsWith('-') ? COLORS.red : COLORS.green;
+    const isTop = i === 0;
+    return `
+<div style="display:flex;align-items:center;gap:16px;padding:14px 20px;background:${isTop ? 'rgba(74,158,255,0.08)' : 'rgba(26,34,56,0.5)'};border:1px solid ${isTop ? COLORS.blue : 'rgba(255,255,255,0.06)'};border-radius:8px;margin-bottom:8px;">
+  <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:${RANK_COLORS[i] || COLORS.textSecondary};color:#000;font-weight:700;font-size:13px;flex-shrink:0;">${escapeHtml(String(l.rank ?? i + 1))}</span>
+  <div style="width:70px;flex-shrink:0;font-size:18px;font-weight:800;color:${COLORS.textPrimary};">${escapeHtml(l.ticker ?? '')}</div>
+  <div style="flex:1;color:${COLORS.textSecondary};font-size:14px;">${escapeHtml(l.insiderName ?? '')}</div>
+  <div style="font-size:18px;font-weight:700;color:${returnColor};">${escapeHtml(returnStr)}</div>
+  <div style="width:80px;text-align:right;">${verdictBadge(verdictKey, 'small')}</div>
+</div>`;
+  }).join('');
+
+  const inner = `
+<div style="width:100%;height:100%;padding:40px;box-sizing:border-box;display:flex;flex-direction:column;">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:24px;">
+    <div style="font-size:22px;font-weight:700;color:${COLORS.textPrimary};">${escapeHtml(data.title ?? '')}</div>
+    <div style="font-size:13px;color:${COLORS.textSecondary};">${escapeHtml(data.weekLabel ?? '')}</div>
+  </div>
+  ${rows}
+</div>`;
+
+  return wrapTemplate(inner, 1200, 675);
+}
+
+// ─── renderTemplate() — main entry point ──────────────────────────────────────
+
+const { uploadChart } = require('./generate-chart');
+
+const SCREENSHOT_URL = 'http://host.docker.internal:3456/screenshot';
+
+function clampDim(val, defaultVal) {
+  return Math.min(Math.max(Number(val) || defaultVal, 200), 3000);
+}
+
+const TEMPLATE_MAP = {
+  1:  [t1DataCard, 1200, 675],
+  2:  [t2SecFilingMiniCard, 600, 337],
+  3:  [t3ComparisonCard, 1200, 675],
+  4:  [t4InsiderTransactionTable, 1200, 675],
+  5:  [t5PriceChart, 1200, 675],
+  6:  [t6RevenueTrend, 1200, 675],
+  7:  [t7ValuationFootballField, 1200, 675],
+  8:  [t8PeerRadar, 600, 600],
+  9:  [t9MarketMovers, 1200, 675],
+  10: [t10ContrarianCard, 1200, 675],
+  11: [t11NewsletterStats, 1200, 675],
+  12: [t12SectorHeatmap, 1200, 675],
+  13: [t13ArticleHero, 1200, 630],
+  14: [t14AlertScoreBadge, 400, 400],
+  15: [t15WeeklyLeaderboard, 1200, 675],
+};
+
+async function renderTemplate(templateId, data, opts = {}, helpers) {
+  const id = Number(templateId);
+  if (!Number.isInteger(id) || id < 1 || id > 15) {
+    throw new Error(`Invalid templateId: must be 1-15 (got ${String(templateId).slice(0, 20)})`);
+  }
+  if (data == null) {
+    throw new Error('renderTemplate: data is required');
+  }
+
+  const [templateFn, rawW, rawH] = TEMPLATE_MAP[id];
+  const w = clampDim(rawW, 1200);
+  const h = clampDim(rawH, 675);
+
+  const html = templateFn(data);
+
+  const url = (helpers.env && helpers.env.SCREENSHOT_SERVER_URL)
+    ? `${helpers.env.SCREENSHOT_SERVER_URL}/screenshot`
+    : SCREENSHOT_URL;
+
+  const res = await helpers.fetchFn(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ html, viewport: { width: w, height: h }, format: 'png' }),
+  });
+
+  if (!res.ok) throw new Error(`Screenshot server error: ${res.status}`);
+  const ct = res.headers.get('Content-Type') || res.headers.get('content-type') || '';
+  if (!ct.startsWith('image/')) throw new Error(`Screenshot server returned non-image: ${ct}`);
+
+  const buffer = await res.buffer();
+
+  if (opts.upload) {
+    return uploadChart(buffer, opts.name || 'template', helpers);
+  }
+  return buffer;
+}
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -412,4 +669,12 @@ module.exports = {
   t6RevenueTrend,
   t7ValuationFootballField,
   t8PeerRadar,
+  t9MarketMovers,
+  t10ContrarianCard,
+  t11NewsletterStats,
+  t12SectorHeatmap,
+  t13ArticleHero,
+  t14AlertScoreBadge,
+  t15WeeklyLeaderboard,
+  renderTemplate,
 };
