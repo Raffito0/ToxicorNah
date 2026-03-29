@@ -423,6 +423,76 @@ async function uploadMediaToX(buffer, helpers) {
   return String(data.media_id_string);
 }
 
+// ---------------------------------------------------------------------------
+// Variable-frequency polling (W8 -- market-hours-aware)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the polling interval in ms based on current New York time.
+ * Market hours (Mon-Fri 9:00-15:59 NY): 5 min
+ * Extended hours (Mon-Fri 16:00-19:59 NY): 15 min
+ * Overnight + weekends: 60 min
+ *
+ * Both `h` and `day` are derived from the same TZ-normalized Date so DST
+ * transitions are handled correctly. Using now.getDay() / now.getHours()
+ * directly would use the server's UTC offset, causing misclassification at
+ * day boundaries (e.g. 00:30 UTC Monday = 19:30 EST Sunday).
+ *
+ * @param {Date} [now=new Date()] - Injectable for testing
+ * @returns {number} Interval in milliseconds
+ */
+function getCurrentPollingInterval(now) {
+  if (!now) now = new Date();
+  var nyDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  var h   = nyDate.getHours();
+  var day = nyDate.getDay(); // 0=Sun, 6=Sat -- in NY time
+
+  if ([1, 2, 3, 4, 5].indexOf(day) !== -1 && h >= 9 && h < 16)
+    return 5 * 60 * 1000;   // market hours: Mon-Fri 9:00-15:59 NY
+  if ([1, 2, 3, 4, 5].indexOf(day) !== -1 && h >= 16 && h < 20)
+    return 15 * 60 * 1000;  // extended hours: Mon-Fri 16:00-19:59 NY
+  return 60 * 60 * 1000;    // overnight + weekends
+}
+
+/**
+ * Orchestrates the skip-check logic for W8 polling cycle.
+ * Reads X_State.last_run, skips if insufficient time has elapsed,
+ * otherwise patches last_run BEFORE engagement and polling_interval AFTER.
+ *
+ * @param {object} opts
+ * @param {number}   [opts.nowMs]            - Current epoch ms (injectable, defaults to Date.now())
+ * @param {function} opts.nocodbGetState     - async () => { last_run: <ms> }
+ * @param {function} opts.nocodbPatchState   - async (fields) => void
+ * @param {function} opts.runEngagement      - async () => void
+ * @returns {Promise<{ skipped: boolean, elapsed: number, interval: number }>}
+ */
+async function runXPollingCycle(opts) {
+  var nowMs = (opts && opts.nowMs != null) ? opts.nowMs : Date.now();
+  var interval = getCurrentPollingInterval(new Date(nowMs));
+
+  var state = await opts.nocodbGetState();
+  var lastRun = (state && state.last_run) ? Number(state.last_run) : 0;
+  var elapsed = nowMs - lastRun;
+
+  if (elapsed < interval) {
+    return { skipped: true, elapsed: elapsed, interval: interval };
+  }
+
+  // PATCH last_run BEFORE engagement to prevent concurrent re-entry
+  await opts.nocodbPatchState({ last_run: nowMs });
+
+  // Run the engagement flow. try/finally ensures polling_interval is always
+  // patched for observability even if engagement throws (last_run is already
+  // patched, so re-entry prevention still works on the next tick).
+  try {
+    await opts.runEngagement();
+  } finally {
+    await opts.nocodbPatchState({ polling_interval: interval });
+  }
+
+  return { skipped: false, elapsed: elapsed, interval: interval };
+}
+
 module.exports = {
   filterRelevant: filterRelevant,
   draftReply: draftReply,
@@ -437,4 +507,6 @@ module.exports = {
   buildEngagementSequence: buildEngagementSequence,
   maybeAttachMedia: maybeAttachMedia,
   uploadMediaToX: uploadMediaToX,
+  getCurrentPollingInterval: getCurrentPollingInterval,
+  runXPollingCycle: runXPollingCycle,
 };
