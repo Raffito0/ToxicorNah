@@ -8,8 +8,13 @@ const TTL_SECONDS = 2592000;   // 30 days
 
 // ─── Internal NocoDB helpers ──────────────────────────────────────────────────
 
-async function _nocoGet(url, token, fetchFn) {
-  const res = await fetchFn(url, { headers: { 'xc-token': token } });
+async function _nocoGet(url, token, fetchFn, _sleep) {
+  let res = await fetchFn(url, { headers: { 'xc-token': token } });
+  if (res.status === 429) {
+    // Rate-limited — wait 1s and retry once
+    await (_sleep ? _sleep(1000) : new Promise(r => setTimeout(r, 1000)));
+    res = await fetchFn(url, { headers: { 'xc-token': token } });
+  }
   if (!res.ok) throw new Error(`NocoDB GET failed: ${res.status}`);
   return res.json();
 }
@@ -20,7 +25,7 @@ async function _nocoGet(url, token, fetchFn) {
  */
 async function _cacheGet(tableId, keyField, keyValue, helpers) {
   const url = `${helpers.env.NOCODB_API_URL}/api/v2/tables/${tableId}/records?where=(${keyField},eq,${encodeURIComponent(keyValue)})&limit=1`;
-  const body = await _nocoGet(url, helpers.env.NOCODB_API_TOKEN, helpers.fetchFn);
+  const body = await _nocoGet(url, helpers.env.NOCODB_API_TOKEN, helpers.fetchFn, helpers._sleep);
   const record = body.list && body.list[0];
   if (!record) return null;
   const fetchedAt = new Date(record.fetched_at).getTime();
@@ -35,7 +40,7 @@ async function _cacheGet(tableId, keyField, keyValue, helpers) {
  */
 async function _cacheSet(tableId, keyField, keyValue, data, helpers) {
   const url = `${helpers.env.NOCODB_API_URL}/api/v2/tables/${tableId}/records?where=(${keyField},eq,${encodeURIComponent(keyValue)})&limit=1`;
-  const body = await _nocoGet(url, helpers.env.NOCODB_API_TOKEN, helpers.fetchFn);
+  const body = await _nocoGet(url, helpers.env.NOCODB_API_TOKEN, helpers.fetchFn, helpers._sleep);
   const existing = body.list && body.list[0];
   const token = helpers.env.NOCODB_API_TOKEN;
   const baseUrl = helpers.env.NOCODB_API_URL;
