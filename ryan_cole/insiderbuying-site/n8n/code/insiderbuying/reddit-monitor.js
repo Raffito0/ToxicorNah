@@ -177,6 +177,7 @@ async function getRedditLog(dateStr) {
     var where = '(posted_at,gte,' + dateStr + 'T00:00:00)~and(posted_at,lte,' + dateStr + 'T23:59:59)~and(status,eq,posted)';
     var url = base + '/api/v1/db/data/noco/reddit/Reddit_Log?where=' + encodeURIComponent(where) + '&limit=100';
     var res = await _deps.fetch(url, { headers: { 'xc-token': tok } });
+    if (res.status !== 200) return [];
     var data = res.json();
     return data.list || [];
   } catch (_) { return []; }
@@ -247,7 +248,11 @@ async function getRedditToken(opts) {
 async function shouldSkipToday() {
   try {
     var now = _now();
-    var dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    // Derive weekday in EST (VPS runs UTC — getDay() without conversion gives wrong day around midnight EST)
+    var estStr = getESTDateString(now);
+    var estParts = estStr.split('-');
+    var estUtc = new Date(Date.UTC(+estParts[0], +estParts[1] - 1, +estParts[2]));
+    var dayOfWeek = estUtc.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat, timezone-safe
     var currentWeek = getISOWeekKey(now);
 
     var stored = await getState('week_skip_days');
@@ -706,6 +711,28 @@ var SUBREDDIT_TONE_MAP = {
 };
 
 // ---------------------------------------------------------------------------
+// A10: Runtime cap guard — prevents accidental over-posting if limits edited
+// ---------------------------------------------------------------------------
+
+async function checkCapGuard(toneMap, alertFn) {
+  // Uses 'dailyCap' (the actual field name in SUBREDDIT_TONE_MAP).
+  // The spec draft called it 'daily_limit' but the live data uses 'dailyCap'.
+  var total = Object.values(toneMap).reduce(function(sum, s) { return sum + (s.dailyCap || 0); }, 0);
+  if (total > 10) {
+    var msg = 'SUBREDDIT_TONE_MAP total daily limit ' + total + ' exceeds max 10';
+    console.error('[REDDIT-CAP]', msg);
+    if (alertFn) {
+      alertFn('ERROR: reddit-monitor cap exceeded -- ' + msg).catch(function() {});
+    }
+    return { error: msg, skipped: true };
+  }
+  return null;
+}
+
+// Module-level check (fire-and-forget, no alert needed at startup)
+checkCapGuard(SUBREDDIT_TONE_MAP, null);
+
+// ---------------------------------------------------------------------------
 // _callClaude — shared Claude API helper
 // ---------------------------------------------------------------------------
 
@@ -1068,7 +1095,7 @@ function randomBetween(min, max) {
  */
 async function insertJob(type, payload, delayMs) {
   try {
-    var base = process.env.NOCODB_API_URL;
+    var base = process.env.NOCODB_API_URL || NOCODB_BASE_URL;
     var tok = process.env.NOCODB_API_TOKEN || NOCODB_TOKEN;
     var executeAfter = new Date(Date.now() + (delayMs || 0)).toISOString();
     var url = base + '/api/v1/db/data/noco/reddit/Scheduled_Jobs';
@@ -1287,21 +1314,25 @@ async function checkDailyCommentLimit(subreddit) {
 }
 
 async function upvoteContext(postId, comment1Id, comment2Id) {
-  var token = await getRedditToken();
-  var vote = async function(id) {
-    await _deps.fetch('https://oauth.reddit.com/api/vote', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'EarlyInsider/1.0',
-      },
-      body: 'id=' + encodeURIComponent(id) + '&dir=1&rank=2',
-    });
-  };
-  await vote(postId);
-  await vote(comment1Id);
-  await vote(comment2Id);
+  try {
+    var token = await getRedditToken();
+    var vote = async function(id) {
+      await _deps.fetch('https://oauth.reddit.com/api/vote', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'EarlyInsider/1.0',
+        },
+        body: 'id=' + encodeURIComponent(id) + '&dir=1&rank=2',
+      });
+    };
+    await vote(postId);
+    await vote(comment1Id);
+    await vote(comment2Id);
+  } catch (err) {
+    console.warn('[upvoteContext] failed: ' + err.message);
+  }
 }
 
 async function scheduleEditUpdate(commentId, ticker, subreddit, priceAtPost) {
@@ -1325,6 +1356,7 @@ async function _processRedditReplyDeferred(payload) {
     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'EarlyInsider/1.0' },
     body: 'thing_id=' + encodeURIComponent(payload.postId) + '&text=' + encodeURIComponent(comment),
   });
+  if (postRes.status !== 200) { console.warn('[_processRedditReplyDeferred] Reddit comment API returned HTTP ' + postRes.status); return; }
   var postData = postRes.json();
   var newCommentName = postData && postData.json && postData.json.data && postData.json.data.things && postData.json.data.things[0] && postData.json.data.things[0].data && postData.json.data.things[0].data.name;
   await _logToRedditLog('', payload.subreddit, comment, 'posted');
@@ -1384,7 +1416,7 @@ async function _processRedditDDReply(payload) {
 
 async function processScheduledJobs(opts) {
   var options = opts || {};
-  var base = process.env.NOCODB_API_URL;
+  var base = process.env.NOCODB_API_URL || NOCODB_BASE_URL;
   var tok = process.env.NOCODB_API_TOKEN || NOCODB_TOKEN;
   var jobs;
   if (options._fixedJobs) {
@@ -1441,7 +1473,7 @@ async function _fetchInsiderData(ticker) {
     var base = process.env.NOCODB_API_URL || 'http://NocoDB:8080';
     var tok = process.env.NOCODB_API_TOKEN || NOCODB_TOKEN;
     var projectId = process.env.NOCODB_PROJECT_ID || NOCODB_PROJECT_ID;
-    var url = base + '/api/v1/db/data/noco/' + projectId + '/Insider_filings?where=(ticker,eq,' + encodeURIComponent(ticker) + ')&sort=-date&limit=1';
+    var url = base + '/api/v1/db/data/noco/' + projectId + '/Insider_Filings?where=(ticker,eq,' + encodeURIComponent(ticker) + ')&sort=-date&limit=1';
     var res = await _deps.fetch(url, { headers: { 'xc-token': tok } });
     if (res.status !== 200) return null;
     var data = res.json();
@@ -1590,4 +1622,7 @@ module.exports = {
 
   // Section 06 — Anti-AI Detection
   buildCommentPrompt: buildCommentPrompt,
+
+  // A10 — cap guard
+  checkCapGuard: checkCapGuard,
 };
