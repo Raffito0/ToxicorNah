@@ -5,6 +5,8 @@ const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
 
+const { createOpusClient } = require('./ai-client');
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -268,6 +270,125 @@ async function gatherWeeklyContent(nocodbApi, _opts) {
 }
 
 // ---------------------------------------------------------------------------
+// generateNewsletter
+// ---------------------------------------------------------------------------
+
+const _NEWSLETTER_SYSTEM_PROMPT = 'You are a financial newsletter writer for EarlyInsider, covering SEC Form 4 insider buying signals. Write engaging, authoritative editorial copy. Respond with raw JSON only — no markdown fences, no explanation, no preamble.';
+
+const _NEWSLETTER_SECTION_DESCRIPTIONS = [
+  's1 — Opening Hook (100-150 words): Personal first-person observation, no data yet. Set the tone.',
+  's2 — Move of the Week (200-250 words): Deep dive on alerts[0] (or macro context if no alerts).',
+  's3 — Scorecard (150-200 words): Last week performance. Include winners AND losers with returns.',
+  's4 — Pattern Recognition (150-200 words): Sector rotation or pre-earnings patterns in the data.',
+  "s5 — What I'm Watching (100-150 words): 3-4 specific upcoming events with dates from earnings.",
+  's6_free — The Wrap P.S.: Invite free subscribers to upgrade. One short paragraph.',
+  's6_pro — The Wrap P.S.: Referral ask. Must contain the exact merge tag {{rp_refer_url}}.',
+].join('\n');
+
+const _NEWSLETTER_SCHEMA = JSON.stringify({
+  sections: { s1: 'string', s2: 'string', s3: 'string', s4: 'string', s5: 'string', s6_free: 'string', s6_pro: 'string' },
+  subjectA: 'curiosity-gap subject line (always sent to Beehiiv for delivery)',
+  subjectB: 'number-specific subject line (logged to NocoDB only)',
+}, null, 2);
+
+/**
+ * POST a message to Telegram using native https.
+ */
+function _sendTelegramAlert(msg, env) {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  const chatId = env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return Promise.resolve();
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ chat_id: chatId, text: msg });
+    const options = {
+      hostname: 'api.telegram.org',
+      path: '/bot' + token + '/sendMessage',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    };
+    const req = _https.request(options, (res) => { res.resume(); resolve(); });
+    req.on('error', () => resolve());
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * Generate all six newsletter sections and two subject lines in one Opus call.
+ *
+ * @param {object} data - Output of gatherWeeklyContent()
+ * @param {object} [_opts]
+ * @param {object}   [_opts._aiClient]   Injectable Opus client { complete }
+ * @param {Function} [_opts._telegramFn] Injectable Telegram sender (msg) => Promise
+ * @param {object}   [_opts._env]        Override process.env
+ * @returns {Promise<{ sections: object, subjectA: string, subjectB: string }>}
+ */
+async function generateNewsletter(data, _opts) {
+  const MAX_RETRIES = 3;
+  const REQUIRED_KEYS = ['s1', 's2', 's3', 's4', 's5', 's6_free', 's6_pro'];
+
+  const env = (_opts && _opts._env) ? _opts._env : process.env;
+
+  // Token budget: clamp inputs before prompt injection
+  const alerts = (data.topAlerts || []).slice(0, 5);
+  const articles = data.articles || [];
+  const performance = data.performance || [];
+  const earnings = (data.upcomingEarnings || []).slice(0, 10);
+
+  // Empty-state prefix prevents AI from hallucinating tickers
+  const emptyPrefix = alerts.length === 0
+    ? 'IMPORTANT: No major insider moves this week. For section s2, write about macro market trends and broader market context instead of a specific ticker. Do not reference or imply any specific insider trade.\n\n'
+    : '';
+
+  const dataBlock = 'DATA:\n' + JSON.stringify({ alerts, articles, performance, earnings });
+  const basePrompt = emptyPrefix + dataBlock + '\n\nSECTIONS TO WRITE:\n' + _NEWSLETTER_SECTION_DESCRIPTIONS + '\n\nRESPONSE FORMAT (raw JSON only, no fences):\n' + _NEWSLETTER_SCHEMA;
+
+  const aiClient = (_opts && _opts._aiClient)
+    ? _opts._aiClient
+    : createOpusClient(_httpsGet, (env.KIEAI_API_KEY || ''));
+
+  const telegramFn = (_opts && _opts._telegramFn)
+    ? _opts._telegramFn
+    : (msg) => _sendTelegramAlert(msg, env);
+
+  let lastError = '';
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const prompt = attempt === 0
+      ? basePrompt
+      : basePrompt + '\n\nPrevious attempt failed: ' + lastError + '. Fix the issue and return valid JSON only.';
+
+    try {
+      const aiResult = await aiClient.complete(_NEWSLETTER_SYSTEM_PROMPT, prompt);
+      const raw = (aiResult && aiResult.content) ? aiResult.content : '';
+      const stripped = raw
+        .replace(/^\s*```(?:json)?\s*/i, '')
+        .replace(/\s*```\s*$/, '')
+        .trim();
+      const parsed = JSON.parse(stripped);
+
+      // Validate shape
+      const missing = REQUIRED_KEYS.filter(
+        (k) => !parsed.sections || !parsed.sections[k] || typeof parsed.sections[k] !== 'string' || !parsed.sections[k].trim()
+      );
+      if (missing.length > 0) { lastError = 'Missing or empty section keys: ' + missing.join(', '); continue; }
+      if (!parsed.subjectA || typeof parsed.subjectA !== 'string' || !parsed.subjectA.trim()) { lastError = 'subjectA missing or empty'; continue; }
+      if (!parsed.subjectB || typeof parsed.subjectB !== 'string' || !parsed.subjectB.trim()) { lastError = 'subjectB missing or empty'; continue; }
+
+      return parsed;
+    } catch (e) {
+      lastError = (e && e.message) ? e.message : String(e);
+    }
+  }
+
+  // All attempts failed — alert operator
+  const alertMsg = '[EarlyInsider] Newsletter AI generation failed after 3 attempts.\nLast error: ' + lastError;
+  try { await telegramFn(alertMsg); } catch (tgErr) {
+    console.error('[generateNewsletter] Telegram alert failed:', (tgErr && tgErr.message) || tgErr);
+  }
+  throw new Error('generateNewsletter failed after ' + MAX_RETRIES + ' attempts: ' + lastError);
+}
+
+// ---------------------------------------------------------------------------
 // generateSummaries
 // ---------------------------------------------------------------------------
 
@@ -397,6 +518,7 @@ module.exports = {
   gatherWeeklyContent,
   computeAlertPerformance,
   getUpcomingEarnings,
+  generateNewsletter,
   generateSummaries,
   assembleNewsletter,
   sendViaBeehiiv,

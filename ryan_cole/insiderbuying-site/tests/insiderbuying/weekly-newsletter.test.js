@@ -1,9 +1,16 @@
 'use strict';
 
+// Mock ai-client BEFORE requiring weekly-newsletter (section-02 generateNewsletter uses it)
+jest.mock('../../n8n/code/insiderbuying/ai-client', () => ({
+  createOpusClient: jest.fn(),
+}));
+const { createOpusClient } = require('../../n8n/code/insiderbuying/ai-client');
+
 const {
   gatherWeeklyContent,
   computeAlertPerformance,
   getUpcomingEarnings,
+  generateNewsletter,
 } = require('../../n8n/code/insiderbuying/weekly-newsletter');
 
 // ---------------------------------------------------------------------------
@@ -292,5 +299,152 @@ describe('getUpcomingEarnings — cache behaviour', () => {
     const symbols = result.map(e => e.symbol);
     expect(symbols).toContain('AAPL');
     expect(symbols).not.toContain('MSFT'); // outside 14-day window
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateNewsletter
+// ---------------------------------------------------------------------------
+
+const VALID_NEWSLETTER_RESULT = {
+  sections: {
+    s1: 'Opening hook text.',
+    s2: 'Move of the week text.',
+    s3: 'Scorecard text.',
+    s4: 'Pattern recognition text.',
+    s5: 'What I am watching text.',
+    s6_free: 'Upgrade to pro today.',
+    s6_pro: 'Refer a friend at {{rp_refer_url}}.',
+  },
+  subjectA: 'This insider just went all in',
+  subjectB: '3 insiders bought $4M in stock this week',
+};
+
+function makeOpusClient(responses) {
+  let idx = 0;
+  const complete = jest.fn().mockImplementation(() => {
+    const item = responses[idx] !== undefined ? responses[idx] : responses[responses.length - 1];
+    idx++;
+    if (item instanceof Error) return Promise.reject(item);
+    return Promise.resolve({ content: typeof item === 'string' ? item : JSON.stringify(item) });
+  });
+  return { complete };
+}
+
+function makeSampleData(overrides = {}) {
+  return {
+    topAlerts: [{ ticker: 'AAPL', score: 9, price_at_filing: 150 }],
+    articles: [{ title: 'Test Article', published_at: '2026-03-14' }],
+    performance: [{ ticker: 'AAPL', return: '+5.0%', winner: true }],
+    upcomingEarnings: [{ symbol: 'AAPL', reportDate: '2026-03-20' }],
+    ...overrides,
+  };
+}
+
+describe('generateNewsletter', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('calls AI client exactly once with all 4 data inputs injected into prompt', async () => {
+    const client = makeOpusClient([VALID_NEWSLETTER_RESULT]);
+    const data = makeSampleData();
+
+    await generateNewsletter(data, { _aiClient: client });
+
+    expect(client.complete).toHaveBeenCalledTimes(1);
+    const [, userPrompt] = client.complete.mock.calls[0];
+    expect(userPrompt).toContain('AAPL'); // alert ticker in data
+    expect(userPrompt).toContain('Test Article'); // article title in data
+  });
+
+  test('strips markdown code fences before JSON.parse', async () => {
+    const fenced = '```json\n' + JSON.stringify(VALID_NEWSLETTER_RESULT) + '\n```';
+    const client = makeOpusClient([fenced]);
+
+    const result = await generateNewsletter(makeSampleData(), { _aiClient: client });
+
+    expect(result.subjectA).toBe(VALID_NEWSLETTER_RESULT.subjectA);
+  });
+
+  test('returns all required section keys and both subject lines', async () => {
+    const client = makeOpusClient([VALID_NEWSLETTER_RESULT]);
+
+    const result = await generateNewsletter(makeSampleData(), { _aiClient: client });
+
+    const REQUIRED_KEYS = ['s1', 's2', 's3', 's4', 's5', 's6_free', 's6_pro'];
+    REQUIRED_KEYS.forEach((k) => {
+      expect(result.sections[k]).toBeTruthy();
+    });
+    expect(typeof result.subjectA).toBe('string');
+    expect(result.subjectA.length).toBeGreaterThan(0);
+    expect(typeof result.subjectB).toBe('string');
+    expect(result.subjectB.length).toBeGreaterThan(0);
+  });
+
+  test('retries on malformed AI JSON and resolves on second attempt', async () => {
+    const client = makeOpusClient(['not-valid-json{{{', VALID_NEWSLETTER_RESULT]);
+
+    const result = await generateNewsletter(makeSampleData(), { _aiClient: client });
+
+    expect(client.complete).toHaveBeenCalledTimes(2);
+    expect(result.subjectA).toBe(VALID_NEWSLETTER_RESULT.subjectA);
+  });
+
+  test('retries when response is missing required section keys', async () => {
+    const partial = { sections: { s1: 'ok' }, subjectA: 'A', subjectB: 'B' };
+    const client = makeOpusClient([partial, VALID_NEWSLETTER_RESULT]);
+
+    const result = await generateNewsletter(makeSampleData(), { _aiClient: client });
+
+    expect(client.complete).toHaveBeenCalledTimes(2);
+    expect(result.sections.s2).toBeTruthy();
+
+    // Retry prompt must contain lastError from the first attempt
+    const [, retryPrompt] = client.complete.mock.calls[1];
+    expect(retryPrompt).toContain('Missing or empty section keys');
+  });
+
+  test('sends Telegram alert and throws after 3 consecutive AI failures', async () => {
+    const client = makeOpusClient([
+      new Error('API timeout'),
+      new Error('API timeout'),
+      new Error('API timeout'),
+    ]);
+    const telegramFn = jest.fn().mockResolvedValue(undefined);
+
+    await expect(
+      generateNewsletter(makeSampleData(), { _aiClient: client, _telegramFn: telegramFn })
+    ).rejects.toThrow(/generateNewsletter failed after 3 attempts/);
+
+    expect(telegramFn).toHaveBeenCalledTimes(1);
+    const [msg] = telegramFn.mock.calls[0];
+    expect(msg).toContain('[EarlyInsider]');
+    expect(msg).toContain('API timeout');
+  });
+
+  test('injects empty-state prefix instruction when topAlerts is empty', async () => {
+    const client = makeOpusClient([VALID_NEWSLETTER_RESULT]);
+    const data = makeSampleData({ topAlerts: [] });
+
+    await generateNewsletter(data, { _aiClient: client });
+
+    const [, userPrompt] = client.complete.mock.calls[0];
+    expect(userPrompt).toContain('No major insider moves this week');
+    expect(userPrompt).toContain('macro market trends');
+  });
+
+  test('prunes alerts to max 5 and earnings to max 10 before sending to AI', async () => {
+    const client = makeOpusClient([VALID_NEWSLETTER_RESULT]);
+    const manyAlerts = Array.from({ length: 8 }, (_, i) => ({ ticker: 'T' + i, score: 8 }));
+    const manyEarnings = Array.from({ length: 15 }, (_, i) => ({ symbol: 'E' + i }));
+    const data = makeSampleData({ topAlerts: manyAlerts, upcomingEarnings: manyEarnings });
+
+    await generateNewsletter(data, { _aiClient: client });
+
+    const [, userPrompt] = client.complete.mock.calls[0];
+    const injected = JSON.parse(userPrompt.match(/DATA:\n(\{[\s\S]*?\})\n\nSECTIONS/)[1]);
+    expect(injected.alerts).toHaveLength(5);
+    expect(injected.earnings).toHaveLength(10);
   });
 });
