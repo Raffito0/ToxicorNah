@@ -5,7 +5,7 @@ jest.mock('../../n8n/code/insiderbuying/render-pdf', () => ({
 }));
 
 const { uploadToR2 } = require('../../n8n/code/insiderbuying/render-pdf');
-const { getCompanyLogo, prefetchLogos } = require('../../n8n/code/insiderbuying/identity-assets');
+const { getCompanyLogo, prefetchLogos, getInsiderPhoto, normalizeInsiderName } = require('../../n8n/code/insiderbuying/identity-assets');
 
 const PNG_BUFFER = Buffer.alloc(100);
 const LARGE_BUFFER = Buffer.alloc(600 * 1024); // > 500KB
@@ -14,7 +14,9 @@ const ENV = {
   NOCODB_API_URL: 'http://nocodb.test',
   NOCODB_API_TOKEN: 'test-token',
   NOCODB_LOGO_TABLE_ID: 'tbl_logos_test',
+  NOCODB_PHOTOS_TABLE_ID: 'tbl_photos_test',
   SCREENSHOT_SERVER_URL: 'http://host.docker.internal:3456',
+  GOOGLE_KG_API_KEY: 'test-kg-key',
 };
 
 function makeHelpers(fetchMocks) {
@@ -284,5 +286,271 @@ describe('prefetchLogos', () => {
     const helpers = { fetchFn, env: ENV, _sleep: jest.fn() };
     await prefetchLogos(['a.com', 'b.com', 'c.com', 'd.com'], helpers);
     expect(brandfetchTracker).toHaveLength(4);
+  });
+});
+
+// ─── normalizeInsiderName ─────────────────────────────────────────────────────
+
+describe('normalizeInsiderName', () => {
+  test('strips Dr. prefix and Jr. suffix', () => {
+    expect(normalizeInsiderName('Dr. Jensen Huang Jr.')).toBe('jensen huang');
+  });
+
+  test('strips Mr. prefix and III suffix', () => {
+    expect(normalizeInsiderName('Mr. John Smith III')).toBe('john smith');
+  });
+
+  test('plain name passes through lowercased', () => {
+    expect(normalizeInsiderName('Elon Musk')).toBe('elon musk');
+  });
+
+  test('preserves hyphen and apostrophe in name', () => {
+    expect(normalizeInsiderName("mary-jane o'connor")).toBe("mary-jane o'connor");
+  });
+
+  test('normalizes unicode accented characters via NFKD', () => {
+    expect(normalizeInsiderName('José García')).toBe('jose garcia');
+  });
+
+  test('empty string returns empty string', () => {
+    expect(normalizeInsiderName('')).toBe('');
+  });
+
+  test('null returns empty string', () => {
+    expect(normalizeInsiderName(null)).toBe('');
+  });
+
+  test('undefined returns empty string', () => {
+    expect(normalizeInsiderName(undefined)).toBe('');
+  });
+});
+
+// ─── getInsiderPhoto — helper factories ──────────────────────────────────────
+
+function photosCacheMiss() {
+  return { ok: true, json: async () => ({ list: [] }) };
+}
+
+function photosCacheHit(name_normalized, photo_url, ttl_seconds = 2592000) {
+  const fetched_at = new Date(Date.now() - 1000).toISOString();
+  return {
+    ok: true,
+    json: async () => ({ list: [{ Id: 55, name_normalized, photo_url, source: 'wikidata', fetched_at, ttl_seconds }] }),
+  };
+}
+
+function wikidataHit(imageUrl = 'https://commons.wikimedia.org/wiki/Special:FilePath/JensenHuang.jpg') {
+  return {
+    ok: true,
+    json: async () => ({
+      results: { bindings: [{ image: { value: imageUrl } }] },
+    }),
+  };
+}
+
+function wikidataNoResult() {
+  return {
+    ok: true,
+    json: async () => ({ results: { bindings: [] } }),
+  };
+}
+
+function headOk() {
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => 'image/jpeg' },
+  };
+}
+
+function head403() {
+  return {
+    ok: false,
+    status: 403,
+    headers: { get: () => null },
+  };
+}
+
+function kgHit(imageUrl = 'https://kg.example.com/jensen_huang.jpg') {
+  return {
+    ok: true,
+    json: async () => ({
+      itemListElement: [{ result: { image: { contentUrl: imageUrl } } }],
+    }),
+  };
+}
+
+function kgNoResult() {
+  return {
+    ok: true,
+    json: async () => ({ itemListElement: [] }),
+  };
+}
+
+// ─── getInsiderPhoto — cache hit ──────────────────────────────────────────────
+
+describe('getInsiderPhoto — cache hit', () => {
+  test('returns cached URL without calling Wikidata', async () => {
+    const helpers = makeHelpers([
+      photosCacheHit('jensen huang', 'https://r2.dev/photos/jensen-huang.jpg'),
+    ]);
+    const url = await getInsiderPhoto('Jensen Huang', 'CEO', helpers);
+    expect(url).toBe('https://r2.dev/photos/jensen-huang.jpg');
+    expect(helpers.fetchFn).toHaveBeenCalledTimes(1); // only NocoDB GET
+  });
+});
+
+// ─── getInsiderPhoto — Wikidata hit ───────────────────────────────────────────
+
+describe('getInsiderPhoto — Wikidata hit', () => {
+  test('Wikidata SPARQL returns image → verifies via HEAD → caches with source wikidata', async () => {
+    const helpers = makeHelpers([
+      photosCacheMiss(),   // initial cache check
+      wikidataHit(),       // Wikidata SPARQL
+      headOk(),            // HEAD verify
+      photosCacheMiss(),   // _cacheSet existence check
+      nocoDone(),          // NocoDB POST
+    ]);
+    const url = await getInsiderPhoto('Jensen Huang', 'CEO', helpers);
+    expect(url).toContain('commons.wikimedia.org');
+    // Find the NocoDB POST (not the Wikidata SPARQL POST)
+    const postCall = helpers.fetchFn.mock.calls.find(
+      c => c[1] && c[1].method === 'POST' && c[0].includes('nocodb')
+    );
+    const posted = JSON.parse(postCall[1].body);
+    expect(posted.source).toBe('wikidata');
+  });
+
+  test('Wikidata SPARQL request includes descriptive User-Agent header', async () => {
+    const helpers = makeHelpers([
+      photosCacheMiss(),
+      wikidataHit(),
+      headOk(),
+      photosCacheMiss(),
+      nocoDone(),
+    ]);
+    await getInsiderPhoto('Jensen Huang', 'CEO', helpers);
+    const wikidataCall = helpers.fetchFn.mock.calls.find(c => c[0].includes('wikidata.org'));
+    expect(wikidataCall).toBeDefined();
+    const headers = wikidataCall[1] && wikidataCall[1].headers;
+    expect(headers['User-Agent'] || headers['user-agent']).toMatch(/EarlyInsiderBot/);
+  });
+
+  test('Wikidata HEAD request uses redirect: follow', async () => {
+    const helpers = makeHelpers([
+      photosCacheMiss(),
+      wikidataHit(),
+      headOk(),
+      photosCacheMiss(),
+      nocoDone(),
+    ]);
+    await getInsiderPhoto('Jensen Huang', 'CEO', helpers);
+    // Find the HEAD call (not the SPARQL POST)
+    const headCall = helpers.fetchFn.mock.calls.find(
+      c => c[1] && c[1].method === 'HEAD'
+    );
+    expect(headCall).toBeDefined();
+    expect(headCall[1].redirect).toBe('follow');
+  });
+});
+
+// ─── getInsiderPhoto — Wikidata miss → Google KG ─────────────────────────────
+
+describe('getInsiderPhoto — Wikidata miss → Google KG', () => {
+  test('Wikidata SPARQL no image → falls to Google KG', async () => {
+    const helpers = makeHelpers([
+      photosCacheMiss(),
+      wikidataNoResult(),  // Wikidata: no results
+      kgHit(),             // Google KG hit
+      headOk(),            // HEAD verify
+      photosCacheMiss(),   // _cacheSet existence check
+      nocoDone(),          // NocoDB POST
+    ]);
+    const url = await getInsiderPhoto('Jensen Huang', 'CEO', helpers);
+    expect(url).toContain('kg.example.com');
+    // Find the NocoDB POST (not the Wikidata SPARQL POST)
+    const postCall = helpers.fetchFn.mock.calls.find(
+      c => c[1] && c[1].method === 'POST' && c[0].includes('nocodb')
+    );
+    const posted = JSON.parse(postCall[1].body);
+    expect(posted.source).toBe('google_kg');
+  });
+
+  test('Wikidata timeout → falls to Google KG', async () => {
+    const helpers = makeHelpers([
+      photosCacheMiss(),
+      () => Promise.reject(new Error('AbortError: timeout')), // Wikidata timeout
+      kgHit(),
+      headOk(),
+      photosCacheMiss(),
+      nocoDone(),
+    ]);
+    const url = await getInsiderPhoto('Jensen Huang', 'CEO', helpers);
+    expect(url).toContain('kg.example.com');
+  });
+});
+
+// ─── getInsiderPhoto — Google KG failures → UI Avatars ────────────────────────
+
+describe('getInsiderPhoto — Google KG failures → UI Avatars', () => {
+  test('Google KG image URL returns 403 → falls to UI Avatars', async () => {
+    const helpers = makeHelpers([
+      photosCacheMiss(),
+      wikidataNoResult(),  // Wikidata: no results
+      kgHit(),             // Google KG returns URL
+      head403(),           // HEAD returns 403 — blocked image
+      photosCacheMiss(),   // _cacheSet existence check (UI Avatars)
+      nocoDone(),          // NocoDB POST
+    ]);
+    const url = await getInsiderPhoto('Jensen Huang', 'CEO', helpers);
+    expect(url).toContain('ui-avatars.com');
+  });
+
+  test('Google KG timeout → falls to UI Avatars', async () => {
+    const helpers = makeHelpers([
+      photosCacheMiss(),
+      wikidataNoResult(),
+      () => Promise.reject(new Error('AbortError: timeout')), // KG timeout
+      photosCacheMiss(),
+      nocoDone(),
+    ]);
+    const url = await getInsiderPhoto('Jensen Huang', 'CEO', helpers);
+    expect(url).toContain('ui-avatars.com');
+  });
+});
+
+// ─── getInsiderPhoto — UI Avatars fallback ────────────────────────────────────
+
+describe('getInsiderPhoto — UI Avatars fallback', () => {
+  test('UI Avatars URL includes firstName+lastName from normalized name', async () => {
+    const helpers = makeHelpers([
+      photosCacheMiss(),
+      wikidataNoResult(),
+      kgNoResult(),
+      photosCacheMiss(),
+      nocoDone(),
+    ]);
+    const url = await getInsiderPhoto('Jensen Huang', 'CEO', helpers);
+    expect(url).toContain('ui-avatars.com');
+    // normalized "jensen huang" → firstName=jensen, lastName=huang
+    expect(url).toContain('jensen');
+    expect(url).toContain('huang');
+  });
+
+  test('UI Avatars result cached with source ui_avatars', async () => {
+    const helpers = makeHelpers([
+      photosCacheMiss(),
+      wikidataNoResult(),
+      kgNoResult(),
+      photosCacheMiss(),
+      nocoDone(),
+    ]);
+    await getInsiderPhoto('Jensen Huang', 'CEO', helpers);
+    // Find the NocoDB POST (not the Wikidata SPARQL POST)
+    const postCall = helpers.fetchFn.mock.calls.find(
+      c => c[1] && c[1].method === 'POST' && c[0].includes('nocodb')
+    );
+    const posted = JSON.parse(postCall[1].body);
+    expect(posted.source).toBe('ui_avatars');
   });
 });

@@ -192,10 +192,159 @@ async function prefetchLogos(domains, helpers) {
   }
 }
 
+// ─── normalizeInsiderName ─────────────────────────────────────────────────────
+
+/**
+ * Normalize a full name for use as a NocoDB cache key.
+ * Strips honorific prefixes (Dr., Mr., etc.) and generational suffixes (Jr., III, etc.).
+ * @param {string|null|undefined} fullName
+ * @returns {string}
+ */
+function normalizeInsiderName(fullName) {
+  if (!fullName) return '';
+  // NFKD normalization + strip combining characters (accents)
+  let name = fullName.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  // Strip honorific prefixes
+  name = name.replace(/^\s*(Dr|Mr|Mrs|Ms|Prof)\.?\s+/i, '');
+  // Strip generational suffixes (standalone tokens at end)
+  name = name.replace(/\s+(Jr\.?|Sr\.?|III|IV|II|I)\s*$/i, '');
+  return name.toLowerCase().trim();
+}
+
+// ─── Insider Photo helpers ────────────────────────────────────────────────────
+
+const WIKIDATA_SPARQL_URL = 'https://query.wikidata.org/sparql';
+const WIKIDATA_USER_AGENT = 'EarlyInsiderBot/1.0 (contact@earlyinsider.com)';
+
+async function _tryWikidata(fullName, helpers) {
+  // C1: escape SPARQL string literal to prevent injection
+  const escaped = fullName.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+  const sparql = `SELECT ?image WHERE { ?entity wdt:P31 wd:Q5 . ?entity rdfs:label "${escaped}"@en . ?entity wdt:P18 ?image . } LIMIT 1`;
+  const res = await helpers.fetchFn(WIKIDATA_SPARQL_URL, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/sparql-results+json',
+      'User-Agent': WIKIDATA_USER_AGENT,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `query=${encodeURIComponent(sparql)}`,
+  });
+  if (!res.ok) throw new Error(`Wikidata SPARQL error: ${res.status}`);
+  const data = await res.json();
+  const imageValue = data.results && data.results.bindings && data.results.bindings[0] && data.results.bindings[0].image && data.results.bindings[0].image.value;
+  if (!imageValue) return null;
+  // I1: reject non-HTTPS URLs to prevent SSRF via crafted Wikidata P18 bindings
+  if (!imageValue.startsWith('https://')) return null;
+
+  const imageUrl = `${imageValue}?width=300`;
+  const head = await helpers.fetchFn(imageUrl, { method: 'HEAD', redirect: 'follow' });
+  if (!head.ok || !(head.headers.get('content-type') || '').startsWith('image/')) return null;
+  return imageUrl;
+}
+
+async function _tryGoogleKG(fullName, title, helpers) {
+  // I3: pass API key as header to avoid logging it in n8n execution history URLs
+  const kgUrl = `https://kgsearch.googleapis.com/v1/entities:search?query=${encodeURIComponent(fullName + ' ' + title)}&types=Person&limit=1`;
+  const res = await helpers.fetchFn(kgUrl, { headers: { 'X-Goog-Api-Key': helpers.env.GOOGLE_KG_API_KEY } });
+  if (!res.ok) throw new Error(`Google KG error: ${res.status}`);
+  const data = await res.json();
+  const imageUrl = data.itemListElement && data.itemListElement[0] && data.itemListElement[0].result && data.itemListElement[0].result.image && data.itemListElement[0].result.image.contentUrl;
+  if (!imageUrl) return null;
+
+  const head = await helpers.fetchFn(imageUrl, { method: 'HEAD', redirect: 'follow' });
+  if (head.status === 403) throw new Error('KG image returned 403');
+  if (!head.ok || !(head.headers.get('content-type') || '').startsWith('image/')) throw new Error('KG image verification failed');
+  return imageUrl;
+}
+
+// ─── getInsiderPhoto ──────────────────────────────────────────────────────────
+
+/**
+ * Resolve an insider/executive photo URL with 3-tier cascade.
+ * Wikidata SPARQL → Google Knowledge Graph → UI Avatars fallback.
+ * Always returns a URL string.
+ * @param {string} fullName - e.g. "Jensen Huang"
+ * @param {string} title - e.g. "CEO"
+ * @param {object} helpers - { fetchFn, env, _sleep }
+ * @returns {Promise<string>}
+ */
+async function getInsiderPhoto(fullName, title, helpers) {
+  const tableId = helpers.env.NOCODB_PHOTOS_TABLE_ID;
+  const normalizedName = normalizeInsiderName(fullName);
+
+  // Step 1: Check cache
+  const cached = await _cacheGet(tableId, 'name_normalized', normalizedName, helpers);
+  if (cached) return cached.photo_url;
+
+  // Step 2: Wikidata
+  // S2: raw fullName (not normalizedName) passed to external APIs — honorifics/diacritics improve match accuracy
+  try {
+    const url = await _tryWikidata(fullName, helpers);
+    if (url) {
+      try {
+        await _cacheSet(tableId, 'name_normalized', normalizedName, {
+          name_normalized: normalizedName,
+          photo_url: url,
+          source: 'wikidata',
+          fetched_at: new Date().toISOString(),
+          ttl_seconds: TTL_SECONDS,
+        }, helpers);
+      } catch (err) {
+        console.warn(`[identity-assets] cache write failed for ${normalizedName}: ${err.message}`);
+      }
+      return url;
+    }
+  } catch (err) {
+    console.warn(`[identity-assets] Wikidata failed for "${fullName}": ${err.message}`);
+  }
+
+  // Step 3: Google Knowledge Graph
+  // S2: raw fullName used for matching accuracy (same reason as Wikidata above)
+  try {
+    const url = await _tryGoogleKG(fullName, title, helpers);
+    if (url) {
+      try {
+        await _cacheSet(tableId, 'name_normalized', normalizedName, {
+          name_normalized: normalizedName,
+          photo_url: url,
+          source: 'google_kg',
+          fetched_at: new Date().toISOString(),
+          ttl_seconds: TTL_SECONDS,
+        }, helpers);
+      } catch (err) {
+        console.warn(`[identity-assets] cache write failed for ${normalizedName}: ${err.message}`);
+      }
+      return url;
+    }
+  } catch (err) {
+    console.warn(`[identity-assets] Google KG failed for "${fullName}": ${err.message}`);
+  }
+
+  // Step 4: UI Avatars fallback
+  const nameParts = normalizedName.split(' ');
+  const firstName = nameParts[0] || 'U';
+  const lastName = nameParts[1] || 'I';
+  // S3: encode each name part separately; use literal '+' as space separator (not %2B)
+  const uiAvatarsUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(firstName)}+${encodeURIComponent(lastName)}&background=0A1128&color=fff&size=128&bold=true&rounded=true`;
+  try {
+    await _cacheSet(tableId, 'name_normalized', normalizedName, {
+      name_normalized: normalizedName,
+      photo_url: uiAvatarsUrl,
+      source: 'ui_avatars',
+      fetched_at: new Date().toISOString(),
+      ttl_seconds: TTL_SECONDS,
+    }, helpers);
+  } catch (err) {
+    console.warn(`[identity-assets] cache write failed for ${normalizedName}: ${err.message}`);
+  }
+  return uiAvatarsUrl;
+}
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
   getCompanyLogo,
   prefetchLogos,
-  // getInsiderPhoto added in Section 07
+  getInsiderPhoto,
+  normalizeInsiderName,
 };
