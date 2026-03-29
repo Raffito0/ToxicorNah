@@ -13,6 +13,8 @@ const {
   buildAnalysisPrompt,
   validateAnalysis,
   analyze,
+  getWordTarget,
+  runAnalyzeAlert,
 } = require('../../n8n/code/insiderbuying/analyze-alert');
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -300,5 +302,220 @@ describe('analyze-alert', () => {
   test('validateAnalysis rejects null/undefined', () => {
     expect(validateAnalysis(null)).toBe(false);
     expect(validateAnalysis(undefined)).toBe(false);
+  });
+});
+
+// ─── Structured Analysis (Section 05) ────────────────────────────────────────
+
+describe('Structured Analysis (Section 05)', () => {
+  const SAMPLE_ALERT_S05 = {
+    ticker: 'NVDA',
+    companyName: 'NVIDIA Corporation',
+    insiderName: 'Jensen Huang',
+    canonicalRole: 'Chief Executive Officer',
+    insiderCategory: 'C-Suite',
+    sharesTraded: 10000,
+    pricePerShare: 490.00,
+    transactionValue: 4900000,
+    transactionDate: '2026-03-15',
+    finalScore: 8,
+    direction: 'A',
+    sharesOwnedAfter: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // ── getWordTarget ──────────────────────────────────────────────────────────
+
+  describe('getWordTarget', () => {
+    test('score 9 → { target: 225, max: 300 }', () => {
+      expect(getWordTarget(9)).toEqual({ target: 225, max: 300 });
+    });
+
+    test('score 8 → { target: 225, max: 300 } (lower boundary)', () => {
+      expect(getWordTarget(8)).toEqual({ target: 225, max: 300 });
+    });
+
+    test('score 7 → { target: 200, max: 275 }', () => {
+      expect(getWordTarget(7)).toEqual({ target: 200, max: 275 });
+    });
+
+    test('score 6 → { target: 200, max: 275 } (lower boundary)', () => {
+      expect(getWordTarget(6)).toEqual({ target: 200, max: 275 });
+    });
+
+    test('score 5 → { target: 125, max: 175 }', () => {
+      expect(getWordTarget(5)).toEqual({ target: 125, max: 175 });
+    });
+
+    test('score 4 → { target: 125, max: 175 } (lower boundary)', () => {
+      expect(getWordTarget(4)).toEqual({ target: 125, max: 175 });
+    });
+
+    test('score 2 → { target: 100, max: 150 }', () => {
+      expect(getWordTarget(2)).toEqual({ target: 100, max: 150 });
+    });
+
+    test('undefined score → default { target: 100, max: 150 }', () => {
+      expect(getWordTarget(undefined)).toEqual({ target: 100, max: 150 });
+    });
+
+    test('null score → default { target: 100, max: 150 }', () => {
+      expect(getWordTarget(null)).toEqual({ target: 100, max: 150 });
+    });
+  });
+
+  // ── direction-aware prompt ─────────────────────────────────────────────────
+
+  describe('direction-aware prompt', () => {
+    test('direction A → prompt contains BUY label and "bought" verb', () => {
+      const alert = { ...SAMPLE_ALERT_S05, direction: 'A' };
+      const prompt = buildAnalysisPrompt(alert, {}, getWordTarget(8));
+      expect(prompt).toContain('BUY');
+      expect(prompt).toContain('bought');
+    });
+
+    test('direction A → prompt does not contain sell ambiguity framing', () => {
+      const alert = { ...SAMPLE_ALERT_S05, direction: 'A' };
+      const prompt = buildAnalysisPrompt(alert, {}, getWordTarget(8));
+      expect(prompt).not.toContain('tax plan or bearish signal');
+    });
+
+    test('missing direction field defaults to BUY framing', () => {
+      const { direction: _omitted, ...alertNoDir } = SAMPLE_ALERT_S05;
+      const prompt = buildAnalysisPrompt(alertNoDir, {}, getWordTarget(8));
+      expect(prompt).toContain('BUY');
+      expect(prompt).toContain('bought');
+    });
+
+    test('direction D → prompt contains SELL label and "sold" verb', () => {
+      const alert = { ...SAMPLE_ALERT_S05, direction: 'D' };
+      const prompt = buildAnalysisPrompt(alert, {}, getWordTarget(8));
+      expect(prompt).toContain('SELL');
+      expect(prompt).toContain('sold');
+    });
+
+    test('direction D → sell prompt includes "tax plan or bearish signal"', () => {
+      const alert = { ...SAMPLE_ALERT_S05, direction: 'D' };
+      const prompt = buildAnalysisPrompt(alert, {}, getWordTarget(8));
+      expect(prompt).toContain('tax plan or bearish signal');
+    });
+
+    test('direction D → prompt does not contain buy conviction framing', () => {
+      const alert = { ...SAMPLE_ALERT_S05, direction: 'D' };
+      const prompt = buildAnalysisPrompt(alert, {}, getWordTarget(8));
+      expect(prompt).not.toContain('conviction behind this buy');
+    });
+  });
+
+  // ── data injection ─────────────────────────────────────────────────────────
+
+  describe('data injection', () => {
+    test('current price injected into prompt when Finnhub quote is available', () => {
+      const marketData = { currentPrice: 52.30, pctChangeToday: 3.1 };
+      const prompt = buildAnalysisPrompt(SAMPLE_ALERT_S05, marketData);
+      expect(prompt).toContain('52.3');
+      expect(prompt).toContain('3.1');
+    });
+
+    test('price fields omitted from prompt when currentPrice is null', () => {
+      const marketData = { currentPrice: null, pctChangeToday: null };
+      const prompt = buildAnalysisPrompt(SAMPLE_ALERT_S05, marketData);
+      expect(prompt).not.toContain('Current price');
+    });
+
+    test('portfolio pct injected when portfolioPct is provided', () => {
+      const marketData = { portfolioPct: 12.4 };
+      const prompt = buildAnalysisPrompt(SAMPLE_ALERT_S05, marketData);
+      expect(prompt).toContain('12.4');
+      expect(prompt).toContain('current holdings');
+    });
+
+    test('portfolio pct omitted when portfolioPct is null', () => {
+      const marketData = { portfolioPct: null };
+      const prompt = buildAnalysisPrompt(SAMPLE_ALERT_S05, marketData);
+      expect(prompt).not.toContain('current holdings');
+    });
+
+    test('"Earnings in X days" present when daysToEarnings is within range', () => {
+      const marketData = { daysToEarnings: 42 };
+      const prompt = buildAnalysisPrompt(SAMPLE_ALERT_S05, marketData);
+      expect(prompt).toContain('42');
+      expect(prompt).toContain('Earnings in');
+    });
+
+    test('earnings sentence omitted when daysToEarnings is null', () => {
+      const marketData = { daysToEarnings: null };
+      const prompt = buildAnalysisPrompt(SAMPLE_ALERT_S05, marketData);
+      expect(prompt).not.toContain('Earnings in');
+    });
+  });
+
+  // ── runAnalyzeAlert integration ────────────────────────────────────────────
+
+  describe('runAnalyzeAlert', () => {
+    test('returns null when finalScore < 4', async () => {
+      const alert = { ...SAMPLE_ALERT_S05, finalScore: 3 };
+      const result = await runAnalyzeAlert(alert, {
+        fetchFn: jest.fn(),
+        sleep: () => Promise.resolve(),
+        env: {},
+      });
+      expect(result).toBeNull();
+    });
+
+    test('returns object with required keys when score >= 4', async () => {
+      const mockClient = makeMockClient(GOOD_ANALYSIS);
+      createDeepSeekClient.mockReturnValue(mockClient);
+      const alert = { ...SAMPLE_ALERT_S05, finalScore: 7 };
+      const result = await runAnalyzeAlert(alert, {
+        fetchFn: jest.fn(),
+        sleep: () => Promise.resolve(),
+        env: { DEEPSEEK_API_KEY: 'test-key' },
+      });
+      expect(result).not.toBeNull();
+      expect(result).toHaveProperty('analysisText');
+      expect(result).toHaveProperty('wordTarget');
+      expect(result).toHaveProperty('percentageDataAvailable');
+      expect(result).toHaveProperty('attemptCount');
+    });
+
+    test('percentageDataAvailable is false when Finnhub data and sharesOwnedAfter are absent', async () => {
+      const mockClient = makeMockClient(GOOD_ANALYSIS);
+      createDeepSeekClient.mockReturnValue(mockClient);
+      const alert = { ...SAMPLE_ALERT_S05, finalScore: 7, sharesOwnedAfter: null };
+      const result = await runAnalyzeAlert(alert, {
+        fetchFn: jest.fn(),
+        sleep: () => Promise.resolve(),
+        env: { DEEPSEEK_API_KEY: 'test-key' },
+      });
+      expect(result.percentageDataAvailable).toBe(false);
+    });
+
+    test('percentageDataAvailable is true when sharesOwnedAfter is provided', async () => {
+      const mockClient = makeMockClient(GOOD_ANALYSIS);
+      createDeepSeekClient.mockReturnValue(mockClient);
+      const alert = { ...SAMPLE_ALERT_S05, finalScore: 7, sharesOwnedAfter: 200000 };
+      const result = await runAnalyzeAlert(alert, {
+        fetchFn: jest.fn(),
+        sleep: () => Promise.resolve(),
+        env: { DEEPSEEK_API_KEY: 'test-key' },
+      });
+      expect(result.percentageDataAvailable).toBe(true);
+    });
+
+    test('DeepSeek error returns null without throwing', async () => {
+      const mockClient = makeMockClient(null, new Error('DeepSeek timeout'));
+      createDeepSeekClient.mockReturnValue(mockClient);
+      const alert = { ...SAMPLE_ALERT_S05, finalScore: 7 };
+      const result = await runAnalyzeAlert(alert, {
+        fetchFn: jest.fn(),
+        sleep: () => Promise.resolve(),
+        env: { DEEPSEEK_API_KEY: 'test-key' },
+      });
+      expect(result).toBeNull();
+    });
   });
 });
