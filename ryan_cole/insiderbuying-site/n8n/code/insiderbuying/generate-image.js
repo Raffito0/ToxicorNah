@@ -238,65 +238,28 @@ async function uploadToR2(key, imageBuffer, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// fal.ai Flux — Hero Image
+// Template 13 (visual-templates.js) — Hero Image
 // ---------------------------------------------------------------------------
 
-async function generateHeroImage(prompt, opts = {}) {
-  const { fetchFn, falKey } = opts;
-  if (!fetchFn || !falKey) return null;
+async function generateHeroImage(article, opts) {
+  opts = opts || {};
+  const templates = opts.templates;
 
-  try {
-    // fal.ai queue API: submit -> poll -> get result
-    const submitRes = await fetchFn('https://queue.fal.run/fal-ai/flux/dev', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Key ${falKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        prompt,
-        image_size: { width: 1200, height: 630 },
-        num_images: 1,
-      }),
-    });
-
-    if (!submitRes.ok) return null;
-    const submitData = await submitRes.json();
-
-    // Direct result (sync mode)
-    if (submitData?.images?.[0]?.url) {
-      return { url: submitData.images[0].url, binary: null };
-    }
-
-    // Async mode: poll request_id
-    const requestId = submitData?.request_id;
-    if (!requestId) return null;
-
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const pollRes = await fetchFn(`https://queue.fal.run/fal-ai/flux/dev/requests/${requestId}/status`, {
-        headers: { 'Authorization': `Key ${falKey}` },
-      });
-      if (!pollRes.ok) continue;
-      const pollData = await pollRes.json();
-
-      if (pollData?.status === 'COMPLETED') {
-        // Fetch result
-        const resultRes = await fetchFn(`https://queue.fal.run/fal-ai/flux/dev/requests/${requestId}`, {
-          headers: { 'Authorization': `Key ${falKey}` },
-        });
-        if (!resultRes.ok) return null;
-        const resultData = await resultRes.json();
-        const url = resultData?.images?.[0]?.url;
-        return url ? { url, binary: null } : null;
-      }
-      if (pollData?.status === 'FAILED') return null;
-    }
-
-    return null; // timeout
-  } catch {
-    return null;
+  if (!templates || typeof templates.renderTemplate !== 'function') {
+    throw new Error('visual-templates.js renderTemplate not found');
   }
+
+  const data = {
+    headline: article.headline,
+    ticker: article.ticker,
+    verdict: article.verdict,
+    insiderName: article.insiderName,
+    date: article.date,
+  };
+
+  const buffer = await templates.renderTemplate(13, data, {}, { fetchFn: opts.fetchFn, env: opts.env });
+  const r2Key = 'hero-' + article.slug + '.png';
+  return uploadToR2(r2Key, buffer, opts);
 }
 
 // ---------------------------------------------------------------------------
@@ -361,30 +324,24 @@ async function generateImages(input, helpers) {
   let heroUrl = null;
   let ogUrl = null;
 
-  // Step 2: Generate hero image
-  const heroPrompt = buildHeroPrompt({
-    ticker: article.ticker,
-    company_name: article.company_name,
-    verdict_type: article.verdict_type,
-  });
+  // Step 2: Generate hero image via Template 13 (visual-templates.js)
+  let visualTemplates;
+  try { visualTemplates = require('./visual-templates'); } catch (e) { /* guard below handles null */ }
 
-  const heroResult = await generateHeroImage(heroPrompt, {
-    fetchFn,
-    falKey: env.FAL_KEY,
-  });
-
-  if (heroResult?.url) {
-    // Download and upload to R2
-    try {
-      const imgRes = await fetchFn(heroResult.url);
-      if (imgRes.ok) {
-        const buffer = Buffer.from(await imgRes.arrayBuffer());
-        const heroKey = buildR2Key(article.slug, 'hero');
-        heroUrl = await uploadToR2(heroKey, buffer, { fetchFn, env });
-      }
-    } catch {
-      // fallback below
-    }
+  try {
+    heroUrl = await generateHeroImage(
+      {
+        slug: article.slug,
+        headline: article.title_text || article.title || '',
+        ticker: article.ticker || '',
+        verdict: article.verdict_type || '',
+        insiderName: article.insider_name || '',
+        date: article.publish_date || '',
+      },
+      { templates: visualTemplates, fetchFn, env }
+    );
+  } catch (e) {
+    heroUrl = null;
   }
 
   // Fallback to generic verdict hero
@@ -434,7 +391,7 @@ async function generateImages(input, helpers) {
         article_id,
         image_type: 'hero',
         r2_url: heroUrl,
-        prompt_used: heroPrompt,
+        prompt_used: null,
       }),
     });
   }

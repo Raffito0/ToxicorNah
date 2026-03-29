@@ -524,18 +524,24 @@ function t12SectorHeatmap(data) {
 }
 
 // ─── T13 — Article Hero (1200×630) ───────────────────────────────────────────
+// Fields: headline, ticker, verdict, insiderName, date
 
 function t13ArticleHero(data) {
+  const verdictKey = normalizeVerdict(data.verdict);
+  const verdictInfo = VERDICTS[verdictKey] || { color: COLORS.blue, label: data.verdict || '' };
+
   const inner = `
 <div style="width:100%;height:100%;padding:64px 72px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(135deg,#0A1128 0%,#1A2238 100%);">
   <div>
-    <span style="display:inline-block;padding:4px 14px;border-radius:20px;border:1px solid ${COLORS.blue};color:${COLORS.blue};font-size:12px;font-weight:700;letter-spacing:1px;margin-bottom:24px;">${escapeHtml(data.category ?? '')}</span>
-    <div style="font-size:48px;font-weight:800;color:${COLORS.textPrimary};line-height:1.15;max-width:900px;">${escapeHtml(data.title ?? '')}</div>
-    ${data.subtitle ? `<div style="font-size:20px;color:${COLORS.textSecondary};margin-top:16px;">${escapeHtml(data.subtitle)}</div>` : ''}
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;">
+      <span style="display:inline-block;padding:4px 14px;border-radius:20px;border:1px solid ${verdictInfo.color};color:${verdictInfo.color};font-size:12px;font-weight:700;letter-spacing:1px;">${escapeHtml(data.ticker ?? '')}</span>
+      <span style="display:inline-block;padding:4px 14px;border-radius:20px;background:${verdictInfo.color}22;border:1px solid ${verdictInfo.color};color:${verdictInfo.color};font-size:12px;font-weight:700;letter-spacing:1px;">${escapeHtml(verdictInfo.label)}</span>
+    </div>
+    <div style="font-size:48px;font-weight:800;color:${COLORS.textPrimary};line-height:1.15;max-width:900px;">${escapeHtml(data.headline ?? '')}</div>
   </div>
   <div style="display:flex;justify-content:space-between;align-items:center;">
-    <div style="font-size:14px;color:${COLORS.textSecondary};">${escapeHtml(data.date ?? '')}</div>
-    ${data.authorName ? `<div style="font-size:13px;color:${COLORS.textSecondary};">${escapeHtml(data.authorName)}</div>` : ''}
+    <div style="font-size:14px;color:${COLORS.textSecondary};">${escapeHtml(data.insiderName ?? '')} &middot; ${escapeHtml(data.date ?? '')}</div>
+    <div style="font-size:12px;font-weight:700;color:${verdictInfo.color};letter-spacing:1px;">EARLYINSIDER.COM</div>
   </div>
 </div>`;
 

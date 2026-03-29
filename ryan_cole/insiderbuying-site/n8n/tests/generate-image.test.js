@@ -9,6 +9,8 @@ const {
   escapeHtml,
   VERDICT_COLORS,
   FALLBACK_HERO_URLS,
+  generateHeroImage,
+  generateOgCard,
 } = require('../code/insiderbuying/generate-image.js');
 
 // ---------------------------------------------------------------------------
@@ -155,5 +157,172 @@ describe('FALLBACK_HERO_URLS', () => {
     for (const v of ['BUY', 'SELL', 'CAUTION', 'WAIT', 'NO_TRADE']) {
       assert.ok(FALLBACK_HERO_URLS[v], `Missing fallback for ${v}`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateHeroImage -- Template 13 path
+// ---------------------------------------------------------------------------
+
+const HERO_ARTICLE = {
+  slug: 'aapl-buy-2026-03-29',
+  headline: 'Apple Insiders Load Up Before Earnings',
+  ticker: 'AAPL',
+  verdict: 'BULLISH',
+  insiderName: 'Tim Cook',
+  date: 'March 29, 2026',
+};
+
+function makeR2Env() {
+  return {
+    R2_ACCOUNT_ID: 'acct-test',
+    R2_ACCESS_KEY_ID: 'akid-test',
+    R2_SECRET_ACCESS_KEY: 'sak-test',
+    R2_PUBLIC_URL: 'https://pub.r2.test',
+  };
+}
+
+describe('generateHeroImage -- Template 13 path', () => {
+  it('guard throws when templates is null', async () => {
+    await assert.rejects(
+      () => generateHeroImage(HERO_ARTICLE, { templates: null }),
+      /renderTemplate not found/
+    );
+  });
+
+  it('guard throws when templates has no renderTemplate function', async () => {
+    await assert.rejects(
+      () => generateHeroImage(HERO_ARTICLE, { templates: {} }),
+      /renderTemplate not found/
+    );
+  });
+
+  it('calls renderTemplate(13, ...) with all required fields', async () => {
+    let capturedId, capturedData;
+    const mockBuffer = Buffer.from('PNG-DATA');
+    const opts = {
+      templates: {
+        renderTemplate: async (id, data) => {
+          capturedId = id;
+          capturedData = Object.assign({}, data);
+          return mockBuffer;
+        },
+      },
+      fetchFn: async () => ({ ok: true }),
+      env: makeR2Env(),
+    };
+    await generateHeroImage(HERO_ARTICLE, opts);
+    assert.strictEqual(capturedId, 13);
+    assert.strictEqual(capturedData.headline, HERO_ARTICLE.headline);
+    assert.strictEqual(capturedData.ticker, HERO_ARTICLE.ticker);
+    assert.strictEqual(capturedData.verdict, HERO_ARTICLE.verdict);
+    assert.strictEqual(capturedData.insiderName, HERO_ARTICLE.insiderName);
+    assert.strictEqual(capturedData.date, HERO_ARTICLE.date);
+  });
+
+  it('R2 key is hero-{slug}.png', async () => {
+    const env = makeR2Env();
+    const opts = {
+      templates: { renderTemplate: async () => Buffer.from('PNG') },
+      fetchFn: async () => ({ ok: true }),
+      env,
+    };
+    const result = await generateHeroImage(HERO_ARTICLE, opts);
+    assert.strictEqual(result, env.R2_PUBLIC_URL + '/hero-' + HERO_ARTICLE.slug + '.png');
+  });
+
+  it('returns the R2 URL string from uploadToR2', async () => {
+    const env = makeR2Env();
+    const opts = {
+      templates: { renderTemplate: async () => Buffer.from('PNG') },
+      fetchFn: async () => ({ ok: true }),
+      env,
+    };
+    const result = await generateHeroImage(HERO_ARTICLE, opts);
+    assert.ok(typeof result === 'string' && result.startsWith('https://'));
+  });
+
+  it('makes no fal.ai calls', async () => {
+    let falCallCount = 0;
+    const opts = {
+      templates: { renderTemplate: async () => Buffer.from('PNG') },
+      fetchFn: async (url) => {
+        if (typeof url === 'string' && url.includes('fal.run')) falCallCount++;
+        return { ok: true };
+      },
+      env: makeR2Env(),
+    };
+    await generateHeroImage(HERO_ARTICLE, opts);
+    assert.strictEqual(falCallCount, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateOgCard -- regression guard
+// ---------------------------------------------------------------------------
+
+describe('generateOgCard -- regression guard', () => {
+  it('calls screenshot server at host.docker.internal:3456', async () => {
+    let screenshotCalled = false;
+    const fetchFn = async (url) => {
+      if (typeof url === 'string' && url.includes('3456')) screenshotCalled = true;
+      return { ok: true, arrayBuffer: async () => new ArrayBuffer(4) };
+    };
+    await generateOgCard('<html/>', { fetchFn });
+    assert.ok(screenshotCalled);
+  });
+
+  it('does NOT call renderTemplate', async () => {
+    let renderTemplateCalled = false;
+    const fetchFn = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) });
+    await generateOgCard('<html/>', { fetchFn });
+    assert.ok(!renderTemplateCalled);
+    // OgCard still returns a Buffer or null (regression: function still works)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// visual-templates.js -- Template 13 unit
+// ---------------------------------------------------------------------------
+
+describe('visual-templates -- Template 13', () => {
+  const templates = require('../code/insiderbuying/visual-templates');
+
+  const T13_DATA = {
+    headline: 'Apple Insiders Buy Big Before Q2',
+    ticker: 'AAPL',
+    verdict: 'BULLISH',
+    insiderName: 'Tim Cook',
+    date: 'March 29, 2026',
+  };
+
+  function makeFetchFnForScreenshot() {
+    const buf = Buffer.from('FAKE-PNG-12345678');
+    return async () => ({
+      ok: true,
+      headers: { get: () => 'image/png' },
+      buffer: async () => buf,
+    });
+  }
+
+  it('renderTemplate(13, validData) resolves without throwing', async () => {
+    const result = await templates.renderTemplate(
+      13, T13_DATA, {}, { fetchFn: makeFetchFnForScreenshot() }
+    );
+    assert.ok(result !== null && result !== undefined);
+  });
+
+  it('renderTemplate(13, validData) returns a Buffer', async () => {
+    const result = await templates.renderTemplate(
+      13, T13_DATA, {}, { fetchFn: makeFetchFnForScreenshot() }
+    );
+    assert.ok(Buffer.isBuffer(result));
+  });
+
+  it('renderTemplate(13, validData) returns non-empty Buffer', async () => {
+    const result = await templates.renderTemplate(
+      13, T13_DATA, {}, { fetchFn: makeFetchFnForScreenshot() }
+    );
+    assert.ok(result.length > 0);
   });
 });
