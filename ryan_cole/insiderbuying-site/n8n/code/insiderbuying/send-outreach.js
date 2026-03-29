@@ -47,6 +47,10 @@ function selectProspects(prospects, limit) {
  * @returns {{ prompt: string, maxTokens: number }}
  */
 function buildEmailPrompt(prospect, ourArticle) {
+  // GAP 12.14: only extract title and summary — never forward url to the LLM
+  var articleTitle = ourArticle ? ourArticle.title : '';
+  var articleSummary = ourArticle ? ourArticle.summary : '';
+
   var prompt =
     'Write a cold outreach email to ' +
     (prospect.contact_name || 'the editor') +
@@ -57,12 +61,10 @@ function buildEmailPrompt(prospect, ourArticle) {
     (prospect.notes || 'Finance/investing blog') +
     '\n\n' +
     'We published: "' +
-    ourArticle.title +
-    '" (' +
-    ourArticle.url +
-    ')\n' +
+    articleTitle +
+    '"\n' +
     'Summary: ' +
-    ourArticle.summary +
+    articleSummary +
     '\n\n' +
     'Rules:\n' +
     '- MAX 150 words total\n' +
