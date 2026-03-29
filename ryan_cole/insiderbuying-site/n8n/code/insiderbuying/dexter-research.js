@@ -237,6 +237,126 @@ async function getInsiderTransactions(ticker, apiKey, fetchFn, nocoClient, cache
 }
 
 // ---------------------------------------------------------------------------
+// Alpha Vantage — Earnings Calendar (Section 5)
+// ---------------------------------------------------------------------------
+
+const AV_BASE = 'https://www.alphavantage.co';
+const CACHE_TTL_EARNINGS_MS = 24 * 60 * 60 * 1000; // 1 day
+
+/**
+ * Split a CSV line while respecting double-quoted fields (handles commas inside quotes).
+ * @param {string} line
+ * @returns {string[]}
+ */
+function splitCsvLine(line) {
+  return line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+}
+
+/**
+ * Strip surrounding double-quotes from a CSV field value.
+ */
+function stripQuotes(s) {
+  return (s || '').replace(/^"|"$/g, '');
+}
+
+/**
+ * Fetch the Alpha Vantage 3-month earnings calendar CSV, cache in NocoDB
+ * under ticker='__all__' / data_type='earnings_calendar'.
+ *
+ * @param {string} apiKey
+ * @param {Object} nocoClient  — NocoDB client (search/create/update)
+ * @param {Function} [fetchFn] — optional override for testing
+ * @returns {Promise<Map<string, {reportDate, fiscalDateEnding, estimate}>>}
+ */
+async function getEarningsCalendar(apiKey, nocoClient, fetchFn) {
+  // 1. Check cache
+  try {
+    const cached = await readCache('__all__', 'earnings_calendar', nocoClient);
+    if (cached !== null) {
+      // cached.data_json is a JSON string of Map entries array
+      const entries = typeof cached === 'string' ? JSON.parse(cached) : Object.entries(cached);
+      return new Map(Array.isArray(cached) ? cached : entries);
+    }
+  } catch (_) {
+    // Cache read failure: fall through to API
+  }
+
+  // 2. Fetch from Alpha Vantage
+  try {
+    const url = `${AV_BASE}/query?function=EARNINGS_CALENDAR&horizon=3month&apikey=${encodeURIComponent(apiKey)}`;
+    const doFetch = fetchFn || (async (u) => {
+      // For production: raw text (CSV), not JSON
+      return new Promise((resolve, reject) => {
+        const parsed = new URL(u);
+        const opts = {
+          hostname: parsed.hostname,
+          path: parsed.pathname + parsed.search,
+          method: 'GET',
+          headers: {
+            'User-Agent': 'EarlyInsider/1.0 (contact@earlyinsider.com)',
+            'Accept': 'text/csv,text/plain,*/*',
+          },
+        };
+        const req = https.request(opts, (res) => {
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () => resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+          res.on('error', reject);
+        });
+        req.setTimeout(15000, () => req.destroy());
+        req.on('error', reject);
+        req.end();
+      });
+    });
+
+    const res = await doFetch(url);
+    if (res.statusCode !== 200 || typeof res.body !== 'string') return new Map();
+
+    // 3. Parse CSV
+    const lines = res.body.split('\n').filter((l) => l.trim());
+    if (lines.length < 2) return new Map();
+
+    const calendar = new Map();
+    // Skip header row (index 0)
+    for (let i = 1; i < lines.length; i++) {
+      const cols = splitCsvLine(lines[i]);
+      if (cols.length < 4) continue;
+      const symbol = stripQuotes(cols[0]).trim();
+      const reportDate = stripQuotes(cols[2]).trim();
+      const fiscalDateEnding = stripQuotes(cols[3]).trim();
+      const estimateRaw = stripQuotes(cols[4] || '').trim();
+      const estimate = estimateRaw === '' ? null : estimateRaw;
+      if (symbol) calendar.set(symbol, { reportDate, fiscalDateEnding, estimate });
+    }
+
+    // 4. Write to cache — serialize Map as JSON array of entries
+    const dataJson = JSON.stringify([...calendar.entries()]);
+    const expiry = Date.now() + CACHE_TTL_EARNINGS_MS;
+    const existing = await nocoClient.search(`(ticker,eq,__all__),(data_type,eq,earnings_calendar)`).catch(() => []);
+    if (existing && existing.length > 0) {
+      await nocoClient.update(existing[0].Id, { data_json: dataJson, expires_at: expiry });
+    } else {
+      await nocoClient.create({ ticker: '__all__', data_type: 'earnings_calendar', data_json: dataJson, expires_at: expiry });
+    }
+
+    return calendar;
+  } catch (_) {
+    return new Map();
+  }
+}
+
+/**
+ * Pure function — look up next earnings report date for a ticker.
+ * @param {string} ticker
+ * @param {Map|null|undefined} calendarMap
+ * @returns {string|null}
+ */
+function getNextEarningsDate(ticker, calendarMap) {
+  if (!calendarMap) return null;
+  return calendarMap.get(ticker)?.reportDate ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // Constants (Section 4)
 // ---------------------------------------------------------------------------
 
@@ -693,6 +813,10 @@ module.exports = {
   getBasicFinancials,
   getInsiderTransactions,
   _computeFinnhubCompleteness,
+
+  // Section 05 — Alpha Vantage earnings calendar
+  getEarningsCalendar,
+  getNextEarningsDate,
 
   // Constants
   DATA_TYPES,

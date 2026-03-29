@@ -25,6 +25,9 @@ const {
   getProfile,
   getBasicFinancials,
   getInsiderTransactions,
+  // Section 5 new exports
+  getEarningsCalendar,
+  getNextEarningsDate,
 } = dexterModule;
 
 // ---------------------------------------------------------------------------
@@ -782,3 +785,109 @@ function generateLinearPrices(days, startPrice, endPrice) {
   }
   return prices;
 }
+
+// ===========================================================================
+// Section 5: Alpha Vantage Earnings Calendar
+// ===========================================================================
+
+describe('alphaVantage.getEarningsCalendar', () => {
+  it('parses standard CSV with no commas in company names', async () => {
+    const csv = [
+      'symbol,name,reportDate,fiscalDateEnding,estimate,currency',
+      'AAPL,Apple Inc,2025-04-30,2025-03-31,1.65,USD',
+      'MSFT,Microsoft Corp,2025-04-25,2025-03-31,3.12,USD',
+    ].join('\n');
+    const mockFetch = async () => ({ statusCode: 200, body: csv });
+    const mockNoco = { search: async () => [], create: async () => ({ Id: 1 }), update: async () => ({}) };
+
+    const result = await getEarningsCalendar('test-key', mockNoco, mockFetch);
+    assert.ok(result instanceof Map);
+    assert.equal(result.get('AAPL').reportDate, '2025-04-30');
+    assert.equal(result.get('MSFT').reportDate, '2025-04-25');
+    assert.equal(result.get('MSFT').estimate, '3.12');
+  });
+
+  it('parses CSV with quoted company name containing a comma', async () => {
+    const csv = [
+      'symbol,name,reportDate,fiscalDateEnding,estimate,currency',
+      '"AAPL","Apple, Inc.",2025-04-30,2025-03-31,1.65,USD',
+    ].join('\n');
+    const mockFetch = async () => ({ statusCode: 200, body: csv });
+    const mockNoco = { search: async () => [], create: async () => ({ Id: 1 }), update: async () => ({}) };
+
+    const result = await getEarningsCalendar('test-key', mockNoco, mockFetch);
+    assert.equal(result.get('AAPL').reportDate, '2025-04-30');
+  });
+
+  it('stores null for empty estimate field', async () => {
+    const csv = [
+      'symbol,name,reportDate,fiscalDateEnding,estimate,currency',
+      'XYZ,Some Co,2025-05-01,2025-03-31,,USD',
+    ].join('\n');
+    const mockFetch = async () => ({ statusCode: 200, body: csv });
+    const mockNoco = { search: async () => [], create: async () => ({ Id: 1 }), update: async () => ({}) };
+
+    const result = await getEarningsCalendar('test-key', mockNoco, mockFetch);
+    assert.equal(result.get('XYZ').estimate, null);
+  });
+
+  it('returns cached Map on NocoDB hit — fetchFn NOT called', async () => {
+    const cachedMap = new Map([['AAPL', { reportDate: '2025-04-30', fiscalDateEnding: '2025-03-31', estimate: '1.65' }]]);
+    const cachedJson = JSON.stringify([...cachedMap.entries()]);
+    const mockNoco = {
+      search: async () => [{ Id: 1, expires_at: Date.now() + 86400000, data_json: cachedJson }],
+      create: async () => {},
+      update: async () => {},
+    };
+    let fetchCalled = false;
+    const mockFetch = async () => { fetchCalled = true; return { statusCode: 200, body: '' }; };
+
+    const result = await getEarningsCalendar('test-key', mockNoco, mockFetch);
+    assert.ok(!fetchCalled, 'fetchFn should NOT be called on cache hit');
+    assert.equal(result.get('AAPL').reportDate, '2025-04-30');
+  });
+
+  it('calls Alpha Vantage on cache miss and writes to NocoDB under __all__', async () => {
+    const csv = [
+      'symbol,name,reportDate,fiscalDateEnding,estimate,currency',
+      'TSLA,Tesla Inc,2025-05-07,2025-03-31,0.52,USD',
+    ].join('\n');
+    let writeTicker = null;
+    const mockNoco = {
+      search: async () => [],
+      create: async (rec) => { writeTicker = rec.ticker; return { Id: 1 }; },
+      update: async () => {},
+    };
+    const mockFetch = async () => ({ statusCode: 200, body: csv });
+
+    const result = await getEarningsCalendar('test-key', mockNoco, mockFetch);
+    assert.equal(writeTicker, '__all__', 'NocoDB create should use ticker="__all__"');
+    assert.equal(result.get('TSLA').reportDate, '2025-05-07');
+  });
+
+  it('returns empty Map on fetch failure — does not throw', async () => {
+    const mockNoco = { search: async () => [], create: async () => {}, update: async () => {} };
+    const mockFetch = async () => { throw new Error('Network error'); };
+
+    const result = await getEarningsCalendar('test-key', mockNoco, mockFetch);
+    assert.ok(result instanceof Map);
+    assert.equal(result.size, 0);
+  });
+});
+
+describe('getNextEarningsDate', () => {
+  it('returns reportDate for known ticker', () => {
+    const cal = new Map([['AAPL', { reportDate: '2025-04-30', fiscalDateEnding: '2025-03-31', estimate: '1.65' }]]);
+    assert.equal(getNextEarningsDate('AAPL', cal), '2025-04-30');
+  });
+
+  it('returns null for unknown ticker', () => {
+    const cal = new Map([['AAPL', { reportDate: '2025-04-30' }]]);
+    assert.equal(getNextEarningsDate('MSFT', cal), null);
+  });
+
+  it('returns null without throw for null or undefined calendarMap', () => {
+    assert.equal(getNextEarningsDate('AAPL', null), null);
+    assert.equal(getNextEarningsDate('AAPL', undefined), null);
+  });
+});

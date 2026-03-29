@@ -12,6 +12,7 @@ const {
   detectCluster,
   readMonitorState,
   writeMonitorState,
+  runSecMonitor,
 } = require('../../n8n/code/insiderbuying/sec-monitor');
 
 const { NocoDB } = require('../../n8n/code/insiderbuying/nocodb-client');
@@ -703,5 +704,194 @@ describe('section-03: sec-monitor.js', () => {
       expect(filingA.cluster_id).toBe(result.clusterId);
       expect(filingA.is_cluster_buy).toBe(true);
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Section 5: runSecMonitor — new edgar-parser pipeline
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PIPELINE_ENV = {
+  NOCODB_API_TOKEN: 'test-token',
+  NOCODB_BASE_URL: 'http://localhost:8080',
+  NOCODB_PROJECT_ID: 'proj123',
+  SUPABASE_URL: 'https://test.supabase.co',
+  SUPABASE_SERVICE_ROLE_KEY: 'sb-key',
+};
+
+function makePipelineNocoDB(overrides = {}) {
+  return {
+    list: jest.fn().mockResolvedValue({ list: [], pageInfo: { isLastPage: true } }),
+    create: jest.fn().mockResolvedValue({ Id: 1 }),
+    update: jest.fn().mockResolvedValue({}),
+    ...overrides,
+  };
+}
+
+// fetchFn that returns empty Supabase results (no prior cluster buys)
+const emptySupabaseFetch = jest.fn().mockResolvedValue({
+  ok: true,
+  json: async () => [],
+});
+
+function makeFilings(n) {
+  return Array.from({ length: n }, (_, i) => ({
+    accessionNumber: `0000320193-25-0000${i + 1}`,
+    filedAt: new Date(Date.now() - i * 1000).toISOString(),
+    issuerName: 'APPLE INC',
+    issuerCik: '0000320193',
+    ticker: 'AAPL',
+  }));
+}
+
+const PARSED_STANDARD_BUY = {
+  isAmendment: false,
+  issuer: { cik: '0000320193', name: 'APPLE INC', ticker: 'AAPL' },
+  reportingOwner: { ownerName: 'John Smith', isDirector: false, isOfficer: true, officerTitle: 'CEO' },
+  nonDerivativeTransactions: [
+    { transactionCode: 'P', transactionShares: '1000', transactionPricePerShare: '175.00', transactionDate: '2025-04-15' },
+  ],
+  derivativeTransactions: [],
+};
+
+describe('section-05: runSecMonitor — new edgar-parser pipeline', () => {
+  test('2-filing run: filing 1 valid buy, filing 2 null XML → 1 result, failureCount 1', async () => {
+    const filings = makeFilings(2);
+    const ep = {
+      fetchRecentFilings: jest.fn().mockResolvedValue(filings),
+      deduplicateFilings: jest.fn().mockReturnValue(filings),
+      fetchForm4Xml: jest.fn()
+        .mockResolvedValueOnce('<xml>valid</xml>')
+        .mockResolvedValueOnce(null),
+      parseForm4Xml: jest.fn().mockReturnValue(PARSED_STANDARD_BUY),
+      filterScorable: jest.fn().mockImplementation((txs) => txs.filter((t) => t.transactionCode === 'P')),
+      classifyInsiderRole: jest.fn().mockReturnValue('C-Suite'),
+    };
+
+    const nocodb = makePipelineNocoDB();
+    const results = await runSecMonitor(
+      { monitorStateName: 'market' },
+      { env: PIPELINE_ENV, nocodb, fetchFn: emptySupabaseFetch, _edgarParser: ep },
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0].ticker).toBe('AAPL');
+    expect(ep.fetchForm4Xml).toHaveBeenCalledTimes(2);
+    // Second filing returned null — parseForm4Xml should only be called once
+    expect(ep.parseForm4Xml).toHaveBeenCalledTimes(1);
+  });
+
+  test('amendment 4/A filing skipped — 0 results, no failureCount increment', async () => {
+    const filings = makeFilings(1);
+    const amendedParsed = { ...PARSED_STANDARD_BUY, isAmendment: true };
+    const ep = {
+      fetchRecentFilings: jest.fn().mockResolvedValue(filings),
+      deduplicateFilings: jest.fn().mockReturnValue(filings),
+      fetchForm4Xml: jest.fn().mockResolvedValue('<xml>amendment</xml>'),
+      parseForm4Xml: jest.fn().mockReturnValue(amendedParsed),
+      filterScorable: jest.fn(),
+      classifyInsiderRole: jest.fn(),
+    };
+
+    const nocodb = makePipelineNocoDB();
+    const results = await runSecMonitor(
+      { monitorStateName: 'market' },
+      { env: PIPELINE_ENV, nocodb, fetchFn: emptySupabaseFetch, _edgarParser: ep },
+    );
+
+    expect(results).toHaveLength(0);
+    // filterScorable must NOT be called for amendments
+    expect(ep.filterScorable).not.toHaveBeenCalled();
+  });
+
+  test('3-transaction filing (2×P, 1×G) → 2 results, all 3 dedup keys stored', async () => {
+    const filings = makeFilings(1);
+    const threeTxParsed = {
+      ...PARSED_STANDARD_BUY,
+      nonDerivativeTransactions: [
+        { transactionCode: 'P', transactionShares: '500', transactionDate: '2025-04-15', transactionPricePerShare: '175' },
+        { transactionCode: 'P', transactionShares: '300', transactionDate: '2025-04-15', transactionPricePerShare: '175' },
+        { transactionCode: 'G', transactionShares: '100', transactionDate: '2025-04-15', transactionPricePerShare: '0' },
+      ],
+    };
+    const ep = {
+      fetchRecentFilings: jest.fn().mockResolvedValue(filings),
+      deduplicateFilings: jest.fn().mockReturnValue(filings),
+      fetchForm4Xml: jest.fn().mockResolvedValue('<xml>valid</xml>'),
+      parseForm4Xml: jest.fn().mockReturnValue(threeTxParsed),
+      filterScorable: jest.fn().mockImplementation((txs) => txs.filter((t) => t.transactionCode === 'P' || t.transactionCode === 'S')),
+      classifyInsiderRole: jest.fn().mockReturnValue('C-Suite'),
+    };
+
+    const nocodb = makePipelineNocoDB();
+    const results = await runSecMonitor(
+      { monitorStateName: 'market' },
+      { env: PIPELINE_ENV, nocodb, fetchFn: emptySupabaseFetch, _edgarParser: ep },
+    );
+
+    expect(results).toHaveLength(2);
+  });
+
+  test('dedup: semantic key already in existingDedupKeys → 0 results', async () => {
+    const filings = makeFilings(1);
+    const ep = {
+      fetchRecentFilings: jest.fn().mockResolvedValue(filings),
+      deduplicateFilings: jest.fn().mockReturnValue(filings),
+      fetchForm4Xml: jest.fn().mockResolvedValue('<xml>valid</xml>'),
+      parseForm4Xml: jest.fn().mockReturnValue(PARSED_STANDARD_BUY),
+      filterScorable: jest.fn().mockImplementation((txs) => txs.filter((t) => t.transactionCode === 'P' || t.transactionCode === 'S')),
+      classifyInsiderRole: jest.fn().mockReturnValue('C-Suite'),
+    };
+
+    // Pre-load semantic dedup key that matches the transaction
+    const tx = PARSED_STANDARD_BUY.nonDerivativeTransactions[0];
+    const semanticKey = buildDedupKey('AAPL', 'John Smith', tx.transactionDate, tx.transactionShares);
+    const nocodb = makePipelineNocoDB({
+      list: jest.fn().mockImplementation(async (table) => {
+        if (table === 'Insider_Alerts') {
+          return { list: [{ dedup_key: semanticKey }], pageInfo: { isLastPage: true } };
+        }
+        return { list: [], pageInfo: { isLastPage: true } };
+      }),
+    });
+
+    const results = await runSecMonitor(
+      { monitorStateName: 'market' },
+      { env: PIPELINE_ENV, nocodb, fetchFn: emptySupabaseFetch, _edgarParser: ep },
+    );
+
+    expect(results).toHaveLength(0);
+  });
+
+  test('Monitor_State watermark updated after successful run', async () => {
+    const filings = makeFilings(0);
+    const ep = {
+      fetchRecentFilings: jest.fn().mockResolvedValue(filings),
+      deduplicateFilings: jest.fn().mockReturnValue(filings),
+      fetchForm4Xml: jest.fn(),
+      parseForm4Xml: jest.fn(),
+      filterScorable: jest.fn(),
+      classifyInsiderRole: jest.fn(),
+    };
+
+    const stateRecord = { Id: 42, name: 'market', last_check_timestamp: '2025-01-01T00:00:00.000Z' };
+    const nocodb = makePipelineNocoDB({
+      list: jest.fn().mockImplementation(async (table) => {
+        if (table === 'Monitor_State') return { list: [stateRecord], pageInfo: { isLastPage: true } };
+        return { list: [], pageInfo: { isLastPage: true } };
+      }),
+    });
+
+    const beforeRun = Date.now();
+    await runSecMonitor(
+      { monitorStateName: 'market' },
+      { env: PIPELINE_ENV, nocodb, fetchFn: emptySupabaseFetch, _edgarParser: ep },
+    );
+
+    expect(nocodb.update).toHaveBeenCalledWith(
+      'Monitor_State', 42, expect.objectContaining({ last_check_timestamp: expect.any(String) }),
+    );
+    const updatedTs = nocodb.update.mock.calls.find(([t]) => t === 'Monitor_State')[2].last_check_timestamp;
+    expect(new Date(updatedTs).getTime()).toBeGreaterThanOrEqual(beforeRun - 1000);
   });
 });
