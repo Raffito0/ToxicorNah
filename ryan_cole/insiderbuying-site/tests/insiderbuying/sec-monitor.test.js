@@ -10,7 +10,11 @@ const {
   loadCikTickerMap,
   enrichFiling,
   detectCluster,
+  readMonitorState,
+  writeMonitorState,
 } = require('../../n8n/code/insiderbuying/sec-monitor');
+
+const { NocoDB } = require('../../n8n/code/insiderbuying/nocodb-client');
 
 // ─── Shared mock factory ──────────────────────────────────────────────────────
 
@@ -19,7 +23,21 @@ function makeFetch(response) {
     ok: true,
     status: 200,
     json: async () => response,
+    text: async () => JSON.stringify(response),
   });
+}
+
+function makeFetchSeq(...calls) {
+  const fn = jest.fn();
+  calls.forEach(({ response, ok = true, status = 200 }) => {
+    fn.mockResolvedValueOnce({
+      ok,
+      status,
+      json: async () => response,
+      text: async () => JSON.stringify(response),
+    });
+  });
+  return fn;
 }
 
 function makeFailFetch(statusCode) {
@@ -30,62 +48,157 @@ function makeFailFetch(statusCode) {
 
 const noSleep = jest.fn().mockResolvedValue(undefined);
 
-// ─────────────────────────────────────────────────────────────────────────────
-describe('section-02: sec-monitor.js', () => {
+const BASE_ENV = {
+  NOCODB_API_TOKEN: 'test-token',
+  NOCODB_BASE_URL: 'http://localhost:8080',
+  NOCODB_PROJECT_ID: 'proj123',
+  FINANCIAL_DATASETS_API_KEY: 'fd-key',
+  SUPABASE_URL: 'https://test.supabase.co',
+  SUPABASE_SERVICE_ROLE_KEY: 'sb-key',
+};
 
-  // ── 2.0 Pre-load: fetchDedupKeys ──────────────────────────────────────────
+function makeNocoDB(fetchFn) {
+  return new NocoDB(BASE_ENV.NOCODB_BASE_URL, BASE_ENV.NOCODB_API_TOKEN, BASE_ENV.NOCODB_PROJECT_ID, fetchFn);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('section-03: sec-monitor.js', () => {
+
+  // ── 3.0 Pre-load: fetchDedupKeys ──────────────────────────────────────────
   describe('fetchDedupKeys()', () => {
     test('returns a Set of strings, not an array', async () => {
       const fetchFn = makeFetch({
-        records: [
-          { fields: { dedup_key: 'AAPL_Tim_Cook_2026-03-25_10000' } },
-          { fields: { dedup_key: 'MSFT_Brad_Smith_2026-03-24_5000' } },
+        list: [
+          { Id: 1, dedup_key: 'AAPL_Tim_Cook_2026-03-25_10000' },
+          { Id: 2, dedup_key: 'MSFT_Brad_Smith_2026-03-24_5000' },
         ],
+        pageInfo: { isLastPage: true },
       });
-      const result = await fetchDedupKeys({
-        baseId: 'appXXX', tableId: 'tblXXX', apiKey: 'key', fetchFn,
-      });
+      const nocodb = makeNocoDB(fetchFn);
+      const result = await fetchDedupKeys({ nocodb });
       expect(result).toBeInstanceOf(Set);
       expect([...result]).toEqual(
         expect.arrayContaining(['AAPL_Tim_Cook_2026-03-25_10000', 'MSFT_Brad_Smith_2026-03-24_5000']),
       );
     });
 
-    test('returns empty Set when Airtable returns no records', async () => {
-      const fetchFn = makeFetch({ records: [] });
-      const result = await fetchDedupKeys({
-        baseId: 'appXXX', tableId: 'tblXXX', apiKey: 'key', fetchFn,
-      });
+    test('returns empty Set when NocoDB returns no records', async () => {
+      const fetchFn = makeFetch({ list: [], pageInfo: { isLastPage: true } });
+      const nocodb = makeNocoDB(fetchFn);
+      const result = await fetchDedupKeys({ nocodb });
       expect(result).toBeInstanceOf(Set);
       expect(result.size).toBe(0);
     });
 
     test('filters out null and undefined dedup_key values', async () => {
       const fetchFn = makeFetch({
-        records: [
-          { fields: { dedup_key: 'AAPL_Cook_2026-03-25_100' } },
-          { fields: {} },
-          { fields: { dedup_key: null } },
-          { fields: { dedup_key: undefined } },
+        list: [
+          { Id: 1, dedup_key: 'AAPL_Cook_2026-03-25_100' },
+          { Id: 2 },
+          { Id: 3, dedup_key: null },
+          { Id: 4, dedup_key: undefined },
         ],
+        pageInfo: { isLastPage: true },
       });
-      const result = await fetchDedupKeys({
-        baseId: 'appXXX', tableId: 'tblXXX', apiKey: 'key', fetchFn,
-      });
+      const nocodb = makeNocoDB(fetchFn);
+      const result = await fetchDedupKeys({ nocodb });
       expect(result.size).toBe(1);
     });
 
-    test('sends Authorization: Bearer header to Airtable', async () => {
-      const fetchFn = makeFetch({ records: [] });
-      await fetchDedupKeys({
-        baseId: 'appXXX', tableId: 'tblXXX', apiKey: 'myToken', fetchFn,
-      });
+    test('sends xc-token header to NocoDB', async () => {
+      const fetchFn = makeFetch({ list: [], pageInfo: { isLastPage: true } });
+      const nocodb = makeNocoDB(fetchFn);
+      await fetchDedupKeys({ nocodb });
       const [, opts] = fetchFn.mock.calls[0];
-      expect(opts.headers['Authorization']).toBe('Bearer myToken');
+      expect(opts.headers['xc-token']).toBe('test-token');
+    });
+
+    test('paginates until pageInfo.isLastPage is true', async () => {
+      const fetchFn = makeFetchSeq(
+        { response: { list: [{ Id: 1, dedup_key: 'KEY_A' }], pageInfo: { isLastPage: false } } },
+        { response: { list: [{ Id: 2, dedup_key: 'KEY_B' }], pageInfo: { isLastPage: true } } },
+      );
+      const nocodb = makeNocoDB(fetchFn);
+      const result = await fetchDedupKeys({ nocodb });
+      expect(fetchFn).toHaveBeenCalledTimes(2);
+      expect(result.has('KEY_A')).toBe(true);
+      expect(result.has('KEY_B')).toBe(true);
+    });
+
+    test('second page call passes incremented offset', async () => {
+      const fetchFn = makeFetchSeq(
+        { response: { list: [{ Id: 1, dedup_key: 'KEY_A' }], pageInfo: { isLastPage: false } } },
+        { response: { list: [{ Id: 2, dedup_key: 'KEY_B' }], pageInfo: { isLastPage: true } } },
+      );
+      const nocodb = makeNocoDB(fetchFn);
+      await fetchDedupKeys({ nocodb });
+      const secondUrl = fetchFn.mock.calls[1][0];
+      expect(secondUrl).toContain('offset=');
+    });
+
+    test('treats missing pageInfo as last page — does not loop infinitely', async () => {
+      const fetchFn = makeFetch({ list: [{ Id: 1, dedup_key: 'KEY_A' }] }); // no pageInfo key
+      const nocodb = makeNocoDB(fetchFn);
+      const result = await fetchDedupKeys({ nocodb });
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      expect(result.has('KEY_A')).toBe(true);
+    });
+
+    test('uses NocoDB filter syntax (filing_date,gt,...) not Airtable formula', async () => {
+      const fetchFn = makeFetch({ list: [], pageInfo: { isLastPage: true } });
+      const nocodb = makeNocoDB(fetchFn);
+      await fetchDedupKeys({ nocodb });
+      const [url] = fetchFn.mock.calls[0];
+      expect(url).toContain('filing_date');
+      expect(url).toContain('gt');
+      expect(url).not.toContain('IS_AFTER');
+      expect(url).not.toContain('airtable.com');
     });
   });
 
-  // ── 2.0 Pre-load: loadCikTickerMap ────────────────────────────────────────
+  // ── 3.0 Monitor_State read/write ─────────────────────────────────────────
+  describe('readMonitorState()', () => {
+    test('calls nocodb.list("Monitor_State") with eq filter and returns record', async () => {
+      const fetchFn = makeFetch({
+        list: [{ Id: 7, name: 'market', last_check_timestamp: '2024-01-15T00:00:00Z' }],
+        pageInfo: { isLastPage: true },
+      });
+      const nocodb = makeNocoDB(fetchFn);
+      const record = await readMonitorState('market', { nocodb });
+      expect(record).not.toBeNull();
+      expect(record.Id).toBe(7);
+      expect(record.last_check_timestamp).toBe('2024-01-15T00:00:00Z');
+      const [url] = fetchFn.mock.calls[0];
+      expect(url).toContain('Monitor_State');
+      expect(url).toContain('market');
+      expect(url).toContain('eq');
+      expect(url).not.toContain('filterByFormula');
+    });
+
+    test('returns null when Monitor_State record not found', async () => {
+      const fetchFn = makeFetch({ list: [], pageInfo: { isLastPage: true } });
+      const nocodb = makeNocoDB(fetchFn);
+      const record = await readMonitorState('market', { nocodb });
+      expect(record).toBeNull();
+    });
+  });
+
+  describe('writeMonitorState()', () => {
+    test('calls nocodb.update("Monitor_State", id, { last_check_timestamp })', async () => {
+      const fetchFn = makeFetch({ Id: 7 });
+      const nocodb = makeNocoDB(fetchFn);
+      await writeMonitorState(7, '2024-01-20T00:00:00Z', { nocodb });
+      const [url, opts] = fetchFn.mock.calls[0];
+      expect(url).toContain('Monitor_State');
+      expect(url).toContain('/7');
+      expect(opts.method).toBe('PATCH');
+      const body = JSON.parse(opts.body);
+      expect(body.last_check_timestamp).toBe('2024-01-20T00:00:00Z');
+      expect(body.fields).toBeUndefined();
+    });
+  });
+
+  // ── 3.0 Pre-load: loadCikTickerMap ────────────────────────────────────────
   describe('loadCikTickerMap()', () => {
     const SEC_DATA = {
       '0': { cik_str: 320193, ticker: 'AAPL', title: 'Apple Inc.' },
@@ -132,7 +245,7 @@ describe('section-02: sec-monitor.js', () => {
     });
   });
 
-  // ── 2.1 EDGAR URL Tests ───────────────────────────────────────────────────
+  // ── 3.1 EDGAR URL Tests ───────────────────────────────────────────────────
   describe('buildEdgarUrl()', () => {
     test('includes startdt and enddt params', () => {
       const url = buildEdgarUrl('2026-03-20', '2026-03-27');
@@ -165,7 +278,7 @@ describe('section-02: sec-monitor.js', () => {
     });
   });
 
-  // ── 2.1 EDGAR Parse Tests ─────────────────────────────────────────────────
+  // ── 3.1 EDGAR Parse Tests ─────────────────────────────────────────────────
   describe('parseEdgarResponse()', () => {
     test('extracts entity_name, file_date, accession_number from hits.hits', () => {
       const response = {
@@ -215,7 +328,7 @@ describe('section-02: sec-monitor.js', () => {
     });
   });
 
-  // ── 2.2 Enrichment Tests ──────────────────────────────────────────────────
+  // ── 3.2 Enrichment Tests ──────────────────────────────────────────────────
   describe('enrichFiling()', () => {
     const FD_RESPONSE = {
       insider_trades: [
@@ -338,7 +451,7 @@ describe('section-02: sec-monitor.js', () => {
     });
   });
 
-  // ── 2.3 Dedup Tests ───────────────────────────────────────────────────────
+  // ── 3.3 Dedup Tests ───────────────────────────────────────────────────────
   describe('buildDedupKey()', () => {
     test('returns ticker_name_date_shares format', () => {
       const key = buildDedupKey('AAPL', 'Tim Cook', '2026-03-25', 10000);
@@ -380,7 +493,7 @@ describe('section-02: sec-monitor.js', () => {
     });
   });
 
-  // ── 2.4 Filter Tests ─────────────────────────────────────────────────────
+  // ── 3.4 Filter Tests ─────────────────────────────────────────────────────
   describe('filterBuysOnly()', () => {
     // Test via isBuyTransaction helper
     const { isBuyTransaction } = require('../../n8n/code/insiderbuying/sec-monitor');
@@ -410,7 +523,7 @@ describe('section-02: sec-monitor.js', () => {
     });
   });
 
-  // ── 2.5 Classification Tests ──────────────────────────────────────────────
+  // ── 3.5 Classification Tests ──────────────────────────────────────────────
   describe('classifyInsider()', () => {
     test('Chief Executive Officer -> C-Suite', () => {
       expect(classifyInsider('Chief Executive Officer', false)).toBe('C-Suite');
@@ -469,7 +582,7 @@ describe('section-02: sec-monitor.js', () => {
     });
   });
 
-  // ── 2.6 Cluster Detection Tests ───────────────────────────────────────────
+  // ── 3.6 Cluster Detection Tests ───────────────────────────────────────────
   describe('detectCluster()', () => {
     const SUPA_URL = 'https://abc.supabase.co';
     const SUPA_KEY = 'service_role_key';
@@ -567,7 +680,7 @@ describe('section-02: sec-monitor.js', () => {
     test('detects same-run cluster via sameRunFilings (Supabase empty)', async () => {
       // Supabase returns empty (filing A not written yet), but sameRunFilings has it
       const fetchFn = jest.fn()
-        .mockResolvedValueOnce({ ok: true, json: async () => [] })    // SELECT → empty
+        .mockResolvedValueOnce({ ok: true, json: async () => [] })    // SELECT -> empty
         .mockResolvedValueOnce({ ok: true, json: async () => [] });   // PATCH (no-op, rowsToUpdate=[])
       const filingA = { ticker: 'AAPL', insider_name: 'Jony Ive', transaction_date: '2026-03-25', cluster_id: null, is_cluster_buy: false };
       const sameRunFilings = [filingA];

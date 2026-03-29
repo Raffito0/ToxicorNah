@@ -21,10 +21,9 @@ const FD_BASE_URL = 'https://api.financialdatasets.ai';
 
 // Required environment variables
 const REQUIRED_ENV = [
-  'AIRTABLE_API_KEY',
-  'AIRTABLE_BASE_ID',
-  'INSIDER_ALERTS_TABLE_ID',
-  'MONITOR_STATE_TABLE_ID',
+  'NOCODB_API_TOKEN',
+  'NOCODB_BASE_URL',
+  'NOCODB_PROJECT_ID',
   'FINANCIAL_DATASETS_API_KEY',
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
@@ -153,48 +152,78 @@ function generateUUID() {
 }
 
 // ---------------------------------------------------------------------------
-// Async: Airtable — fetch existing dedup keys (past 7 days)
+// Async: NocoDB — fetch existing dedup keys (past 7 days)
 // ---------------------------------------------------------------------------
 
 /**
- * Returns a Set<string> of dedup_key values from Airtable Insider_Alerts
- * for the past 7 days. Handles Airtable pagination.
+ * Returns a Set<string> of dedup_key values from NocoDB Insider_Alerts
+ * for the past 7 days. Handles NocoDB offset pagination.
  *
  * @param {Object} opts
- * @param {string} opts.baseId
- * @param {string} opts.tableId
- * @param {string} opts.apiKey
- * @param {Function} opts.fetchFn  — injectable for tests
+ * @param {Object} opts.nocodb  — NocoDB client instance
  */
 async function fetchDedupKeys(opts = {}) {
-  const { baseId, tableId, apiKey, fetchFn } = opts;
+  const { nocodb } = opts;
   const keys = new Set();
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     .toISOString()
     .split('T')[0];
-  const formula = `IS_AFTER({filing_date}, '${sevenDaysAgo}')`;
+  const where = `(filing_date,gt,${sevenDaysAgo})`;
 
-  let offset = null;
-  do {
-    const params = new URLSearchParams({ filterByFormula: formula });
-    if (offset) params.set('offset', offset);
-    const url = `https://api.airtable.com/v0/${baseId}/${tableId}?${params.toString()}`;
+  const LIMIT = 100;
+  let offset = 0;
+  let isLastPage = false;
 
-    const res = await fetchFn(url, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+  while (!isLastPage) {
+    const { list, pageInfo } = await nocodb.list('Insider_Alerts', {
+      where,
+      sort: '-Id',
+      fields: 'dedup_key',
+      limit: LIMIT,
+      offset,
     });
-    const data = await res.json();
-
-    for (const record of (data.records || [])) {
-      const key = record.fields && record.fields.dedup_key;
+    for (const record of (list || [])) {
+      const key = record.dedup_key;
       if (key != null) keys.add(key);
     }
-
-    offset = data.offset || null;
-  } while (offset);
+    isLastPage = !pageInfo || pageInfo.isLastPage === true;
+    offset += LIMIT;
+  }
 
   return keys;
+}
+
+// ---------------------------------------------------------------------------
+// Async: NocoDB — Monitor_State read/write helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the Monitor_State record for a given workflow name.
+ * Returns the record (with integer Id) or null if not found.
+ *
+ * @param {string} stateName  e.g. 'market'
+ * @param {Object} opts
+ * @param {Object} opts.nocodb
+ */
+async function readMonitorState(stateName, opts) {
+  const { nocodb } = opts;
+  const where = `(name,eq,${stateName})`;
+  const result = await nocodb.list('Monitor_State', { where, limit: 1 });
+  return (result.list && result.list[0]) || null;
+}
+
+/**
+ * Write the last_check_timestamp back to Monitor_State.
+ *
+ * @param {number} stateId    NocoDB integer Id of the record
+ * @param {string} timestamp  ISO 8601 timestamp string
+ * @param {Object} opts
+ * @param {Object} opts.nocodb
+ */
+async function writeMonitorState(stateId, timestamp, opts) {
+  const { nocodb } = opts;
+  await nocodb.update('Monitor_State', stateId, { last_check_timestamp: timestamp });
 }
 
 // ---------------------------------------------------------------------------
@@ -409,35 +438,27 @@ async function detectCluster(ticker, transactionDate, currentInsiderName, opts =
 async function runSecMonitor(input, helpers) {
   const fetchFn = helpers && helpers.fetchFn;
   const env = (helpers && helpers.env) || {};
+  const nocodb = helpers && helpers.nocodb;
 
   // Validate required env vars
   const missing = REQUIRED_ENV.filter((k) => !env[k]);
   if (missing.length > 0) {
     throw new Error(`sec-monitor: missing required env vars: ${missing.join(', ')}`);
   }
+  if (!nocodb) {
+    throw new Error('sec-monitor: helpers.nocodb is required');
+  }
 
   // Step 1: Pre-load in parallel
   const [existingDedupKeys, cikTickerMap] = await Promise.all([
-    fetchDedupKeys({
-      baseId: env.AIRTABLE_BASE_ID,
-      tableId: env.INSIDER_ALERTS_TABLE_ID,
-      apiKey: env.AIRTABLE_API_KEY,
-      fetchFn,
-    }),
+    fetchDedupKeys({ nocodb }),
     loadCikTickerMap({ fetchFn }),
   ]);
 
-  // Step 2: Get last_check_timestamp from Monitor_State
-  const stateUrl =
-    `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${env.MONITOR_STATE_TABLE_ID}` +
-    `?filterByFormula=${encodeURIComponent(`{name}='${input.monitorStateName || 'market'}'`)}`;
-  const stateRes = await fetchFn(stateUrl, {
-    headers: { Authorization: `Bearer ${env.AIRTABLE_API_KEY}` },
-  });
-  const stateData = await stateRes.json();
-  const stateRecord = stateData.records && stateData.records[0];
+  // Step 2: Read last_check_timestamp from Monitor_State
+  const stateRecord = await readMonitorState(input.monitorStateName || 'market', { nocodb });
   const lastCheckTimestamp =
-    (stateRecord && stateRecord.fields && stateRecord.fields.last_check_timestamp) ||
+    (stateRecord && stateRecord.last_check_timestamp) ||
     new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const lastCheckDate = lastCheckTimestamp.split('T')[0];
 
@@ -550,20 +571,7 @@ async function runSecMonitor(input, helpers) {
 
   // Update Monitor_State last_check_timestamp
   if (stateRecord) {
-    const now = new Date().toISOString();
-    await fetchFn(
-      `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${env.MONITOR_STATE_TABLE_ID}/${stateRecord.id}`,
-      {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${env.AIRTABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fields: { last_check_timestamp: now },
-        }),
-      },
-    );
+    await writeMonitorState(stateRecord.Id, new Date().toISOString(), { nocodb });
   }
 
   return results;
@@ -588,6 +596,8 @@ module.exports = {
   loadCikTickerMap,
   enrichFiling,
   detectCluster,
+  readMonitorState,
+  writeMonitorState,
 
   // Orchestrator
   runSecMonitor,
