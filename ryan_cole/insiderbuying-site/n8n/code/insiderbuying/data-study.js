@@ -1,4 +1,7 @@
 'use strict';
+// DISABLED: superseded by the monthly backtest lead magnet (unit 17 A1).
+// DISABLED flag is in module.exports at bottom of file.
+
 const _https = require('https');
 const _http = require('http');
 const { URL } = require('url');
@@ -307,6 +310,7 @@ function buildStudyRecord(title, analysis, chartsData) {
 }
 
 module.exports = {
+  DISABLED: true,
   STUDY_TOPICS: STUDY_TOPICS,
   selectStudyTopic: selectStudyTopic,
   aggregateData: aggregateData,
