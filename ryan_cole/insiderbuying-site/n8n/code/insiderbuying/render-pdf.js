@@ -47,9 +47,10 @@ async function renderPDF(html, options = {}) {
  * Upload buffer to Cloudflare R2 via S3-compatible API.
  * @param {Buffer} buffer - File buffer
  * @param {string} key - R2 object key (e.g., 'reports/lead-magnet-latest.pdf')
+ * @param {string} [contentType='application/pdf'] - MIME type for the uploaded file
  * @returns {Promise<string>} Public URL
  */
-async function uploadToR2(buffer, key) {
+async function uploadToR2(buffer, key, contentType = 'application/pdf') {
   const accountId = process.env.R2_ACCOUNT_ID;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
@@ -71,7 +72,7 @@ async function uploadToR2(buffer, key) {
   const canonicalUri = '/' + bucket + '/' + key;
   const canonicalQueryString = '';
   const payloadHash = crypto.createHash('sha256').update(buffer).digest('hex');
-  const canonicalHeaders = 'content-type:application/pdf\nhost:' + host + '\nx-amz-content-sha256:' + payloadHash + '\nx-amz-date:' + amzDate + '\n';
+  const canonicalHeaders = 'content-type:' + contentType + '\nhost:' + host + '\nx-amz-content-sha256:' + payloadHash + '\nx-amz-date:' + amzDate + '\n';
   const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
   const canonicalRequest = 'PUT\n' + canonicalUri + '\n' + canonicalQueryString + '\n' + canonicalHeaders + '\n' + signedHeaders + '\n' + payloadHash;
 
@@ -89,7 +90,7 @@ async function uploadToR2(buffer, key) {
       path: canonicalUri,
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/pdf',
+        'Content-Type': contentType,
         'Content-Length': buffer.length,
         'x-amz-content-sha256': payloadHash,
         'x-amz-date': amzDate,
