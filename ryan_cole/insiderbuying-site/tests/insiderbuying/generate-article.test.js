@@ -288,25 +288,25 @@ describe('buildToolSchema', () => {
 // ---------------------------------------------------------------------------
 
 describe('qualityGate', () => {
-  test('returns object with pass and failures fields', () => {
-    const article = makeValidArticle({ word_count: 1200 });
-    const gate = qualityGate(article, 'AAPL insider buying', 'medium', 'standard');
-    expect(gate).toHaveProperty('pass');
-    expect(gate).toHaveProperty('failures');
-    expect(Array.isArray(gate.failures)).toBe(true);
+  test('returns object with valid and errors fields', () => {
+    const article = makeValidArticle();
+    const gate = qualityGate(article, { primaryKeyword: 'AAPL insider buying', daysSinceFiling: 20 });
+    expect(gate).toHaveProperty('valid');
+    expect(gate).toHaveProperty('errors');
+    expect(Array.isArray(gate.errors)).toBe(true);
   });
 
   test('fails for article with no verdict_type', () => {
-    const article = makeValidArticle({ verdict_type: null, word_count: 1200 });
-    const gate = qualityGate(article, 'AAPL insider buying', 'medium', 'standard');
-    expect(gate.pass).toBe(false);
-    expect(gate.failures.some((f) => /verdict/i.test(f))).toBe(true);
+    const article = makeValidArticle({ verdict_type: null });
+    const gate = qualityGate(article, { primaryKeyword: 'AAPL insider buying', daysSinceFiling: 20 });
+    expect(gate.valid).toBe(false);
+    expect(gate.errors.some((f) => /verdict/i.test(f))).toBe(true);
   });
 
   test('fails for article below minimum word count', () => {
     const shortBody = Array(200).fill('word').join(' ');
-    const article = makeValidArticle({ body_html: `<p>${shortBody}</p>`, word_count: 200 });
-    const gate = qualityGate(article, 'AAPL insider buying', 'medium', 'standard');
-    expect(gate.pass).toBe(false);
+    const article = makeValidArticle({ body_html: `<p>${shortBody}</p>` });
+    const gate = qualityGate(article, { primaryKeyword: 'AAPL insider buying', daysSinceFiling: 20 });
+    expect(gate.valid).toBe(false);
   });
 });

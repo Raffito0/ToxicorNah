@@ -186,133 +186,228 @@ function buildToolSchema() {
 
 
 // ---------------------------------------------------------------------------
-// Quality Gate (14 checks)
+// Readability helpers
 // ---------------------------------------------------------------------------
 
-function qualityGate(article, primaryKeyword, targetLength, articleType) {
-  const failures = [];
+const FINANCE_ABBREV_SYLLABLES = { IPO: 3, ETF: 3, CEO: 3, SEC: 3, ESG: 3, CFO: 3, COO: 3, CTO: 3 };
 
-  // Check #14 first: required fields
-  for (const field of REQUIRED_ARTICLE_FIELDS) {
-    if (!article[field] && article[field] !== 0) {
-      failures.push(`Missing required field: ${field}`);
-    }
+function countSyllablesInline(word) {
+  const upper = word.toUpperCase();
+  if (FINANCE_ABBREV_SYLLABLES[upper] !== undefined) return FINANCE_ABBREV_SYLLABLES[upper];
+  const lower = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (!lower) return 1;
+  let count = (lower.match(/[aeiouy]+/gi) || []).length;
+  // subtract silent trailing e (but not when preceded by l or r, which form their own syllable)
+  const prev = lower[lower.length - 2];
+  if (lower.length > 2 && lower.endsWith('e') && !/[aeiouy]/.test(prev) && !/[lr]/.test(prev)) {
+    count -= 1;
   }
-  if (failures.length > 0) {
-    return { pass: false, failures };
+  return Math.max(1, count);
+}
+
+function mean(arr) {
+  if (!arr || arr.length === 0) return 0;
+  return arr.reduce((s, v) => s + v, 0) / arr.length;
+}
+
+function stdDev(arr) {
+  if (!arr || arr.length <= 1) return 0;
+  const m = mean(arr);
+  return Math.sqrt(arr.reduce((s, v) => s + (v - m) * (v - m), 0) / arr.length);
+}
+
+function extractSentences(html) {
+  const text = (html || '').replace(/<[^>]+>/g, ' ');
+  // Protect decimal points (e.g. $26.0B, 64.2%) so they don't split sentences
+  const cleaned = text.replace(/(\d)\.(\d)/g, '$1\u00B7$2');
+  const matches = cleaned.match(/[^.!?]*[.!?]+(?=\s|$)/g) || [];
+  return matches.map((s) => s.replace(/\u00B7/g, '.').trim()).filter(Boolean);
+}
+
+function countWords(html) {
+  const text = (html || '').replace(/<[^>]+>/g, ' ');
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+function computeFleschKincaidEase(html) {
+  // Strip script/style blocks including content
+  const noScript = (html || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  const plain = noScript.replace(/<[^>]+>/g, ' ');
+  const words = plain.split(/\s+/).filter(Boolean);
+  const sentences = extractSentences(plain);
+  if (words.length === 0 || sentences.length === 0) return null;
+  const syllables = words.reduce((s, w) => s + countSyllablesInline(w), 0);
+  return 206.835 - 1.015 * (words.length / sentences.length) - 84.6 * (syllables / words.length);
+}
+
+// ---------------------------------------------------------------------------
+// Quality Gate (19 checks)
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {object} article
+ * @param {{ primaryKeyword: string, daysSinceFiling: number }} opts
+ * @returns {{ valid: boolean, errors: string[], staleness_warning: boolean }}
+ */
+function qualityGate(article, opts) {
+  const { primaryKeyword, daysSinceFiling } = opts || {};
+  const errors = [];
+  let staleness_warning = false;
+
+  // Check 1: Title length 55-65 chars
+  if (!article.title || article.title.length < 55 || article.title.length > 65) {
+    errors.push(`Title length ${(article.title || '').length} outside 55-65 range`);
   }
 
-  // Check #1: Title length 55-65 chars
-  if (article.title.length < 55 || article.title.length > 65) {
-    failures.push(`Title length ${article.title.length} outside 55-65 range`);
+  // Check 2: Meta description 140-155 chars
+  if (!article.meta_description || article.meta_description.length < 140 || article.meta_description.length > 155) {
+    errors.push(`Meta description length ${(article.meta_description || '').length} outside 140-155 range`);
   }
 
-  // Check #2: Meta description 140-155 chars
-  if (article.meta_description.length < 140 || article.meta_description.length > 155) {
-    failures.push(`Meta description length ${article.meta_description.length} outside 140-155 range`);
-  }
-
-  // Check #3: key_takeaways has 3-4 items, each contains a number
+  // Check 3: key_takeaways 3-4 items, each contains a number
   if (!Array.isArray(article.key_takeaways) ||
       article.key_takeaways.length < 3 || article.key_takeaways.length > 4) {
-    failures.push(`key_takeaways must have 3-4 items, got ${article.key_takeaways?.length || 0}`);
+    errors.push(`key_takeaways must have 3-4 items, got ${article.key_takeaways ? article.key_takeaways.length : 0}`);
   } else {
     for (let i = 0; i < article.key_takeaways.length; i++) {
       if (!/\d/.test(article.key_takeaways[i])) {
-        failures.push(`key_takeaway #${i + 1} does not contain a number`);
+        errors.push(`key_takeaway #${i + 1} does not contain a number`);
       }
     }
   }
 
-  // Check #4: verdict_type valid
-  if (!VALID_VERDICTS.includes(article.verdict_type)) {
-    failures.push(`Invalid verdict_type: ${article.verdict_type}`);
+  // Check 4: verdict_type valid
+  if (!article.verdict_type || !VALID_VERDICTS.includes(article.verdict_type)) {
+    errors.push(`Invalid verdict_type: ${article.verdict_type}`);
   }
 
-  // Check #5: verdict_text exists and contains a numeric threshold
+  // Check 5: verdict_text exists and contains a number
   if (!article.verdict_text || !/\d/.test(article.verdict_text)) {
-    failures.push('verdict_text missing or lacks numeric threshold');
+    errors.push('verdict_text missing or lacks numeric threshold');
   }
 
-  // Check #6: Zero banned phrases
-  const bodyLower = (article.body_html || '').toLowerCase();
+  // Check 6: Zero banned AI phrases (scan plain text)
+  const bodyPlain = (article.body_html || '').replace(/<[^>]+>/g, ' ').toLowerCase();
   for (const phrase of BANNED_PHRASES) {
-    if (bodyLower.includes(phrase.toLowerCase())) {
-      failures.push(`Banned phrase found: "${phrase}"`);
+    if (bodyPlain.includes(phrase.toLowerCase())) {
+      errors.push(`Banned phrase found: "${phrase}"`);
     }
   }
 
-  // Check #7: At least 40% of paragraphs contain numeric data
+  // Check 7: At least 40% of paragraphs contain numeric data (plain text per paragraph)
   const paragraphs = (article.body_html || '').match(/<p[^>]*>([\s\S]*?)<\/p>/gi) || [];
   if (paragraphs.length > 0) {
-    const numericPattern = /(\d[\d,.]*%?|\$[\d,.]+[BMTbmt]?)/;
-    const numericCount = paragraphs.filter((p) => numericPattern.test(p)).length;
+    const numericPattern = /\d/;
+    const numericCount = paragraphs.filter((p) => numericPattern.test(p.replace(/<[^>]+>/g, ''))).length;
     const density = numericCount / paragraphs.length;
     if (density < 0.4) {
-      failures.push(`Paragraph numeric density ${(density * 100).toFixed(0)}% below 40% threshold`);
+      errors.push(`Paragraph numeric density ${(density * 100).toFixed(0)}% below 40% threshold`);
     }
   }
 
-  // Check #8: Word count in target range
-  const config = LENGTH_CONFIG[targetLength];
-  if (config) {
-    if (article.word_count < config.minWords || article.word_count > config.maxWords) {
-      failures.push(`Word count ${article.word_count} outside ${targetLength} range (${config.minWords}-${config.maxWords})`);
+  // Check 8: FK Ease 25-55 (skip if null)
+  const fk = computeFleschKincaidEase(article.body_html);
+  if (fk !== null) {
+    if (fk < 25 || fk > 55) {
+      errors.push(`Flesch-Kincaid ease score ${fk.toFixed(1)} outside 25-55 range`);
     }
   }
 
-  // Check #9: Primary keyword in title
-  if (primaryKeyword) {
+  // Check 9: Word count 1800-2500
+  const wc = countWords(article.body_html);
+  if (wc < 1800 || wc > 2500) {
+    errors.push(`Word count ${wc} outside 1800-2500 range`);
+  }
+
+  // Check 10: Visual placeholders >= 3
+  const body = article.body_html || '';
+  const missingVisuals = [];
+  if (!body.includes('{{VISUAL_1}}')) missingVisuals.push('{{VISUAL_1}}');
+  if (!body.includes('{{VISUAL_2}}')) missingVisuals.push('{{VISUAL_2}}');
+  if (!body.includes('{{VISUAL_3}}')) missingVisuals.push('{{VISUAL_3}}');
+  if (missingVisuals.length > 0) {
+    errors.push(`Missing visual placeholders: ${missingVisuals.join(', ')}`);
+  }
+
+  // Check 11: Internal links >= 4
+  const internalLinks = (body.match(/href="\/[^"]*"/g) || []).length;
+  if (internalLinks < 4) {
+    errors.push(`Internal links ${internalLinks} below minimum of 4`);
+  }
+
+  // Check 12: CTA in first 500 chars
+  const first500 = body.slice(0, 500).toLowerCase();
+  const ctaWords = ['alert', 'subscribe', 'notification', 'free'];
+  if (!ctaWords.some((w) => first500.includes(w))) {
+    errors.push('No CTA (alert/subscribe/notification/free) in first 500 chars');
+  }
+
+  // Check 13: Track record section
+  if (!bodyPlain.includes('track record')) {
+    errors.push('Missing "track record" section');
+  }
+
+  // Check 14: Social proof
+  const socialProofPhrases = ['subscriber', 'members', 'readers'];
+  if (!socialProofPhrases.some((p) => bodyPlain.includes(p))) {
+    errors.push('Missing social proof (subscriber/members/readers)');
+  }
+
+  // Check 15: Filing timeliness
+  if (daysSinceFiling !== undefined && daysSinceFiling !== null) {
+    if (daysSinceFiling > 72) {
+      errors.push(`Filing too stale: ${daysSinceFiling} days since filing (max 72)`);
+    } else if (daysSinceFiling > 24) {
+      staleness_warning = true;
+    }
+  }
+
+  // Check 16: TLDR in first 200 words
+  const plainWords = (article.body_html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean);
+  const first200text = plainWords.slice(0, 200).join(' ').toLowerCase();
+  const tldrPhrases = ['tldr', 'tl;dr', 'key takeaway', 'in brief'];
+  if (!tldrPhrases.some((p) => first200text.includes(p))) {
+    errors.push('TLDR/key takeaway not found in first 200 words');
+  }
+
+  // Check 17: Sentence variation CV > 0.45
+  const sentences = extractSentences(article.body_html);
+  if (sentences.length > 1) {
+    const lengths = sentences.map((s) => s.split(/\s+/).filter(Boolean).length);
+    const m = mean(lengths);
+    if (m > 0) {
+      const cv = stdDev(lengths) / m;
+      if (cv <= 0.45) {
+        errors.push(`Sentence length variation CV ${cv.toFixed(2)} below 0.45 threshold`);
+      }
+    }
+  }
+
+  // Check 18: Keyword density 1.0-2.5%
+  if (primaryKeyword && wc > 0) {
     const kwLower = primaryKeyword.toLowerCase();
-    // Check if significant words from keyword appear in title
-    const kwWords = kwLower.split(/\s+/).filter((w) => w.length > 2);
-    const titleLower = article.title.toLowerCase();
-    const matchCount = kwWords.filter((w) => titleLower.includes(w)).length;
-    if (matchCount < Math.ceil(kwWords.length * 0.5)) {
-      failures.push(`Primary keyword not sufficiently represented in title`);
+    const bodyLower2 = (article.body_html || '').replace(/<[^>]+>/g, ' ').toLowerCase();
+    const kwRegex = new RegExp(kwLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+    const kwMatches = (bodyLower2.match(kwRegex) || []).length;
+    const kwDensity = (kwMatches / wc) * 100;
+    if (kwDensity < 1.0 || kwDensity > 2.5) {
+      errors.push(`Keyword density ${kwDensity.toFixed(1)}% outside 1.0-2.5% range`);
     }
   }
 
-  // Check #10: Primary keyword in first 100 words of body
-  if (primaryKeyword) {
-    const textOnly = (article.body_html || '').replace(/<[^>]+>/g, '');
-    const first100 = textOnly.split(/\s+/).slice(0, 100).join(' ').toLowerCase();
-    const kwWords = primaryKeyword.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-    const matchCount = kwWords.filter((w) => first100.includes(w)).length;
-    if (matchCount < Math.ceil(kwWords.length * 0.5)) {
-      failures.push('Primary keyword not found in first 100 words');
+  // Check 19: No generic opening (use bodyPlain to handle any HTML nesting)
+  const GENERIC_OPENINGS = ['In this article', 'Today we', "In today's", 'Welcome to', 'Are you', 'Have you ever'];
+  const openingLower = bodyPlain.trimStart().slice(0, 100).toLowerCase();
+  for (const phrase of GENERIC_OPENINGS) {
+    if (openingLower.startsWith(phrase.toLowerCase())) {
+      errors.push(`Generic opening detected: "${phrase}"`);
+      break;
     }
   }
 
-  // Check #11: Primary keyword in at least one H2
-  if (primaryKeyword) {
-    const h2s = (article.body_html || '').match(/<h2[^>]*>([\s\S]*?)<\/h2>/gi) || [];
-    const kwWords = primaryKeyword.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-    const inH2 = h2s.some((h2) => {
-      const h2Lower = h2.toLowerCase();
-      return kwWords.some((w) => h2Lower.includes(w));
-    });
-    if (!inH2) {
-      failures.push('Primary keyword not found in any H2');
-    }
-  }
-
-  // Check #12: Primary keyword in meta_description
-  if (primaryKeyword) {
-    const metaLower = article.meta_description.toLowerCase();
-    const kwWords = primaryKeyword.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-    const matchCount = kwWords.filter((w) => metaLower.includes(w)).length;
-    if (matchCount < Math.ceil(kwWords.length * 0.4)) {
-      failures.push('Primary keyword not found in meta_description');
-    }
-  }
-
-  // Check #13: data_tables_count >= 1 for type A
-  if (articleType === 'A' && (article.data_tables_count || 0) < 1) {
-    failures.push('Type A article requires at least 1 data table');
-  }
-
-  return { pass: failures.length === 0, failures };
+  return { valid: errors.length === 0, errors, staleness_warning };
 }
 
 // ---------------------------------------------------------------------------
@@ -712,28 +807,15 @@ async function generateArticleOutline(ticker, articleType, dexterData, fetchFn, 
 
   var lastErrors = [];
 
+  var outlineClient = createClaudeClient(fetchFn, anthropicApiKey);
+
   for (var attempt = 0; attempt < 2; attempt++) {
     var prompt = attempt === 0
       ? basePrompt
       : basePrompt + '\n\nRegenerate outline fixing: ' + lastErrors.join('; ');
 
-    var res = await fetchFn('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicApiKey || '',
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 400,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (!res.ok) throw new Error('Claude API error: ' + res.status);
-    var data = await res.json();
-    var raw = (data.content && data.content[0] && data.content[0].text) ? data.content[0].text : '';
+    var result = await outlineClient.complete('', prompt, { maxTokens: 400 });
+    var raw = result.content || '';
 
     var outline = null;
     try { outline = parseClaudeJSON(raw); } catch (e) { /* invalid JSON */ }
@@ -917,6 +999,7 @@ async function writeArticle(article, keyword, nocodbOpts) {
     data_tables_count: article.data_tables_count || 0,
     filing_citations_count: article.filing_citations_count || 0,
     confidence_notes: article.confidence_notes || '',
+    staleness_warning: article.staleness_warning || false,
     ticker: keyword.ticker || extractTicker(keyword.keyword),
     sector: keyword.sector || '',
     company_name: keyword.company_name || '',
@@ -1170,8 +1253,8 @@ async function generateArticle(input, helpers) {
     const textOnly = (article.body_html || '').replace(/<[^>]+>/g, '');
     article.word_count = textOnly.split(/\s+/).filter(Boolean).length;
 
-    // Step 8: Quality gate (14 checks)
-    const gate = qualityGate(article, keyword.keyword, params.targetLength, keyword.article_type);
+    // Step 8: Quality gate (19 checks)
+    const gate = qualityGate(article, { primaryKeyword: keyword.keyword, daysSinceFiling: keyword.days_since_filing });
 
     // Step 8.7: SEO Score (must be >= 70)
     const seo = seoScore(article, keyword.keyword);
@@ -1183,7 +1266,7 @@ async function generateArticle(input, helpers) {
     article._aiDetectionScore = aiCheck.score;
 
     // Collect ALL failures across all 3 gates
-    const allFailures = [...gate.failures];
+    const allFailures = [...gate.errors];
     if (!seo.pass) {
       const weakAreas = Object.entries(seo.breakdown)
         .filter(([, v]) => v < 10)
@@ -1234,7 +1317,8 @@ async function generateArticle(input, helpers) {
   const existingSlugs = (existingSlugsRes?.list || []).map((r) => r.slug);
   article.slug = ensureUniqueSlug(article.slug, existingSlugs);
 
-  // Step 9: Write to NocoDB
+  // Step 9: Write to NocoDB (include staleness_warning from quality gate)
+  article.staleness_warning = gate.staleness_warning;
   const created = await writeArticle(article, { ...keyword, author_name: params.authorName }, nocodbOpts);
 
   // Step 10: Update keyword
@@ -1285,6 +1369,12 @@ module.exports = {
   generateArticleOutline,
   buildDraftUserMessage,
   parseClaudeJSON,
+  countSyllablesInline,
+  computeFleschKincaidEase,
+  extractSentences,
+  countWords,
+  stdDev,
+  mean,
   qualityGate,
   seoScore,
   aiDetectionScore,
