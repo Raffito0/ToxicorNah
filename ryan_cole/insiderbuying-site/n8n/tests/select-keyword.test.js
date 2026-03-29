@@ -1,4 +1,4 @@
-const { describe, it } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
@@ -7,6 +7,7 @@ const {
   generateSeedKeywords,
   isDuplicate,
   selectTopKeywords,
+  fetchKWEKeywords,
   INTENT_MULTIPLIERS,
   TYPE_MAP,
   BLOG_SEED_PATTERNS,
@@ -51,29 +52,46 @@ describe('classifyIntent', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test: Priority scoring
+// Test: Priority scoring (updated: {kd, volume} signature, new formula)
 // ---------------------------------------------------------------------------
 describe('computePriorityScore', () => {
-  it('volume=1000, difficulty=30, multiplier=1.2 -> 840', () => {
-    const score = computePriorityScore(1000, 30, 1.2);
-    assert.equal(score, 840);
+  it('{volume:1000, kd:30} -> 0.7', () => {
+    const score = computePriorityScore({ volume: 1000, kd: 30 });
+    assert.ok(Math.abs(score - 0.7) < 0.001, `expected ~0.7, got ${score}`);
   });
 
-  it('volume=500, difficulty=0, multiplier=1.0 -> 500', () => {
-    assert.equal(computePriorityScore(500, 0, 1.0), 500);
+  it('{volume:500, kd:0} -> 0.5', () => {
+    assert.ok(Math.abs(computePriorityScore({ volume: 500, kd: 0 }) - 0.5) < 0.001);
   });
 
-  it('volume=0 -> 0 regardless of other params', () => {
-    assert.equal(computePriorityScore(0, 50, 1.2), 0);
+  it('{volume:0} -> 0 regardless of kd', () => {
+    assert.equal(computePriorityScore({ volume: 0, kd: 50 }), 0);
   });
 
-  it('difficulty=100 -> 0 regardless of volume', () => {
-    assert.equal(computePriorityScore(1000, 100, 1.0), 0);
+  it('{kd:100} -> 0 regardless of volume', () => {
+    assert.equal(computePriorityScore({ volume: 1000, kd: 100 }), 0);
   });
 
   it('handles missing/null inputs gracefully', () => {
-    assert.equal(computePriorityScore(null, 30, 1.0), 0);
-    assert.equal(computePriorityScore(1000, null, 1.0), 1000);
+    assert.equal(computePriorityScore({ volume: null, kd: 30 }), 0);
+    assert.ok(Math.abs(computePriorityScore({ volume: 1000, kd: null }) - 1.0) < 0.001);
+  });
+
+  it('low-kd/high-volume scores higher than high-kd/low-volume', () => {
+    const good = computePriorityScore({ volume: 2000, kd: 10 });
+    const poor = computePriorityScore({ volume: 100, kd: 80 });
+    assert.ok(good > poor, `expected ${good} > ${poor}`);
+  });
+
+  it('DataForSEO field names not in function body', () => {
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '../code/insiderbuying/select-keyword.js'), 'utf8'
+    );
+    const fnStart = src.indexOf('function computePriorityScore');
+    const fnEnd = src.indexOf('}', fnStart);
+    const fnBody = src.slice(fnStart, fnEnd + 1);
+    assert.ok(!fnBody.includes('competition_index'), 'competition_index should not be in computePriorityScore');
+    assert.ok(!fnBody.includes('search_volume'), 'search_volume should not be in computePriorityScore');
   });
 });
 
@@ -83,7 +101,6 @@ describe('computePriorityScore', () => {
 describe('generateSeedKeywords', () => {
   it('insiderbuying seeds contain insider buying / Form 4 / insider trading patterns', () => {
     const seeds = generateSeedKeywords('insiderbuying', ['AAPL', 'NVDA']);
-    const joined = seeds.join(' ');
     assert.ok(seeds.some((s) => s.toLowerCase().includes('insider buying')),
       'Should contain "insider buying"');
     assert.ok(seeds.some((s) => s.includes('Form 4')),
@@ -137,7 +154,7 @@ describe('isDuplicate', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test: Batch output — selectTopKeywords produces exactly 21
+// Test: Batch output -- selectTopKeywords produces exactly 21
 // ---------------------------------------------------------------------------
 describe('selectTopKeywords', () => {
   it('returns exactly 21 keywords from larger pool', () => {
@@ -145,12 +162,12 @@ describe('selectTopKeywords', () => {
     for (let i = 0; i < 50; i++) {
       candidates.push({
         keyword: `keyword ${i}`,
-        search_volume: 1000 - i * 10,
-        difficulty: 20 + i,
+        volume: 1000 - i * 10,
+        kd: 20 + i,
         cpc: 1.5,
         article_type: 'A',
         intent_multiplier: 1.0,
-        priority_score: computePriorityScore(1000 - i * 10, 20 + i, 1.0),
+        priority_score: computePriorityScore({ volume: 1000 - i * 10, kd: 20 + i }),
       });
     }
     const selected = selectTopKeywords(candidates, 21);
@@ -180,7 +197,7 @@ describe('selectTopKeywords', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test: Multi-blog — 2 blogs produce 42 keywords
+// Test: Multi-blog -- 2 blogs produce 42 keywords
 // ---------------------------------------------------------------------------
 describe('multi-blog keyword selection', () => {
   it('2 active blogs produce separate keyword sets', () => {
@@ -247,5 +264,187 @@ describe('TYPE_MAP', () => {
     assert.ok(TYPE_MAP.D.includes('guide'));
     assert.ok(TYPE_MAP.D.includes('opinion'));
     assert.ok(TYPE_MAP.D.includes('should'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test: fetchKWEKeywords
+// ---------------------------------------------------------------------------
+describe('fetchKWEKeywords', () => {
+  let savedKWEKey;
+
+  before(() => {
+    savedKWEKey = process.env.KWE_API_KEY;
+    process.env.KWE_API_KEY = 'test-kwe-key';
+  });
+
+  after(() => {
+    if (savedKWEKey === undefined) delete process.env.KWE_API_KEY;
+    else process.env.KWE_API_KEY = savedKWEKey;
+  });
+
+  it('happy path: returns {keyword, kd, volume, cpc} mapped from KWE response', async () => {
+    const mockFetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: [
+          { keyword: 'insider buying AAPL', seo_difficulty: 35, vol: 1000, competition: { value: 0.45 } },
+          { keyword: 'form 4 NVDA', seo_difficulty: 50, vol: 500, competition: { value: 0.30 } },
+        ],
+      }),
+    });
+
+    const result = await fetchKWEKeywords(['insider buying AAPL', 'form 4 NVDA'], { fetchFn: mockFetch });
+    assert.equal(result.length, 2);
+    assert.equal(result[0].keyword, 'insider buying AAPL');
+    assert.equal(result[0].kd, 35);
+    assert.equal(result[0].volume, 1000);
+    assert.equal(result[0].cpc, 0.45);
+    // exactly 4 fields, no extras
+    assert.deepStrictEqual(Object.keys(result[0]).sort(), ['cpc', 'kd', 'keyword', 'volume']);
+  });
+
+  it('kd falls back to on_page_difficulty when seo_difficulty is absent', async () => {
+    const mockFetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: [
+          { keyword: 'test kw', on_page_difficulty: 42, vol: 200, competition: { value: 0.1 } },
+        ],
+      }),
+    });
+
+    const result = await fetchKWEKeywords(['test kw'], { fetchFn: mockFetch });
+    assert.equal(result[0].kd, 42);
+  });
+
+  it('request shape: POST to KWE URL with Authorization Bearer and correct body', async () => {
+    process.env.KWE_API_KEY = 'my-test-api-key';
+    let capturedUrl, capturedOpts;
+    const mockFetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOpts = options;
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    };
+
+    await fetchKWEKeywords(['insider buying'], { fetchFn: mockFetch });
+
+    assert.equal(capturedUrl, 'https://api.keywordseverywhere.com/v1/get_keyword_data');
+    assert.equal(capturedOpts.method, 'POST');
+    assert.ok(capturedOpts.headers['Authorization'].includes('my-test-api-key'),
+      'Authorization header must include KWE_API_KEY');
+    assert.ok(capturedOpts.headers['Authorization'].startsWith('Bearer '),
+      'Authorization header must use Bearer scheme');
+    const body = JSON.parse(capturedOpts.body);
+    assert.equal(body.country, 'us');
+    assert.equal(body.currency, 'usd');
+    assert.equal(body.dataSource, 'gkp');
+    assert.deepStrictEqual(body['kw[]'], ['insider buying']);
+  });
+
+  it('empty keyword list returns [] without making HTTP call', async () => {
+    let called = false;
+    const mockFetch = async () => { called = true; return {}; };
+    const result = await fetchKWEKeywords([], { fetchFn: mockFetch });
+    assert.deepStrictEqual(result, []);
+    assert.equal(called, false, 'fetchFn should not be called for empty list');
+  });
+
+  it('HTTP 5xx throws a descriptive error (not silent empty array)', async () => {
+    const mockFetch = async () => ({ ok: false, status: 503, json: async () => ({}) });
+    await assert.rejects(
+      () => fetchKWEKeywords(['test'], { fetchFn: mockFetch }),
+      /503/
+    );
+  });
+
+  it('HTTP 429 throws with "429" in error message', async () => {
+    const mockFetch = async () => ({ ok: false, status: 429, json: async () => ({}) });
+    await assert.rejects(
+      () => fetchKWEKeywords(['test'], { fetchFn: mockFetch }),
+      /429/
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test: fetchKeywordData -- fallback chain
+// ---------------------------------------------------------------------------
+describe('fetchKeywordData fallback chain', () => {
+  const { fetchKeywordData } = require('../code/insiderbuying/select-keyword.js');
+  let savedKWEKey;
+
+  before(() => {
+    savedKWEKey = process.env.KWE_API_KEY;
+    process.env.KWE_API_KEY = 'test-kwe-key';
+  });
+
+  after(() => {
+    if (savedKWEKey === undefined) delete process.env.KWE_API_KEY;
+    else process.env.KWE_API_KEY = savedKWEKey;
+  });
+
+  it('when KWE throws, calls DataForSEO fallback and returns its results', async () => {
+    let dataForSEOCalled = false;
+    const mockFetch = async (url) => {
+      if (url.includes('keywordseverywhere')) {
+        return { ok: false, status: 503, json: async () => ({}) };
+      }
+      // DataForSEO fallback call
+      dataForSEOCalled = true;
+      return {
+        ok: true, status: 200,
+        json: async () => ({
+          tasks: [{
+            result: [
+              {
+                keyword: 'insider buying',
+                keyword_info: { search_volume: 800, cpc: 1.2 },
+                keyword_properties: { keyword_difficulty: 40 },
+              },
+            ],
+          }],
+        }),
+      };
+    };
+
+    // Set DataForSEO credentials so fallback doesn't throw on missing creds
+    const origLogin = process.env.DATAFORSEO_LOGIN;
+    const origPass = process.env.DATAFORSEO_PASSWORD;
+    process.env.DATAFORSEO_LOGIN = 'test-login';
+    process.env.DATAFORSEO_PASSWORD = 'test-pass';
+
+    try {
+      const result = await fetchKeywordData(['insider buying'], { fetchFn: mockFetch });
+      assert.equal(dataForSEOCalled, true, 'DataForSEO fallback should be called when KWE fails');
+      assert.equal(result.length, 1);
+      assert.equal(result[0].keyword, 'insider buying');
+      assert.equal(result[0].volume, 800);
+      assert.equal(result[0].kd, 40);
+    } finally {
+      if (origLogin === undefined) delete process.env.DATAFORSEO_LOGIN;
+      else process.env.DATAFORSEO_LOGIN = origLogin;
+      if (origPass === undefined) delete process.env.DATAFORSEO_PASSWORD;
+      else process.env.DATAFORSEO_PASSWORD = origPass;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test: DataForSEO fallback static check
+// ---------------------------------------------------------------------------
+describe('DataForSEO fallback static check', () => {
+  it('fetchSearchVolume and fetchRelatedKeywords are removed; fetchDataForSEOFallback exists', () => {
+    const src = require('fs').readFileSync(
+      require('path').join(__dirname, '../code/insiderbuying/select-keyword.js'), 'utf8'
+    );
+    assert.ok(!src.includes('fetchSearchVolume'),
+      'fetchSearchVolume should be removed from select-keyword.js');
+    assert.ok(!src.includes('fetchRelatedKeywords'),
+      'fetchRelatedKeywords should be removed from select-keyword.js');
+    assert.ok(src.includes('fetchDataForSEOFallback'),
+      'fetchDataForSEOFallback named fallback must exist');
   });
 });

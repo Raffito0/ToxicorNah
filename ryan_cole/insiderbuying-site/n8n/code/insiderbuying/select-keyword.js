@@ -1,59 +1,65 @@
 /**
- * W1 — Keyword Selection Workflow (n8n Code Node)
+ * W1 -- Keyword Selection Workflow (n8n Code Node)
  *
  * Weekly workflow that generates seed keywords, fetches SEO data from
- * DataForSEO, classifies intent, scores priority, deduplicates against
- * existing NocoDB entries, and selects the top 21 keywords per blog.
+ * Keywords Everywhere (primary) or DataForSEO (fallback), classifies intent,
+ * scores priority, deduplicates against existing NocoDB entries, and selects
+ * the top 21 keywords per blog.
  *
- * Trigger: Schedule — every Sunday at midnight EST
+ * Trigger: Schedule -- every Sunday at midnight EST
  */
 
 'use strict';
+
+// n8n sandbox requires these built-in module references even when using injected fetchFn
+var _https = require('https');
+var _http = require('http');
+var { URL } = require('url');
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const TYPE_MAP = {
+var TYPE_MAP = {
   A: ['earnings', 'analysis', 'forecast', 'valuation', 'revenue', 'results', 'financials'],
   B: ['why', 'how', 'signal', 'insider', 'buying', 'selling', 'pattern', 'meaning'],
   C: ['vs', 'compare', 'best', 'top', 'alternative', 'which'],
   D: ['strategy', 'guide', 'opinion', 'approach', 'should', 'when'],
 };
 
-const INTENT_MULTIPLIERS = {
+var INTENT_MULTIPLIERS = {
   A: 1.0,
   B: 1.2,
   C: 0.8,
   D: 0.9,
 };
 
-const KEYWORDS_PER_BLOG = 21; // 3/day * 7 days
+var KEYWORDS_PER_BLOG = 21; // 3/day * 7 days
 
-const BLOG_SEED_PATTERNS = {
+var BLOG_SEED_PATTERNS = {
   insiderbuying: [
-    (ticker) => `insider buying ${ticker}`,
-    (ticker) => `insider selling ${ticker}`,
-    (ticker) => `Form 4 filing ${ticker}`,
-    (ticker) => `insider trading signal ${ticker}`,
-    (ticker) => `${ticker} insider transactions`,
+    function(ticker) { return 'insider buying ' + ticker; },
+    function(ticker) { return 'insider selling ' + ticker; },
+    function(ticker) { return 'Form 4 filing ' + ticker; },
+    function(ticker) { return 'insider trading signal ' + ticker; },
+    function(ticker) { return ticker + ' insider transactions'; },
   ],
   deepstockanalysis: [
-    (ticker) => `${ticker} earnings analysis`,
-    (ticker) => `${ticker} stock forecast`,
-    (ticker) => `${ticker} valuation`,
-    (ticker) => `${ticker} revenue growth`,
+    function(ticker) { return ticker + ' earnings analysis'; },
+    function(ticker) { return ticker + ' stock forecast'; },
+    function(ticker) { return ticker + ' valuation'; },
+    function(ticker) { return ticker + ' revenue growth'; },
   ],
   dividenddeep: [
-    (ticker) => `${ticker} dividend safety`,
-    (ticker) => `best dividend stocks ${ticker}`,
-    (ticker) => `${ticker} payout ratio`,
-    (ticker) => `${ticker} dividend yield analysis`,
+    function(ticker) { return ticker + ' dividend safety'; },
+    function(ticker) { return 'best dividend stocks ' + ticker; },
+    function(ticker) { return ticker + ' payout ratio'; },
+    function(ticker) { return ticker + ' dividend yield analysis'; },
   ],
 };
 
 // Sector-level seeds (no ticker needed)
-const BLOG_SECTOR_SEEDS = {
+var BLOG_SECTOR_SEEDS = {
   insiderbuying: [
     'insider buying signals this week',
     'most significant insider purchases',
@@ -66,13 +72,18 @@ const BLOG_SECTOR_SEEDS = {
     'stock comparison sector',
   ],
   dividenddeep: [
-    `best dividend stocks ${new Date().getFullYear()}`,
+    'best dividend stocks ' + new Date().getFullYear(),
     'dividend aristocrats analysis',
     'high yield dividend safety',
   ],
 };
 
-const DATAFORSEO_BASE = 'https://api.dataforseo.com/v3';
+var DATAFORSEO_BASE = 'https://api.dataforseo.com/v3';
+
+// Default KD when KWE omits both seo_difficulty and on_page_difficulty.
+// 50 = median difficulty: neither optimistic (0) nor pessimistic (100).
+// Penalizes score by 50% relative to kd=0 keywords of equal volume.
+var KWE_UNKNOWN_KD = 50;
 
 // ---------------------------------------------------------------------------
 // Intent classification
@@ -81,16 +92,16 @@ const DATAFORSEO_BASE = 'https://api.dataforseo.com/v3';
 function classifyIntent(keyword) {
   if (!keyword || typeof keyword !== 'string') return 'A';
 
-  const lower = keyword.toLowerCase();
-  const words = lower.split(/\s+/);
+  var lower = keyword.toLowerCase();
 
   // Check types in priority order: C and D first (more specific),
   // then B, then A. This prevents "insider buying strategy guide"
   // from matching B (insider/buying) instead of D (strategy/guide).
-  // Use word-boundary matching to avoid "top" matching inside "stopped".
-  for (const type of ['C', 'D', 'B', 'A']) {
-    for (const signal of TYPE_MAP[type]) {
-      const re = new RegExp(`\\b${signal}\\b`, 'i');
+  for (var i = 0; i < ['C', 'D', 'B', 'A'].length; i++) {
+    var type = ['C', 'D', 'B', 'A'][i];
+    for (var j = 0; j < TYPE_MAP[type].length; j++) {
+      var signal = TYPE_MAP[type][j];
+      var re = new RegExp('\\b' + signal + '\\b', 'i');
       if (re.test(lower)) {
         return type;
       }
@@ -102,13 +113,15 @@ function classifyIntent(keyword) {
 
 // ---------------------------------------------------------------------------
 // Priority scoring
+// Returns score in [0, ~N] range: (volume/1000) * (1 - kd/100)
+// Examples: vol=1000 kd=30 -> 0.7 | vol=5000 kd=20 -> 4.0
+// INTENT_MULTIPLIERS are not applied here (removed per spec -- use kd+volume only)
 // ---------------------------------------------------------------------------
 
-function computePriorityScore(searchVolume, difficulty, intentMultiplier) {
-  const vol = searchVolume || 0;
-  const diff = difficulty || 0;
-  const mult = intentMultiplier || 1.0;
-  return Math.round(vol * (1 - diff / 100) * mult * 100) / 100;
+function computePriorityScore(opts) {
+  var vol = (opts && opts.volume) || 0;
+  var kd = Math.min((opts && opts.kd) || 0, 100);
+  return (vol / 1000) * (1 - kd / 100);
 }
 
 // ---------------------------------------------------------------------------
@@ -116,21 +129,25 @@ function computePriorityScore(searchVolume, difficulty, intentMultiplier) {
 // ---------------------------------------------------------------------------
 
 function generateSeedKeywords(blog, tickers) {
-  const patterns = BLOG_SEED_PATTERNS[blog];
+  var patterns = BLOG_SEED_PATTERNS[blog];
   if (!patterns) return [];
 
-  const seeds = [];
+  var seeds = [];
 
   // Ticker-based seeds
-  for (const ticker of (tickers || [])) {
-    for (const pattern of patterns) {
-      seeds.push(pattern(ticker));
+  var tickerList = tickers || [];
+  for (var i = 0; i < tickerList.length; i++) {
+    var ticker = tickerList[i];
+    for (var j = 0; j < patterns.length; j++) {
+      seeds.push(patterns[j](ticker));
     }
   }
 
   // Sector-level seeds
-  const sectorSeeds = BLOG_SECTOR_SEEDS[blog] || [];
-  seeds.push(...sectorSeeds);
+  var sectorSeeds = BLOG_SECTOR_SEEDS[blog] || [];
+  for (var k = 0; k < sectorSeeds.length; k++) {
+    seeds.push(sectorSeeds[k]);
+  }
 
   return seeds;
 }
@@ -141,37 +158,96 @@ function generateSeedKeywords(blog, tickers) {
 
 function isDuplicate(keyword, existingKeywords) {
   if (!keyword || !existingKeywords || existingKeywords.length === 0) return false;
-  const lower = keyword.toLowerCase().trim();
-  return existingKeywords.some((existing) =>
-    existing.toLowerCase().trim() === lower
-  );
+  var lower = keyword.toLowerCase().trim();
+  for (var i = 0; i < existingKeywords.length; i++) {
+    if (existingKeywords[i].toLowerCase().trim() === lower) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
 // Top keyword selection
 // ---------------------------------------------------------------------------
 
-function selectTopKeywords(candidates, limit = KEYWORDS_PER_BLOG) {
-  return [...candidates]
-    .sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0))
-    .slice(0, limit);
+function selectTopKeywords(candidates, limit) {
+  var cap = limit !== undefined ? limit : KEYWORDS_PER_BLOG;
+  return candidates.slice().sort(function(a, b) {
+    return ((b.priority_score || 0) - (a.priority_score || 0));
+  }).slice(0, cap);
 }
 
 // ---------------------------------------------------------------------------
-// DataForSEO API helpers
+// Keywords Everywhere (KWE) primary fetch function
 // ---------------------------------------------------------------------------
 
-function buildDataForSEOAuth(login, password) {
-  const encoded = Buffer.from(`${login}:${password}`).toString('base64');
-  return `Basic ${encoded}`;
-}
-
-async function fetchSearchVolume(keywords, auth, opts = {}) {
-  const { fetchFn } = opts;
+async function fetchKWEKeywords(keywords, opts) {
+  var fetchFn = (opts || {}).fetchFn;
   if (!fetchFn) throw new Error('fetchFn is required');
 
-  const response = await fetchFn(
-    `${DATAFORSEO_BASE}/keywords_data/google_ads/search_volume/live`,
+  if (!keywords || keywords.length === 0) return [];
+
+  if (!process.env.KWE_API_KEY) {
+    throw new Error('KWE_API_KEY environment variable not set');
+  }
+
+  // KWE limit: 100 keywords per request
+  var batch = keywords.length > 100 ? keywords.slice(0, 100) : keywords;
+  if (keywords.length > 100) {
+    console.warn('[SEO] fetchKWEKeywords: truncated to 100 keywords (got ' + keywords.length + ')');
+  }
+
+  var response = await fetchFn(
+    'https://api.keywordseverywhere.com/v1/get_keyword_data',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + process.env.KWE_API_KEY,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        country: 'us',
+        currency: 'usd',
+        dataSource: 'gkp',
+        'kw[]': batch,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('KWE API error ' + response.status);
+  }
+
+  var json = await response.json();
+  return (json.data || []).map(function(item) {
+    return {
+      keyword: item.keyword,
+      kd: item.seo_difficulty != null ? item.seo_difficulty
+        : (item.on_page_difficulty != null ? item.on_page_difficulty : KWE_UNKNOWN_KD),
+      volume: item.vol != null ? item.vol : 0,
+      cpc: (item.competition && item.competition.value != null) ? item.competition.value : null,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// DataForSEO fallback (only invoked inside fetchKeywordData wrapper)
+// Uses dataforseo_labs/google/keyword_overview/live endpoint
+// ---------------------------------------------------------------------------
+
+async function fetchDataForSEOFallback(keywords, opts) {
+  var fetchFn = (opts || {}).fetchFn;
+  if (!fetchFn) throw new Error('fetchFn is required');
+
+  var login = process.env.DATAFORSEO_LOGIN;
+  var password = process.env.DATAFORSEO_PASSWORD;
+  if (!login || !password) {
+    throw new Error('DATAFORSEO_LOGIN/DATAFORSEO_PASSWORD environment variables not set');
+  }
+  var auth = 'Basic ' + Buffer.from(login + ':' + password).toString('base64');
+
+  var response = await fetchFn(
+    DATAFORSEO_BASE + '/dataforseo_labs/google/keyword_overview/live',
     {
       method: 'POST',
       headers: {
@@ -179,151 +255,133 @@ async function fetchSearchVolume(keywords, auth, opts = {}) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify([{
-        keywords,
-        location_code: 2840, // US
+        keywords: keywords,
         language_code: 'en',
+        location_code: 2840, // US
       }]),
     }
   );
 
-  if (!response.ok) return null;
-  const data = await response.json();
-  return data?.tasks?.[0]?.result || [];
+  if (!response.ok) {
+    throw new Error('DataForSEO API error ' + response.status);
+  }
+
+  var data = await response.json();
+  var results = (data && data.tasks && data.tasks[0] && data.tasks[0].result) || [];
+
+  return results.map(function(item) {
+    return {
+      keyword: item.keyword,
+      kd: (item.keyword_properties && item.keyword_properties.keyword_difficulty) || 0,
+      volume: (item.keyword_info && item.keyword_info.search_volume) || 0,
+      cpc: (item.keyword_info && item.keyword_info.cpc) || null,
+    };
+  });
 }
 
-async function fetchRelatedKeywords(keywords, auth, opts = {}) {
-  const { fetchFn } = opts;
-  if (!fetchFn) throw new Error('fetchFn is required');
+// ---------------------------------------------------------------------------
+// Combined fetch wrapper -- transparent KWE -> DataForSEO fallback
+// This is the only function callers inside runKeywordPipeline should use.
+// ---------------------------------------------------------------------------
 
-  const response = await fetchFn(
-    `${DATAFORSEO_BASE}/keywords_data/google_ads/keywords_for_keywords/live`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': auth,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify([{
-        keywords,
-        location_code: 2840,
-      }]),
+async function fetchKeywordData(keywords, opts) {
+  try {
+    return await fetchKWEKeywords(keywords, opts);
+  } catch (kweErr) {
+    console.warn('[SEO] KWE failed, falling back to DataForSEO:', kweErr.message);
+    try {
+      return await fetchDataForSEOFallback(keywords, opts);
+    } catch (dfsErr) {
+      throw new Error('[SEO] BOTH providers failed. KWE: ' + kweErr.message + ' | DataForSEO: ' + dfsErr.message);
     }
-  );
-
-  if (!response.ok) return [];
-  const data = await response.json();
-  return data?.tasks?.[0]?.result || [];
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Full keyword pipeline for one blog
 // ---------------------------------------------------------------------------
 
-async function runKeywordPipeline(blog, tickers, existingKeywords, opts = {}) {
-  const { fetchFn, dataForSEOAuth } = opts;
+async function runKeywordPipeline(blog, tickers, existingKeywords, opts) {
+  var fetchFn = (opts || {}).fetchFn;
 
   // Step 1: Generate seeds
-  const seeds = generateSeedKeywords(blog, tickers);
+  var seeds = generateSeedKeywords(blog, tickers);
   if (seeds.length === 0) {
-    return { blog, keywords: [], warning: `No seed patterns for blog: ${blog}` };
+    return { blog: blog, keywords: [], warning: 'No seed patterns for blog: ' + blog };
   }
 
-  let allCandidates = [];
+  var allCandidates = [];
 
-  // Step 2: Fetch SEO data (if DataForSEO available)
-  if (fetchFn && dataForSEOAuth) {
+  // Step 2: Fetch SEO data via fetchKeywordData (KWE primary, DataForSEO fallback)
+  if (fetchFn) {
     try {
-      const [volumeResults, relatedResults] = await Promise.allSettled([
-        fetchSearchVolume(seeds, dataForSEOAuth, { fetchFn }),
-        fetchRelatedKeywords(seeds, dataForSEOAuth, { fetchFn }),
-      ]);
+      var kwData = await fetchKeywordData(seeds, { fetchFn: fetchFn });
 
-      // Process volume results
-      if (volumeResults.status === 'fulfilled' && volumeResults.value) {
-        for (const item of volumeResults.value) {
-          if (!item?.keyword) continue;
-          const type = classifyIntent(item.keyword);
+      if (!kwData || kwData.length === 0) {
+        console.warn('[SEO] No keyword data returned for blog: ' + blog);
+      } else {
+        for (var i = 0; i < kwData.length; i++) {
+          var item = kwData[i];
+          if (!item || !item.keyword) continue;
+          var type = classifyIntent(item.keyword);
           allCandidates.push({
             keyword: item.keyword,
-            blog,
-            search_volume: item.search_volume || 0,
-            difficulty: item.keyword_info?.keyword_difficulty || 0,
-            cpc: item.cpc || 0,
+            blog: blog,
+            kd: item.kd,
+            volume: item.volume,
+            cpc: item.cpc,
             article_type: type,
             intent_multiplier: INTENT_MULTIPLIERS[type],
-            priority_score: computePriorityScore(
-              item.search_volume || 0,
-              item.keyword_info?.keyword_difficulty || 0,
-              INTENT_MULTIPLIERS[type]
-            ),
-          });
-        }
-      }
-
-      // Process related keywords
-      if (relatedResults.status === 'fulfilled' && relatedResults.value) {
-        for (const item of relatedResults.value) {
-          if (!item?.keyword) continue;
-          const type = classifyIntent(item.keyword);
-          allCandidates.push({
-            keyword: item.keyword,
-            blog,
-            search_volume: item.search_volume || 0,
-            difficulty: item.keyword_info?.keyword_difficulty || 0,
-            cpc: item.cpc || 0,
-            article_type: type,
-            intent_multiplier: INTENT_MULTIPLIERS[type],
-            priority_score: computePriorityScore(
-              item.search_volume || 0,
-              item.keyword_info?.keyword_difficulty || 0,
-              INTENT_MULTIPLIERS[type]
-            ),
+            priority_score: computePriorityScore({ kd: item.kd, volume: item.volume }),
           });
         }
       }
     } catch (err) {
-      console.warn(`DataForSEO failed for ${blog}: ${err.message}. Falling back to seeds only.`);
+      console.warn('[SEO] Keyword data fetch failed for ' + blog + ': ' + err.message + '. Falling back to seeds only.');
     }
   }
 
-  // Fallback: if no API results, use seeds with default scores
+  // Fallback: if no API results, use seeds with zero scores
   if (allCandidates.length === 0) {
-    for (const seed of seeds) {
-      const type = classifyIntent(seed);
+    for (var j = 0; j < seeds.length; j++) {
+      var seed = seeds[j];
+      var seedType = classifyIntent(seed);
       allCandidates.push({
         keyword: seed,
-        blog,
-        search_volume: 0,
-        difficulty: 0,
+        blog: blog,
+        kd: 0,
+        volume: 0,
         cpc: 0,
-        article_type: type,
-        intent_multiplier: INTENT_MULTIPLIERS[type],
+        article_type: seedType,
+        intent_multiplier: INTENT_MULTIPLIERS[seedType],
         priority_score: 0,
       });
     }
   }
 
-  // Step 3a: Self-dedup within candidate pool (API may return same keyword twice)
-  const seen = new Set();
-  allCandidates = allCandidates.filter((c) => {
-    const key = c.keyword.toLowerCase().trim();
+  // Step 3a: Self-dedup within candidate pool
+  var seen = new Set();
+  allCandidates = allCandidates.filter(function(c) {
+    var key = c.keyword.toLowerCase().trim();
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 
   // Step 3b: Dedup against existing NocoDB keywords
-  allCandidates = allCandidates.filter((c) => !isDuplicate(c.keyword, existingKeywords || []));
+  allCandidates = allCandidates.filter(function(c) {
+    return !isDuplicate(c.keyword, existingKeywords || []);
+  });
 
   // Step 4: Select top 21
-  const selected = selectTopKeywords(allCandidates, KEYWORDS_PER_BLOG);
+  var selected = selectTopKeywords(allCandidates, KEYWORDS_PER_BLOG);
 
   // Step 5: Warning if too few
-  const warning = selected.length < 7
-    ? `WARNING: Blog "${blog}" has only ${selected.length} new keywords (< 7 minimum)`
+  var warning = selected.length < 7
+    ? 'WARNING: Blog "' + blog + '" has only ' + selected.length + ' new keywords (< 7 minimum)'
     : null;
 
-  return { blog, keywords: selected, warning };
+  return { blog: blog, keywords: selected, warning: warning };
 }
 
 // ---------------------------------------------------------------------------
@@ -331,30 +389,24 @@ async function runKeywordPipeline(blog, tickers, existingKeywords, opts = {}) {
 // ---------------------------------------------------------------------------
 
 async function selectKeywords(input, helpers) {
-  const activeBlogs = input.active_blogs || ['insiderbuying'];
-  const tickers = input.tickers || [];
-  const existingKeywords = input.existing_keywords || [];
-  const dataForSEOLogin = helpers?.env?.DATAFORSEO_LOGIN;
-  const dataForSEOPassword = helpers?.env?.DATAFORSEO_PASSWORD;
+  var activeBlogs = input.active_blogs || ['insiderbuying'];
+  var tickers = input.tickers || [];
+  var existingKeywords = input.existing_keywords || [];
 
-  const auth = dataForSEOLogin && dataForSEOPassword
-    ? buildDataForSEOAuth(dataForSEOLogin, dataForSEOPassword)
-    : null;
+  var results = [];
 
-  const results = [];
-
-  for (const blog of activeBlogs) {
-    const result = await runKeywordPipeline(blog, tickers, existingKeywords, {
-      fetchFn: helpers?.fetchFn,
-      dataForSEOAuth: auth,
+  for (var i = 0; i < activeBlogs.length; i++) {
+    var blog = activeBlogs[i];
+    var result = await runKeywordPipeline(blog, tickers, existingKeywords, {
+      fetchFn: helpers && helpers.fetchFn,
     });
     results.push(result);
   }
 
   return {
-    total_keywords: results.reduce((sum, r) => sum + r.keywords.length, 0),
+    total_keywords: results.reduce(function(sum, r) { return sum + r.keywords.length; }, 0),
     blogs: results,
-    warnings: results.filter((r) => r.warning).map((r) => r.warning),
+    warnings: results.filter(function(r) { return r.warning; }).map(function(r) { return r.warning; }),
   };
 }
 
@@ -371,9 +423,9 @@ module.exports = {
   selectTopKeywords,
   runKeywordPipeline,
   selectKeywords,
-  buildDataForSEOAuth,
-  fetchSearchVolume,
-  fetchRelatedKeywords,
+  fetchKWEKeywords,
+  fetchDataForSEOFallback,
+  fetchKeywordData,
 
   // Constants
   TYPE_MAP,
