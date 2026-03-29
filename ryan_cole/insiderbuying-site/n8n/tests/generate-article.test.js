@@ -10,6 +10,10 @@ const {
   ensureUniqueSlug,
   buildToolSchema,
   extractToolResult,
+  buildSystemPrompt,
+  validateOutline,
+  generateArticleOutline,
+  buildDraftUserMessage,
   BANNED_PHRASES,
   VALID_VERDICTS,
   LENGTH_CONFIG,
@@ -362,5 +366,182 @@ describe('ensureUniqueSlug', () => {
     const existing = ['nvda-earnings', 'nvda-earnings-2603'];
     const result = ensureUniqueSlug('nvda-earnings', existing);
     assert.ok(!existing.includes(result));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildSystemPrompt — persona injection (section 01)
+// ---------------------------------------------------------------------------
+describe('buildSystemPrompt', () => {
+  it('insiderbuying contains "Ryan Chen"', () => {
+    assert.ok(buildSystemPrompt({ blog: 'insiderbuying' }).includes('Ryan Chen'));
+  });
+
+  it('insiderbuying contains "Goldman Sachs"', () => {
+    assert.ok(buildSystemPrompt({ blog: 'insiderbuying' }).includes('Goldman Sachs'));
+  });
+
+  it('deepstockanalysis does NOT contain "Ryan Chen"', () => {
+    assert.ok(!buildSystemPrompt({ blog: 'deepstockanalysis' }).includes('Ryan Chen'));
+  });
+
+  it('deepstockanalysis contains "Dexter Research"', () => {
+    assert.ok(buildSystemPrompt({ blog: 'deepstockanalysis' }).includes('Dexter Research'));
+  });
+
+  it('dividenddeep does NOT contain "Ryan Chen"', () => {
+    assert.ok(!buildSystemPrompt({ blog: 'dividenddeep' }).includes('Ryan Chen'));
+  });
+
+  it('persona is a substring — base prompt still present', () => {
+    const full = buildSystemPrompt({ blog: 'insiderbuying' });
+    assert.ok(full.includes('Ryan Chen'));
+    assert.ok(full.length > 'Ryan Chen'.length + 50);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateOutline (section 01)
+// ---------------------------------------------------------------------------
+describe('validateOutline', () => {
+  const fiveSections = [{ h2: 'A' }, { h2: 'B' }, { h2: 'C' }, { h2: 'D' }, { h2: 'E' }];
+
+  it('5 H2 sections with ticker in headline -> valid', () => {
+    const r = validateOutline({ sections: fiveSections, headline: 'AAPL insider buying signal' }, 'AAPL');
+    assert.deepEqual(r, { valid: true, errors: [] });
+  });
+
+  it('4 sections -> invalid with correct error', () => {
+    const r = validateOutline({ sections: fiveSections.slice(0, 4), headline: 'AAPL insider buying' }, 'AAPL');
+    assert.equal(r.valid, false);
+    assert.ok(r.errors.includes('Outline has fewer than 5 H2 sections'));
+  });
+
+  it('ticker not in headline -> invalid with correct error', () => {
+    const r = validateOutline({ sections: fiveSections, headline: 'insider buying signal analysis' }, 'AAPL');
+    assert.equal(r.valid, false);
+    assert.ok(r.errors.includes('Outline does not mention ticker'));
+  });
+
+  it('empty sections array -> invalid', () => {
+    const r = validateOutline({ sections: [], headline: 'AAPL' }, 'AAPL');
+    assert.equal(r.valid, false);
+    assert.ok(r.errors.includes('Outline has fewer than 5 H2 sections'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateArticleOutline (section 01)
+// ---------------------------------------------------------------------------
+describe('generateArticleOutline', () => {
+  const validOutline = {
+    headline: 'NVDA Insider Buying Analysis 2026 Report',
+    tldr: ['bullet 1', 'bullet 2', 'bullet 3'],
+    sections: [
+      { h2: 'Background', h3s: ['Context', 'History'] },
+      { h2: 'Analysis', h3s: ['Data', 'Trends'] },
+      { h2: 'Risk Factors', h3s: ['Downside', 'Bear Case'] },
+      { h2: 'Valuation', h3s: ['DCF Model', 'Comps'] },
+      { h2: 'Conclusion', h3s: ['Verdict', 'Price Target'] },
+    ],
+    required_data_points: ['eps', 'revenue'],
+  };
+
+  function makeFetch(outline) {
+    return async () => ({
+      ok: true,
+      json: async () => ({
+        content: [{ type: 'text', text: JSON.stringify(outline) }],
+        stop_reason: 'end_turn',
+      }),
+    });
+  }
+
+  it('returns parsed ArticleOutline on valid response', async () => {
+    const result = await generateArticleOutline('NVDA', 'A', {}, makeFetch(validOutline), 'test');
+    assert.equal(result.headline, validOutline.headline);
+    assert.ok(Array.isArray(result.sections));
+    assert.equal(result.sections.length, 5);
+  });
+
+  it('strips markdown fences from JSON response', async () => {
+    const fetchFn = async () => ({
+      ok: true,
+      json: async () => ({
+        content: [{ type: 'text', text: '```json\n' + JSON.stringify(validOutline) + '\n```' }],
+        stop_reason: 'end_turn',
+      }),
+    });
+    const result = await generateArticleOutline('NVDA', 'A', {}, fetchFn, 'test');
+    assert.equal(result.headline, validOutline.headline);
+  });
+
+  it('retries once on invalid; retry prompt contains error list', async () => {
+    const invalidOutline = {
+      headline: 'no ticker in headline at all',
+      sections: [{ h2: 'A' }],
+      tldr: [],
+      required_data_points: [],
+    };
+    const capturedBodies = [];
+    let call = 0;
+    const fetchFn = async (url, opts) => {
+      capturedBodies.push(JSON.parse(opts.body));
+      const outline = call === 0 ? invalidOutline : validOutline;
+      call++;
+      return {
+        ok: true,
+        json: async () => ({ content: [{ type: 'text', text: JSON.stringify(outline) }] }),
+      };
+    };
+    const result = await generateArticleOutline('NVDA', 'A', {}, fetchFn, 'test');
+    assert.equal(call, 2);
+    assert.equal(result.headline, validOutline.headline);
+    const retryPrompt = capturedBodies[1].messages[0].content;
+    assert.ok(
+      retryPrompt.includes('Outline has fewer than 5 H2 sections') ||
+      retryPrompt.includes('Outline does not mention ticker'),
+      `retry prompt missing errors: ${retryPrompt}`,
+    );
+  });
+
+  it('throws after 2 invalid attempts', async () => {
+    const invalidOutline = { headline: 'no ticker', sections: [{ h2: 'A' }], tldr: [], required_data_points: [] };
+    const fetchFn = async () => ({
+      ok: true,
+      json: async () => ({ content: [{ type: 'text', text: JSON.stringify(invalidOutline) }] }),
+    });
+    await assert.rejects(
+      generateArticleOutline('NVDA', 'A', {}, fetchFn, 'test'),
+      /failed after 2 attempts/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDraftUserMessage (section 01)
+// ---------------------------------------------------------------------------
+describe('buildDraftUserMessage', () => {
+  it('contains outline headline and section names when outline provided', () => {
+    const outline = {
+      headline: 'NVDA Insider Analysis Report 2026',
+      sections: [
+        { h2: 'Background Analysis', h3s: [] },
+        { h2: 'Risk Factors', h3s: [] },
+        { h2: 'Valuation', h3s: [] },
+        { h2: 'Catalysts', h3s: [] },
+        { h2: 'Verdict', h3s: [] },
+      ],
+    };
+    const msg = buildDraftUserMessage(outline);
+    assert.ok(msg.includes('NVDA Insider Analysis Report 2026'));
+    assert.ok(msg.includes('Background Analysis'));
+  });
+
+  it('contains {{VISUAL_1}}, {{VISUAL_2}}, {{VISUAL_3}} placeholder instruction', () => {
+    const msg = buildDraftUserMessage(null);
+    assert.ok(msg.includes('{{VISUAL_1}}'));
+    assert.ok(msg.includes('{{VISUAL_2}}'));
+    assert.ok(msg.includes('{{VISUAL_3}}'));
   });
 });

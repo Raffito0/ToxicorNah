@@ -95,6 +95,16 @@ const REQUIRED_ARTICLE_FIELDS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Persona Constants (Section 01)
+// ---------------------------------------------------------------------------
+
+var CLAUDE_MODEL = 'claude-haiku-4-5-20251001'; // lightweight model for outline; override via env if needed
+
+var BASE_SYSTEM_PROMPT = 'You are a financial analyst writing for Dexter Research, an independent data-driven financial analysis firm. Write with authority. Use specific numbers, percentages, and dollar amounts. Cite SEC filings. Avoid generic commentary. Never use filler phrases or AI-sounding vocabulary.';
+
+var RYAN_CHEN_PERSONA = 'You are Ryan Chen, a former Goldman Sachs equity research analyst with 12 years of experience covering technology, semiconductor, and growth equities. You now write independent financial analysis for EarlyInsider.com. Write in first-person singular. Reference your Goldman Sachs analytical background naturally without forcing it. Your tone is direct, data-driven, and skeptical of consensus narratives. You cite specific page numbers from SEC filings. You disagree with Wall Street consensus when the numbers warrant it.';
+
+// ---------------------------------------------------------------------------
 // Ticker Extraction
 // ---------------------------------------------------------------------------
 
@@ -631,6 +641,157 @@ function ensureUniqueSlug(slug, existingSlugs) {
 }
 
 // ---------------------------------------------------------------------------
+// Section 01: Persona, Outline, Draft Builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the system prompt for a Claude article generation call.
+ * Injects Ryan Chen persona for insiderbuying blog only.
+ * @param {{ blog: string }} opts
+ * @returns {string}
+ */
+function buildSystemPrompt(opts) {
+  var blog = opts && opts.blog;
+  var prompt = BASE_SYSTEM_PROMPT;
+  if (blog === 'insiderbuying') {
+    prompt += '\n\n' + RYAN_CHEN_PERSONA;
+  }
+  return prompt;
+}
+
+/**
+ * Strip markdown code fences then parse JSON.
+ * @param {string} text
+ * @returns {object}
+ */
+function parseClaudeJSON(text) {
+  var cleaned = text.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
+  return JSON.parse(cleaned);
+}
+
+/**
+ * Validate a Claude-generated article outline.
+ * @param {object} outline
+ * @param {string} ticker
+ * @returns {{ valid: boolean, errors: string[] }}
+ */
+function validateOutline(outline, ticker) {
+  var errors = [];
+  if (!outline || !Array.isArray(outline.sections) || outline.sections.length < 5) {
+    errors.push('Outline has fewer than 5 H2 sections');
+  }
+  if (ticker && outline && outline.headline) {
+    if (!outline.headline.toLowerCase().includes(ticker.toLowerCase())) {
+      errors.push('Outline does not mention ticker');
+    }
+  } else if (!outline || !outline.headline) {
+    errors.push('Outline does not mention ticker');
+  }
+  return { valid: errors.length === 0, errors: errors };
+}
+
+/**
+ * Generate a structured article outline via a lightweight Claude call.
+ * Has an independent 1-retry budget (2 total attempts).
+ * @param {string} ticker
+ * @param {string} articleType
+ * @param {object} dexterData
+ * @param {function} fetchFn
+ * @param {string} [anthropicApiKey]
+ * @returns {Promise<object>}
+ */
+async function generateArticleOutline(ticker, articleType, dexterData, fetchFn, anthropicApiKey) {
+  var basePrompt = 'Generate a structured article outline for an insider buying analysis.\n'
+    + 'Ticker: ' + ticker + '\n'
+    + 'Article type: ' + (articleType || 'A') + '\n\n'
+    + 'Return JSON only (no markdown fences) with this exact shape:\n'
+    + '{"headline":"55-65 char headline containing ' + ticker + '","tldr":["bullet1","bullet2","bullet3"],'
+    + '"sections":[{"h2":"Section Title","h3s":["Subsection A","Subsection B"]}],'
+    + '"required_data_points":["specific data point"]}\n\n'
+    + 'Requirements: 5-7 H2 sections, headline must contain "' + ticker + '", no markdown fences in response.';
+
+  var lastErrors = [];
+
+  for (var attempt = 0; attempt < 2; attempt++) {
+    var prompt = attempt === 0
+      ? basePrompt
+      : basePrompt + '\n\nRegenerate outline fixing: ' + lastErrors.join('; ');
+
+    var res = await fetchFn('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicApiKey || '',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 400,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!res.ok) throw new Error('Claude API error: ' + res.status);
+    var data = await res.json();
+    var raw = (data.content && data.content[0] && data.content[0].text) ? data.content[0].text : '';
+
+    var outline = null;
+    try { outline = parseClaudeJSON(raw); } catch (e) { /* invalid JSON */ }
+
+    if (outline) {
+      var validation = validateOutline(outline, ticker);
+      if (validation.valid) return outline;
+      lastErrors = validation.errors;
+    } else {
+      lastErrors = ['Failed to parse outline JSON'];
+    }
+  }
+
+  throw new Error('Article outline validation failed after 2 attempts: ' + lastErrors.join('; '));
+}
+
+/**
+ * Build the user message for the draft Claude call.
+ * Includes validated outline and visual placeholder instruction.
+ * @param {object|null} outline
+ * @returns {string}
+ */
+function buildDraftUserMessage(outline) {
+  var parts = [];
+
+  if (outline) {
+    var outlineBlock = '[OUTLINE]\n'
+      + 'Headline: ' + outline.headline + '\n'
+      + 'Sections:\n'
+      + (outline.sections || []).map(function(s) {
+        var h3Lines = (s.h3s || []).map(function(h) { return '### ' + h; }).join('\n');
+        return '## ' + s.h2 + (h3Lines ? '\n' + h3Lines : '');
+      }).join('\n\n')
+      + '\n[/OUTLINE]';
+    parts.push(outlineBlock);
+  }
+
+  parts.push('Generate the article now.');
+  parts.push('Your article body_html must include {{VISUAL_1}}, {{VISUAL_2}}, and {{VISUAL_3}} tokens at appropriate chart positions within body_html.');
+
+  return parts.join('\n\n');
+}
+
+/**
+ * Extract the tool_use result from a raw Claude API response.
+ * @param {object} response
+ * @returns {object|null}
+ */
+function extractToolResult(response) {
+  if (!response || !Array.isArray(response.content)) return null;
+  var toolBlock = response.content.find(function(b) {
+    return b.type === 'tool_use' && b.name === 'generate_article';
+  });
+  if (!toolBlock) return null;
+  return toolBlock.input || null;
+}
+
+// ---------------------------------------------------------------------------
 // NocoDB helpers (for n8n Code node usage)
 // ---------------------------------------------------------------------------
 
@@ -1118,6 +1279,12 @@ module.exports = {
   determineArticleParams,
   interpolateTemplate,
   buildToolSchema,
+  extractToolResult,
+  buildSystemPrompt,
+  validateOutline,
+  generateArticleOutline,
+  buildDraftUserMessage,
+  parseClaudeJSON,
   qualityGate,
   seoScore,
   aiDetectionScore,
