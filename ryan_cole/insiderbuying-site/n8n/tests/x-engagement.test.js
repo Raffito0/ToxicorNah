@@ -9,6 +9,10 @@ const {
   buildFilingContext,
   selectArchetype,
   buildReplyPrompt,
+  validateReply,
+  checkDailyReplyCap,
+  buildTimingDelay,
+  buildEngagementSequence,
 } = require('../code/insiderbuying/x-engagement.js');
 
 // ---------------------------------------------------------------------------
@@ -438,5 +442,180 @@ describe('buildReplyPrompt', () => {
       () => buildReplyPrompt('nonexistent_type', tweet, filingCtx, helpers),
       /archetype/i
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateReply
+// ---------------------------------------------------------------------------
+describe('validateReply', () => {
+  function makeText(len, ticker) {
+    ticker = ticker || '$NVDA';
+    var base = ticker + ' ';
+    var s = base;
+    while (s.length < len) s += 'a';
+    return s.slice(0, len);
+  }
+
+  it('150-char text with $NVDA -> valid', () => {
+    const r = validateReply(makeText(150));
+    assert.equal(r.valid, true);
+  });
+
+  it('220-char text with $NVDA -> valid', () => {
+    const r = validateReply(makeText(220));
+    assert.equal(r.valid, true);
+  });
+
+  it('149-char text -> invalid, error mentions 149', () => {
+    const r = validateReply(makeText(149));
+    assert.equal(r.valid, false);
+    assert.ok(r.error.includes('149'), `error: ${r.error}`);
+  });
+
+  it('221-char text -> invalid', () => {
+    const r = validateReply(makeText(221));
+    assert.equal(r.valid, false);
+  });
+
+  it('3 emojis -> invalid, error mentions emoji', () => {
+    const text = '$NVDA buy signal ' + '\u{1F4C8}\u{1F525}\u{1F911}' + ' '.repeat(150 - 21);
+    const r = validateReply(text);
+    assert.equal(r.valid, false);
+    assert.ok(r.error.toLowerCase().includes('emoji'), `error: ${r.error}`);
+  });
+
+  it('2 emojis -> valid', () => {
+    const base = '$NVDA buy signal ' + '\u{1F4C8}\u{1F525}';
+    const text = base + ' '.repeat(150 - base.length);
+    const r = validateReply(text);
+    assert.equal(r.valid, true);
+  });
+
+  it('contains http:// -> invalid, error mentions link', () => {
+    const base = '$NVDA http://example.com check ';
+    const text = base + ' '.repeat(Math.max(0, 150 - base.length));
+    const r = validateReply(text);
+    assert.equal(r.valid, false);
+    assert.ok(r.error.toLowerCase().includes('link'), `error: ${r.error}`);
+  });
+
+  it('contains www. -> invalid', () => {
+    const base = '$NVDA see www.site.com for ';
+    const text = base + ' '.repeat(Math.max(0, 150 - base.length));
+    const r = validateReply(text);
+    assert.equal(r.valid, false);
+  });
+
+  it('contains .com/ -> invalid', () => {
+    const base = '$NVDA site.com/page data ';
+    const text = base + ' '.repeat(Math.max(0, 150 - base.length));
+    const r = validateReply(text);
+    assert.equal(r.valid, false);
+  });
+
+  it('contains "dot-com bubble" -> valid (not a URL)', () => {
+    const base = '$NVDA not like the dot-com bubble at all just buying ';
+    const text = base + ' '.repeat(Math.max(0, 150 - base.length));
+    const r = validateReply(text);
+    assert.equal(r.valid, true, `error: ${r.error}`);
+  });
+
+  it('no $CASHTAG -> invalid, error mentions CASHTAG', () => {
+    const r = validateReply('Insider buying heavily this quarter watch the market closely now!'.padEnd(150, ' '));
+    assert.equal(r.valid, false);
+    assert.ok(r.error.includes('CASHTAG'), `error: ${r.error}`);
+  });
+
+  it('$BRK.B present -> valid (extended ticker)', () => {
+    const r = validateReply(makeText(150, '$BRK.B'));
+    assert.equal(r.valid, true, `error: ${r.error}`);
+  });
+
+  it('contains "As an AI language model" -> invalid, error mentions AI refusal', () => {
+    const base = '$NVDA As an AI language model I cannot comment ';
+    const text = base + ' '.repeat(Math.max(0, 150 - base.length));
+    const r = validateReply(text);
+    assert.equal(r.valid, false);
+    assert.ok(r.error.toLowerCase().includes('ai refusal'), `error: ${r.error}`);
+  });
+
+  it('contains "I cannot" -> invalid', () => {
+    const base = '$NVDA I cannot provide financial advice ';
+    const text = base + ' '.repeat(Math.max(0, 150 - base.length));
+    const r = validateReply(text);
+    assert.equal(r.valid, false);
+  });
+
+  it('$NVDA, 180 chars, no URL, no refusal, 1 emoji -> valid', () => {
+    const base = '$NVDA CEO Jensen Huang: $2.4M buy signals conviction. \u{1F4C8} ';
+    const text = base + ' '.repeat(Math.max(0, 180 - base.length));
+    const r = validateReply(text.slice(0, 180));
+    assert.equal(r.valid, true, `error: ${r.error}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkDailyReplyCap
+// ---------------------------------------------------------------------------
+describe('checkDailyReplyCap', () => {
+  it('15 entries -> canReply: false, repliesToday: 15', () => {
+    const entries = Array.from({ length: 15 }, (_, i) => ({ id: i }));
+    const r = checkDailyReplyCap(entries);
+    assert.equal(r.canReply, false);
+    assert.equal(r.repliesToday, 15);
+  });
+
+  it('14 entries -> canReply: true, repliesToday: 14', () => {
+    const entries = Array.from({ length: 14 }, (_, i) => ({ id: i }));
+    const r = checkDailyReplyCap(entries);
+    assert.equal(r.canReply, true);
+    assert.equal(r.repliesToday, 14);
+  });
+
+  it('empty array -> canReply: true, repliesToday: 0', () => {
+    const r = checkDailyReplyCap([]);
+    assert.equal(r.canReply, true);
+    assert.equal(r.repliesToday, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTimingDelay
+// ---------------------------------------------------------------------------
+describe('buildTimingDelay', () => {
+  it('100 calls all return values in [180000, 300000]', () => {
+    for (let i = 0; i < 100; i++) {
+      const v = buildTimingDelay();
+      assert.ok(v >= 180000 && v <= 300000, `out of range: ${v}`);
+    }
+  });
+
+  it('20 calls return different values (not constant)', () => {
+    const vals = new Set();
+    for (let i = 0; i < 20; i++) vals.add(buildTimingDelay());
+    assert.ok(vals.size > 1, 'all values identical — not random');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildEngagementSequence
+// ---------------------------------------------------------------------------
+describe('buildEngagementSequence', () => {
+  it('returns array of exactly 1 payload', () => {
+    const r = buildEngagementSequence('123');
+    assert.ok(Array.isArray(r));
+    assert.equal(r.length, 1);
+  });
+
+  it('payload contains the original tweet id', () => {
+    const r = buildEngagementSequence('tw999');
+    assert.ok(r[0].body && r[0].body.tweet_id === 'tw999' || r[0].tweetId === 'tw999');
+  });
+
+  it('payload uses POST method and /likes url structure', () => {
+    const r = buildEngagementSequence('123');
+    assert.equal(r[0].method, 'POST');
+    assert.ok(r[0].url && r[0].url.includes('/likes'), `url: ${r[0].url}`);
   });
 });

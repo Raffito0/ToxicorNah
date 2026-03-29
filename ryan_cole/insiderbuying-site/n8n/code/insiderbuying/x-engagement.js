@@ -287,6 +287,73 @@ async function buildReplyPrompt(archetype, tweet, filingContext, helpers) {
   return _aiClient.claude(userPrompt, { maxTokens: 300, systemPrompt: systemPrompt }, helpers);
 }
 
+// ---------------------------------------------------------------------------
+// Validation, caps, and timing
+// ---------------------------------------------------------------------------
+
+var DAILY_REPLY_CAP = 15;
+
+/**
+ * Validate a generated reply against 5 content rules.
+ * @param {string} text
+ * @returns {{ valid: boolean, error: string|null }}
+ */
+function validateReply(text) {
+  var len = text.length;
+  if (len < 150) return { valid: false, error: 'Reply is ' + len + ' chars, minimum is 150' };
+  if (len > 220) return { valid: false, error: 'Reply is ' + len + ' chars, maximum is 220' };
+
+  var emojis = Array.from(text.matchAll(/\p{Emoji_Presentation}/gu));
+  if (emojis.length > 2) return { valid: false, error: 'Reply has ' + emojis.length + ' emojis, maximum is 2' };
+
+  if (text.includes('http') || text.includes('www.') || text.includes('.com/')) {
+    return { valid: false, error: 'Reply contains a link' };
+  }
+
+  if (!/\$[A-Z]{1,6}(?:\.[A-Z]{1,2})?/.test(text)) {
+    return { valid: false, error: 'Reply missing $CASHTAG' };
+  }
+
+  if (/\b(as an AI|language model|I cannot|I apologize)\b/i.test(text)) {
+    return { valid: false, error: 'Reply contains AI refusal phrase' };
+  }
+
+  return { valid: true, error: null };
+}
+
+/**
+ * Check whether the daily reply cap has been reached.
+ * @param {Array} logEntries - today's reply log entries (filtered by upstream n8n query)
+ * @returns {{ canReply: boolean, repliesToday: number }}
+ */
+function checkDailyReplyCap(logEntries) {
+  var count = Array.isArray(logEntries) ? logEntries.length : 0;
+  return { canReply: count < DAILY_REPLY_CAP, repliesToday: count };
+}
+
+/**
+ * Return a random delay in ms between 3 and 5 minutes.
+ * @returns {number}
+ */
+function buildTimingDelay() {
+  return Math.floor(Math.random() * (300000 - 180000 + 1)) + 180000;
+}
+
+/**
+ * Build a like-the-original-tweet engagement payload.
+ * @param {string} originalTweetId
+ * @returns {object[]} array of exactly 1 payload
+ */
+function buildEngagementSequence(originalTweetId) {
+  return [
+    {
+      method: 'POST',
+      url: 'https://api.twitter.com/2/users/{{myUserId}}/likes',
+      body: { tweet_id: originalTweetId },
+    },
+  ];
+}
+
 module.exports = {
   filterRelevant: filterRelevant,
   draftReply: draftReply,
@@ -295,4 +362,8 @@ module.exports = {
   buildFilingContext: buildFilingContext,
   selectArchetype: selectArchetype,
   buildReplyPrompt: buildReplyPrompt,
+  validateReply: validateReply,
+  checkDailyReplyCap: checkDailyReplyCap,
+  buildTimingDelay: buildTimingDelay,
+  buildEngagementSequence: buildEngagementSequence,
 };
