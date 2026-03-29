@@ -8,6 +8,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 const { createDeepSeekClient } = require('./ai-client');
+const { NocoDB } = require('./nocodb-client');
 
 const YAHOO_API = 'https://query1.finance.yahoo.com/v8/finance/chart';
 const HISTORY_MONTHS = 24;
@@ -570,6 +571,139 @@ async function runScoreAlert(filings, helpers = {}) {
   return results;
 }
 
+// ─── runWeeklyCalibration ────────────────────────────────────────────────────
+
+const ALERTS_TABLE = 'Alerts';
+const CALIB_TABLE = 'score_calibration_runs';
+
+/**
+ * Queries NocoDB for all scored alerts from the past 7 days, buckets them into
+ * four score ranges, fires a Telegram alert if the distribution is unhealthy,
+ * and always writes a calibration run record to score_calibration_runs.
+ *
+ * @param {object} deps  { fetchFn, sleep, env }
+ *   env keys: NOCODB_BASE_URL, NOCODB_API_TOKEN, NOCODB_PROJECT_ID,
+ *             TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+ * @returns {{ total, buckets, flagged } | { message } | null}
+ */
+async function runWeeklyCalibration(deps) {
+  // sleep: accepted for dep-injection consistency with other functions; unused here
+  const { fetchFn, env } = deps;
+
+  if (!env.NOCODB_BASE_URL || !env.NOCODB_API_TOKEN) {
+    console.warn('[calibration] missing NocoDB env vars — skipping');
+    return null;
+  }
+
+  const nocodb = new NocoDB(
+    env.NOCODB_BASE_URL,
+    env.NOCODB_API_TOKEN,
+    env.NOCODB_PROJECT_ID,
+    fetchFn
+  );
+
+  // Step 1: Query alerts from past 7 days with a final score
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  let alerts;
+  try {
+    const response = await nocodb.list(ALERTS_TABLE, {
+      where: `(created_at,gte,${sevenDaysAgo})~and(final_score,isnot,null)`,
+      fields: 'final_score',
+      limit: 1000,
+    });
+    alerts = response.list || [];
+  } catch (err) {
+    console.error('[calibration] NocoDB query failed:', err.message);
+    return null;
+  }
+
+  // Step 2: Guard for empty week
+  if (alerts.length === 0) {
+    console.log('[calibration] no alerts this week — skipping');
+    return { message: 'no alerts this week' };
+  }
+
+  // Step 3: Bucket the scores
+  const total = alerts.length;
+  let count_1_3 = 0, count_4_5 = 0, count_6_7 = 0, count_8_10 = 0;
+
+  for (const alert of alerts) {
+    const score = alert.final_score;
+    if (score <= 3) count_1_3++;
+    else if (score <= 5) count_4_5++;
+    else if (score <= 7) count_6_7++;
+    else count_8_10++;
+  }
+
+  const pct_1_3 = parseFloat((count_1_3 / total * 100).toFixed(1));
+  const pct_4_5 = parseFloat((count_4_5 / total * 100).toFixed(1));
+  const pct_6_7 = parseFloat((count_6_7 / total * 100).toFixed(1));
+  const pct_8_10 = parseFloat((count_8_10 / total * 100).toFixed(1));
+
+  // Step 4: Evaluate alert conditions
+  let flagged = false;
+  let flagReason = '';
+
+  if (pct_8_10 > 25) {
+    flagged = true;
+    flagReason = `8-10 bucket is ${pct_8_10}% — formula may be too generous`;
+  } else if (pct_8_10 < 5) {
+    flagged = true;
+    flagReason = `8-10 bucket is ${pct_8_10}% — formula may be too strict`;
+  } else if (pct_1_3 === 0 || pct_4_5 === 0 || pct_6_7 === 0 || pct_8_10 === 0) {
+    flagged = true;
+    flagReason = 'one or more buckets are empty — pipeline anomaly detected';
+  }
+
+  // Step 5: Send Telegram alert if flagged
+  if (flagged) {
+    const weekOf = new Date().toISOString().slice(0, 10);
+    const text = [
+      `[Score Calibration Alert] Week of ${weekOf}`,
+      `Total alerts: ${total}`,
+      'Distribution:',
+      `  1-3:  ${pct_1_3}%`,
+      `  4-5:  ${pct_4_5}%`,
+      `  6-7:  ${pct_6_7}%`,
+      `  8-10: ${pct_8_10}%`,
+      '',
+      `Issue: ${flagReason}`,
+    ].join('\n');
+
+    const tgUrl = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+    try {
+      const res = await fetchFn(tgUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text }),
+      });
+      if (!res.ok) {
+        console.error(`[calibration] Telegram sendMessage returned ${res.status}`);
+      }
+    } catch (err) {
+      console.error('[calibration] Telegram send failed:', err.message);
+    }
+  }
+
+  // Step 6: Write calibration record to NocoDB (always, even when not flagged)
+  const run_date = new Date().toISOString().slice(0, 10);
+  try {
+    await nocodb.create(CALIB_TABLE, {
+      run_date,
+      total_alerts: total,
+      pct_1_3,
+      pct_4_5,
+      pct_6_7,
+      pct_8_10,
+      flagged,
+    });
+  } catch (err) {
+    console.error('[calibration] NocoDB calibration write failed:', err.message);
+  }
+
+  return { total, buckets: { pct_1_3, pct_4_5, pct_6_7, pct_8_10 }, flagged };
+}
+
 // ─── n8n Code node entry point ───────────────────────────────────────────────
 // When running inside n8n, the node receives $input.all() items.
 // This block is only executed in n8n context (not in tests).
@@ -611,4 +745,5 @@ module.exports = {
   callDeepSeekForRefinement,
   detectSameDaySell,
   emitScoreLog,
+  runWeeklyCalibration,
 };

@@ -1199,3 +1199,195 @@ describe('structured score logging', () => {
     logSpy.mockRestore();
   });
 });
+
+// ─── runWeeklyCalibration (S04) ──────────────────────────────────────────────
+
+const { runWeeklyCalibration } = require('../../n8n/code/insiderbuying/score-alert');
+
+describe('runWeeklyCalibration', () => {
+  const ENV = {
+    NOCODB_BASE_URL: 'http://localhost:8080',
+    NOCODB_API_TOKEN: 'test-token',
+    NOCODB_PROJECT_ID: 'proj1',
+    TELEGRAM_BOT_TOKEN: 'bot123',
+    TELEGRAM_CHAT_ID: '-100111',
+  };
+
+  const ALERTS_TABLE = 'Alerts';
+  const CALIB_TABLE = 'score_calibration_runs';
+
+  // Helper: builds a fetchFn mock that returns given final_scores from NocoDB
+  function makeCalibFetch(scores, { nocoFails = false, telegramFails = false } = {}) {
+    return jest.fn().mockImplementation(async (url) => {
+      if (url.includes('api.telegram.org')) {
+        if (telegramFails) throw new Error('Telegram error');
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      }
+      if (nocoFails) throw new Error('NocoDB down');
+      if (url.includes(ALERTS_TABLE)) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ list: scores.map(s => ({ final_score: s })), pageInfo: { isLastPage: true } }),
+        };
+      }
+      // calibration write
+      return { ok: true, status: 200, json: async () => ({ Id: 42 }) };
+    });
+  }
+
+  function makeDeps(scores, opts = {}) {
+    const fetchFn = makeCalibFetch(scores, opts);
+    return { fetchFn, sleep: jest.fn().mockResolvedValue(undefined), env: ENV };
+  }
+
+  // ─ Distribution bucketing ──────────────────────────────────────────────────
+
+  test('correctly buckets 10 scores into 4 ranges', async () => {
+    // 1 in 1-3, 2 in 4-5, 3 in 6-7, 4 in 8-10
+    const scores = [2, 4, 5, 6, 6, 7, 8, 9, 10, 8];
+    const result = await runWeeklyCalibration(makeDeps(scores));
+    expect(result).not.toBeNull();
+    expect(result.total).toBe(10);
+    expect(result.buckets.pct_1_3).toBe(10);
+    expect(result.buckets.pct_4_5).toBe(20);
+    expect(result.buckets.pct_6_7).toBe(30);
+    expect(result.buckets.pct_8_10).toBe(40);
+  });
+
+  test('8-10 bucket > 25% sets flagged=true', async () => {
+    const scores = [8, 9, 10, 8, 7, 5, 4, 3, 6, 6]; // 4/10 = 40% in 8-10
+    const result = await runWeeklyCalibration(makeDeps(scores));
+    expect(result.flagged).toBe(true);
+  });
+
+  test('all same score (empty buckets) sets flagged=true', async () => {
+    const scores = Array(14).fill(5); // 100% in 4-5, rest empty
+    const result = await runWeeklyCalibration(makeDeps(scores));
+    expect(result.flagged).toBe(true);
+  });
+
+  test('healthy distribution (all buckets non-empty, 8-10 in range) sets flagged=false', async () => {
+    // ~10% 1-3, ~30% 4-5, ~40% 6-7, ~20% 8-10 → all buckets non-empty, 8-10=20% (5%–25%)
+    const scores = [2, 4, 4, 4, 6, 6, 6, 6, 8, 8];
+    const result = await runWeeklyCalibration(makeDeps(scores));
+    expect(result.flagged).toBe(false);
+  });
+
+  // ─ Telegram ────────────────────────────────────────────────────────────────
+
+  test('Telegram fires when 8-10 bucket > 25%', async () => {
+    const scores = [8, 9, 10, 8, 8, 5, 5, 4, 6, 6]; // 5/10 = 50%
+    const deps = makeDeps(scores);
+    await runWeeklyCalibration(deps);
+    const telegramCalls = deps.fetchFn.mock.calls.filter(c => c[0].includes('api.telegram.org'));
+    expect(telegramCalls.length).toBeGreaterThan(0);
+  });
+
+  test('Telegram fires when 8-10 bucket < 5%', async () => {
+    const scores = [2, 3, 4, 4, 5, 5, 6, 6, 7, 7]; // 0/10 = 0% in 8-10
+    const deps = makeDeps(scores);
+    await runWeeklyCalibration(deps);
+    const telegramCalls = deps.fetchFn.mock.calls.filter(c => c[0].includes('api.telegram.org'));
+    expect(telegramCalls.length).toBeGreaterThan(0);
+  });
+
+  test('Telegram does NOT fire for healthy distribution', async () => {
+    const scores = [2, 4, 4, 4, 6, 6, 6, 6, 8, 8]; // healthy
+    const deps = makeDeps(scores);
+    await runWeeklyCalibration(deps);
+    const telegramCalls = deps.fetchFn.mock.calls.filter(c => c[0].includes('api.telegram.org'));
+    expect(telegramCalls.length).toBe(0);
+  });
+
+  test('Telegram message contains distribution table with all 4 buckets', async () => {
+    const scores = [8, 9, 10, 8, 8, 5, 5, 4, 6, 6]; // flagged
+    const deps = makeDeps(scores);
+    await runWeeklyCalibration(deps);
+    const telegramCall = deps.fetchFn.mock.calls.find(c => c[0].includes('api.telegram.org'));
+    const body = JSON.parse(telegramCall[1].body);
+    expect(body.text).toContain('1-3');
+    expect(body.text).toContain('4-5');
+    expect(body.text).toContain('6-7');
+    expect(body.text).toContain('8-10');
+    expect(body.text).toContain('10'); // total count
+  });
+
+  // ─ NocoDB calibration record ────────────────────────────────────────────────
+
+  test('calibration record is always written (flagged=false)', async () => {
+    const scores = [2, 4, 4, 4, 6, 6, 6, 6, 8, 8]; // healthy
+    const deps = makeDeps(scores);
+    await runWeeklyCalibration(deps);
+    const calibCalls = deps.fetchFn.mock.calls.filter(c => c[0].includes(CALIB_TABLE) && c[1]?.method === 'POST');
+    expect(calibCalls.length).toBeGreaterThan(0);
+  });
+
+  test('calibration record is written when flagged=true', async () => {
+    const scores = [8, 9, 10, 8, 8, 5, 5, 4, 6, 6]; // flagged
+    const deps = makeDeps(scores);
+    await runWeeklyCalibration(deps);
+    const calibCalls = deps.fetchFn.mock.calls.filter(c => c[0].includes(CALIB_TABLE) && c[1]?.method === 'POST');
+    expect(calibCalls.length).toBeGreaterThan(0);
+    const body = JSON.parse(calibCalls[0][1].body);
+    expect(body.flagged).toBe(true);
+    expect(body).toHaveProperty('run_date');
+    expect(body).toHaveProperty('total_alerts');
+    expect(body).toHaveProperty('pct_1_3');
+    expect(body).toHaveProperty('pct_8_10');
+  });
+
+  // ─ Zero alerts early exit ─────────────────────────────────────────────────
+
+  test('zero alerts → returns early, no Telegram, no calibration write', async () => {
+    const deps = makeDeps([]); // empty alerts
+    const result = await runWeeklyCalibration(deps);
+    expect(result).not.toBeNull(); // returns early message, not null
+    const telegramCalls = deps.fetchFn.mock.calls.filter(c => c[0].includes('api.telegram.org'));
+    const calibCalls = deps.fetchFn.mock.calls.filter(c => c[0].includes(CALIB_TABLE) && c[1]?.method === 'POST');
+    expect(telegramCalls).toHaveLength(0);
+    expect(calibCalls).toHaveLength(0);
+  });
+
+  // ─ Error handling ──────────────────────────────────────────────────────────
+
+  test('NocoDB query failure → returns null, no crash, no calibration record', async () => {
+    const deps = makeDeps([], { nocoFails: true });
+    const warnSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const result = await runWeeklyCalibration(deps);
+    expect(result).toBeNull();
+    warnSpy.mockRestore();
+  });
+
+  test('Telegram failure does not abort calibration record write', async () => {
+    const scores = [8, 9, 10, 8, 8, 5, 5, 4, 6, 6]; // flagged
+    const deps = makeDeps(scores, { telegramFails: true });
+    const warnSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const result = await runWeeklyCalibration(deps); // should not throw
+    // calibration write should still happen
+    const calibCalls = deps.fetchFn.mock.calls.filter(c => c[0].includes(CALIB_TABLE) && c[1]?.method === 'POST');
+    expect(calibCalls.length).toBeGreaterThan(0);
+    warnSpy.mockRestore();
+  });
+
+  test('pct_8_10 exactly 25% → flagged=false (boundary)', async () => {
+    // 5 scores in 8-10 out of 20 total = exactly 25% → not > 25 → not flagged
+    // 1-3: 3 (15%), 4-5: 4 (20%), 6-7: 8 (40%), 8-10: 5 (25%)
+    const scores = [1, 2, 3, 4, 4, 5, 5, 6, 6, 6, 7, 7, 7, 7, 7, 8, 8, 9, 9, 10];
+    const result = await runWeeklyCalibration(makeDeps(scores));
+    expect(result.buckets.pct_8_10).toBe(25);
+    expect(result.flagged).toBe(false);
+  });
+
+  test('missing NOCODB_BASE_URL → returns null, no crash', async () => {
+    const deps = {
+      fetchFn: jest.fn(),
+      sleep: jest.fn().mockResolvedValue(undefined),
+      env: { NOCODB_API_TOKEN: 'tok', TELEGRAM_BOT_TOKEN: 'bot', TELEGRAM_CHAT_ID: '-1' },
+    };
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await runWeeklyCalibration(deps);
+    expect(result).toBeNull();
+    expect(deps.fetchFn).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
