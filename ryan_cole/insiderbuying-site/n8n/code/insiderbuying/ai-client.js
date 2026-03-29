@@ -3,38 +3,46 @@
 /**
  * ai-client.js -- Unified AI Provider Abstraction
  *
- * Routes AI calls to Claude (Anthropic) or DeepSeek via a single interface.
+ * Routes AI calls through a 2-tier provider system for maximum quality at minimum cost.
  * Handles request formatting, response parsing, retry with backoff, prompt
- * caching (Claude only), and per-call cost logging.
+ * caching (Claude/Opus only), cost logging, and automatic fallback.
+ *
+ * Tier 1 (primary): Claude Opus 4.6 via kie.ai -- highest quality, cheaper than Sonnet direct
+ * Tier 2 (data tasks): DeepSeek V3.2 -- structured/classification tasks
+ * Fallback: Claude Sonnet direct (Anthropic) -- if kie.ai fails 3 consecutive times
  *
  * Environment variables:
- *   ANTHROPIC_API_KEY  -- required for Claude calls (generate-article.js)
- *   DEEPSEEK_API_KEY   -- required for DeepSeek calls (score-alert.js, analyze-alert.js)
+ *   KIEAI_API_KEY      -- required for Opus calls (all human-facing content)
+ *   DEEPSEEK_API_KEY   -- required for DeepSeek calls (score-alert.js, analyze-alert.js score<9)
+ *   ANTHROPIC_API_KEY  -- fallback only (if kie.ai is down); also used by createClaudeClient
  *
  * Usage:
  *
- *   const { createClaudeClient, createDeepSeekClient } = require('./ai-client');
+ *   const { createOpusClient, createDeepSeekClient, createClaudeClient } = require('./ai-client');
  *
- *   // Text completion (DeepSeek)
- *   const ds = createDeepSeekClient(fetchFn, env.DEEPSEEK_API_KEY);
- *   const result = await ds.complete(systemPrompt, userPrompt);
+ *   // Opus via kie.ai (primary -- all human-facing content)
+ *   const opus = createOpusClient(fetchFn, env.KIEAI_API_KEY);
+ *   const result = await opus.complete(systemPrompt, userPrompt);
  *   console.log(result.content);        // prose text
  *   console.log(result.estimatedCost);  // USD
  *
- *   // Cached completion (Claude) -- saves ~90% on repeated system prompts
- *   // Note: cache TTL is 5 minutes. Only beneficial for batch processing.
- *   const claude = createClaudeClient(fetchFn, env.ANTHROPIC_API_KEY);
- *   const result = await claude.completeWithCache(systemPrompt, userPrompt);
+ *   // Opus with prompt caching -- saves ~90% on repeated system prompts
+ *   const result = await opus.completeWithCache(systemPrompt, userPrompt);
  *
- *   // Tool Use (Claude) -- structured output via tools
+ *   // DeepSeek (data tasks: score refinement, low-score analysis, follow-ups)
+ *   const ds = createDeepSeekClient(fetchFn, env.DEEPSEEK_API_KEY);
+ *   const result = await ds.complete(systemPrompt, userPrompt);
+ *
+ *   // Claude Sonnet direct (fallback / tool use)
+ *   const claude = createClaudeClient(fetchFn, env.ANTHROPIC_API_KEY);
  *   const result = await claude.completeToolUse(
  *     systemPrompt, userPrompt, tools, toolChoice, { cache: true }
  *   );
  *   console.log(result.toolResult); // parsed tool input object
  *
- *   // Switching providers: change one line
- *   // createDeepSeekClient(fetchFn, env.DEEPSEEK_API_KEY)
- *   //   --> createClaudeClient(fetchFn, env.ANTHROPIC_API_KEY)
+ *   // Opus auto-fallback: pass fallbackApiKey to createOpusClient for graceful degradation
+ *   const opus = createOpusClient(fetchFn, env.KIEAI_API_KEY, { fallbackApiKey: env.ANTHROPIC_API_KEY });
+ *   // If kie.ai fails 3x, the call is automatically retried once via Anthropic Sonnet direct.
  *
  * Return shape (all methods):
  *   {
@@ -48,10 +56,10 @@
  * Cost logging: every call logs provider/model/tokens/cost to console.
  * Security: logs NEVER include prompts, API keys, or response content.
  *
- * Monthly cost projection (earlyinsider.com, ~30 articles/day):
- *   Claude (generate-article):  ~$11-14/month (with prompt caching)
- *   DeepSeek (score+analyze):   ~$2-3/month
- *   Total:                      ~$13-17/month (vs ~$45/month pre-migration)
+ * Monthly cost projection (earlyinsider.com):
+ *   Opus via kie.ai ($1.75/$8.75 per 1M):  ~$7.50/month
+ *   DeepSeek ($0.27/$1.10 per 1M):         ~$1.00/month
+ *   Total:                                  ~$8.50/month
  */
 
 class AIClient {
@@ -103,7 +111,7 @@ class AIClient {
       body.response_format = opts.response_format;
     }
 
-    if (cfg.provider === 'claude') {
+    if (cfg.provider === 'claude' || cfg.provider === 'opus') {
       if (systemPrompt != null) body.system = systemPrompt;
       body.messages = [{ role: 'user', content: userPrompt }];
     } else {
@@ -119,7 +127,7 @@ class AIClient {
 
   _buildHeaders() {
     const cfg = this._config;
-    if (cfg.provider === 'claude') {
+    if (cfg.provider === 'claude' || cfg.provider === 'opus') {
       return {
         'content-type': 'application/json',
         'x-api-key': cfg.apiKey,
@@ -141,7 +149,7 @@ class AIClient {
     let text = '';
     let rawUsage = {};
 
-    if (cfg.provider === 'claude') {
+    if (cfg.provider === 'claude' || cfg.provider === 'opus') {
       if (data.content && data.content.length > 0) {
         const textBlock = data.content.find((b) => b.type === 'text');
         if (textBlock) text = textBlock.text;
@@ -195,7 +203,7 @@ class AIClient {
 
   _normalizeUsage(rawUsage) {
     const cfg = this._config;
-    if (cfg.provider === 'claude') {
+    if (cfg.provider === 'claude' || cfg.provider === 'opus') {
       return {
         inputTokens: rawUsage.input_tokens || 0,
         outputTokens: rawUsage.output_tokens || 0,
@@ -213,7 +221,21 @@ class AIClient {
 
   _computeCost(rawUsage) {
     const cfg = this._config;
+    if (cfg.provider === 'opus') {
+      // Opus via kie.ai: $1.75 input / $8.75 output / $0.175 cached per 1M tokens
+      const inputTokens = rawUsage.input_tokens || 0;
+      const outputTokens = rawUsage.output_tokens || 0;
+      const cacheRead = rawUsage.cache_read_input_tokens || 0;
+      const cacheWrite = rawUsage.cache_creation_input_tokens || 0;
+      return (
+        (inputTokens * 1.75 / 1e6) +
+        (outputTokens * 8.75 / 1e6) +
+        (cacheRead * 0.175 / 1e6) +
+        (cacheWrite * 3.75 / 1e6)
+      );
+    }
     if (cfg.provider === 'claude') {
+      // Claude Sonnet direct (Anthropic): $3 input / $15 output per 1M tokens
       const inputTokens = rawUsage.input_tokens || 0;
       const outputTokens = rawUsage.output_tokens || 0;
       const cacheRead = rawUsage.cache_read_input_tokens || 0;
@@ -225,6 +247,7 @@ class AIClient {
         (cacheWrite * 3.75 / 1e6)
       );
     }
+    // DeepSeek: $0.27 input / $1.10 output per 1M tokens
     const inputTokens = rawUsage.prompt_tokens || 0;
     const outputTokens = rawUsage.completion_tokens || 0;
     return (inputTokens * 0.27 / 1e6) + (outputTokens * 1.10 / 1e6);
@@ -294,6 +317,27 @@ class AIClient {
       throw new Error(`HTTP ${status}: ${JSON.stringify(errData)}`);
     }
 
+    // Opus-only fallback: if kie.ai exhausted all retries and a fallbackApiKey is configured,
+    // attempt one final call via Anthropic Sonnet direct (graceful degradation).
+    if (cfg.provider === 'opus' && cfg.fallbackApiKey) {
+      console.warn('[ai-client] kie.ai unavailable after retries -- falling back to Anthropic Sonnet direct');
+      const fallbackClient = new AIClient(this._fetchFn, {
+        provider: 'claude',
+        url: 'https://api.anthropic.com/v1/messages',
+        model: 'claude-sonnet-4-6-20250514',
+        apiKey: cfg.fallbackApiKey,
+        maxTokens: cfg.maxTokens,
+        temperature: cfg.temperature,
+        timeout: cfg.timeout,
+        maxRetries: 0,
+        baseDelay: cfg.baseDelay,
+        maxDelay: cfg.maxDelay,
+        retryableStatuses: cfg.retryableStatuses,
+        _sleep: this._sleep,
+      });
+      return fallbackClient._call(body, parseResponse);
+    }
+
     throw lastError || new Error('All retry attempts failed');
   }
 
@@ -307,6 +351,23 @@ class AIClient {
 // ---------------------------------------------------------------------------
 // Factory functions
 // ---------------------------------------------------------------------------
+
+function createOpusClient(fetchFn, apiKey, extraConfig = {}) {
+  return new AIClient(fetchFn, {
+    provider: 'opus',
+    url: 'https://api.kie.ai/v1/messages',
+    model: 'claude-opus-4-6',
+    temperature: 0.7,
+    maxTokens: 4096,
+    timeout: 30000,
+    maxRetries: 2,
+    baseDelay: 2000,
+    maxDelay: 10000,
+    retryableStatuses: [429, 529],
+    apiKey,
+    ...extraConfig,
+  });
+}
 
 function createClaudeClient(fetchFn, apiKey, extraConfig = {}) {
   return new AIClient(fetchFn, {
@@ -342,4 +403,4 @@ function createDeepSeekClient(fetchFn, apiKey, extraConfig = {}) {
   });
 }
 
-module.exports = { AIClient, createClaudeClient, createDeepSeekClient };
+module.exports = { AIClient, createOpusClient, createClaudeClient, createDeepSeekClient };

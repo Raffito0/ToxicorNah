@@ -1,6 +1,6 @@
 'use strict';
 
-const { createDeepSeekClient } = require('./ai-client');
+const { createOpusClient, createDeepSeekClient } = require('./ai-client');
 
 // Try to import finnhub client (section 07). Stub if not yet available.
 let _getQuote = async () => null;
@@ -11,6 +11,23 @@ try {
   _getNextEarningsDate = finnhub.getNextEarningsDate;
 } catch {
   // finnhub-client.js not yet complete (section 07) — quote/earnings data unavailable
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const BANNED_PHRASES = ["guaranteed", "will moon", "to the moon", "can't lose", "sure thing"];
+const CAUTIONARY_WORDS = ["however", "risk", "caution", "could", "routine", "consider"];
+
+// ─── stripMarkdownFences ─────────────────────────────────────────────────────
+
+/**
+ * Removes markdown code fences (```json ... ``` or ``` ... ```) from a string.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripMarkdownFences(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text.replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/s, '$1').trim();
 }
 
 // ─── getWordTarget ────────────────────────────────────────────────────────────
@@ -134,23 +151,66 @@ CRITICAL: Do NOT use generic phrases like "insiders have information about their
 Return ONLY the analysis prose. No JSON, no markdown headers, no bullet points.`;
 }
 
-// ─── validateAnalysis ────────────────────────────────────────────────────────
+// ─── validateAnalysis (S06) ──────────────────────────────────────────────────
 
 /**
- * Basic structural validation of analysis text.
- * Section 06 extends this with additional rules (word count, banned phrases, etc.)
+ * Validates analysis text against 5 rules.
+ * All rules are checked — no short-circuit on first failure.
  *
- * @param {string} text
- * @param {number} [score]         - Alert score (used by S06 extension)
- * @param {string} [direction]     - 'A' or 'D' (used by S06 extension)
- * @param {boolean} [pctAvailable] - Whether percentage data was available (S06)
- * @returns {boolean}
+ * @param {string}  text           - Analysis text to validate
+ * @param {number}  [score]        - Alert score; if undefined, Rule 1 is skipped
+ * @param {string}  [direction]    - 'A' or 'D' (reserved for future use)
+ * @param {boolean} [pctAvailable] - If true, Rule 4 requires a "%" in text
+ * @returns {{ valid: boolean, errors: string[] }}
  */
 function validateAnalysis(text, score, direction, pctAvailable) {
-  if (!text || typeof text !== 'string') return false;
-  if (text.length < 50) return false;
-  const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-  return paragraphs.length >= 2;
+  const errors = [];
+
+  if (!text || typeof text !== 'string') {
+    return { valid: false, errors: ['text is required'] };
+  }
+
+  const stripped = stripMarkdownFences(text);
+  const words = stripped.split(/\s+/).filter(Boolean);
+  const wordCount = words.length;
+
+  // Rule 1 — Word count (skip if score undefined/null)
+  if (score != null) {
+    const { target, max } = getWordTarget(score);
+    const minWords = Math.floor(target * 0.70);
+    if (wordCount < minWords) {
+      errors.push(`too short: ${wordCount} words (minimum ${minWords} for score ${score})`);
+    } else if (wordCount > max) {
+      errors.push(`too long: ${wordCount} words (maximum ${max} for score ${score})`);
+    }
+  }
+
+  // Rule 2 — Banned phrases (case-insensitive)
+  for (const phrase of BANNED_PHRASES) {
+    if (stripped.toLowerCase().includes(phrase.toLowerCase())) {
+      errors.push(`banned phrase detected: "${phrase}"`);
+    }
+  }
+
+  // Rule 3 — Dollar amount present
+  if (!/\$\d/.test(stripped)) {
+    errors.push('missing dollar amount: text must contain at least one "$" followed by a digit');
+  }
+
+  // Rule 4 — Percentage present (conditional)
+  if (pctAvailable) {
+    if (!/%/.test(stripped)) {
+      errors.push('missing percentage: prompt injected percentage data but no "%" found in text');
+    }
+  }
+
+  // Rule 5 — Cautionary language
+  const hasCautionary = CAUTIONARY_WORDS.some(w => stripped.toLowerCase().includes(w.toLowerCase()));
+  if (!hasCautionary) {
+    errors.push(`missing cautionary language: text must contain at least one of [${CAUTIONARY_WORDS.join(', ')}]`);
+  }
+
+  return { valid: errors.length === 0, errors };
 }
 
 // ─── Legacy prompt builder (used by analyze() for backward compat) ────────────
@@ -197,7 +257,7 @@ Return ONLY the analysis prose. No JSON, no markdown headers, no bullet points.`
  * Legacy entry point. New callers should use runAnalyzeAlert().
  *
  * @param {object} filing - Enriched filing object from score-alert.js
- * @param {object} helpers - { deepSeekApiKey, fetchFn }
+ * @param {object} helpers - { deepSeekApiKey, kieaiApiKey, fetchFn }
  * @returns {Promise<string|null>} - Prose analysis string, or null on skip/failure
  */
 async function analyze(filing, helpers) {
@@ -206,13 +266,15 @@ async function analyze(filing, helpers) {
   }
 
   const prompt = _buildLegacyPrompt(filing);
-  const client = createDeepSeekClient(helpers.fetchFn, helpers.deepSeekApiKey);
+  const client = filing.significance_score >= 9
+    ? createOpusClient(helpers.fetchFn, helpers.kieaiApiKey)
+    : createDeepSeekClient(helpers.fetchFn, helpers.deepSeekApiKey);
 
   try {
     let result = await client.complete(null, prompt);
     let text = result.content;
 
-    if (validateAnalysis(text)) {
+    if (validateAnalysis(text).valid) {
       return text;
     }
 
@@ -223,7 +285,7 @@ async function analyze(filing, helpers) {
     result = await client.complete(null, prompt);
     text = result.content;
 
-    if (validateAnalysis(text)) {
+    if (validateAnalysis(text).valid) {
       return text;
     }
 
@@ -289,34 +351,76 @@ async function runAnalyzeAlert(alert, deps = {}) {
   const marketData = { currentPrice, pctChangeToday, daysToEarnings, portfolioPct };
   const promptString = buildAnalysisPrompt(alert, marketData, wordTarget);
 
-  // Step 7: Call DeepSeek
-  const apiKey = deps.deepSeekApiKey || (env && env.DEEPSEEK_API_KEY);
-  const client = createDeepSeekClient(fetchFn, apiKey);
+  // Step 7: Route to Opus (score >= 9) or DeepSeek (score < 9)
+  const client = finalScore >= 9
+    ? createOpusClient(fetchFn, (env && env.KIEAI_API_KEY))
+    : createDeepSeekClient(fetchFn, deps.deepSeekApiKey || (env && env.DEEPSEEK_API_KEY));
+
+  const insiderName = alert.insiderName || alert.insider_name || 'The insider';
+  const actionVerb = direction === 'A' ? 'bought' : 'sold';
+  const rawPrice = alert.pricePerShare || alert.price_per_share;
+  const priceStr = rawPrice != null ? `$${rawPrice}` : 'N/A';
 
   let text = null;
   let attemptCount = 0;
 
   try {
+    // Attempt 1
     attemptCount++;
     let result = await client.complete(null, promptString, { temperature: 0.3 });
     text = result.content;
 
-    // Step 8: Validate (S06 extends this to use score/direction/pctAvailable)
-    if (!validateAnalysis(text, finalScore, direction, percentageDataAvailable)) {
-      attemptCount++;
-      if (sleep) await sleep(2000);
-      result = await client.complete(null, promptString, { temperature: 0.3 });
-      text = result.content;
+    const v1 = validateAnalysis(text, finalScore, direction, percentageDataAvailable);
+    console.log(JSON.stringify({
+      event: 'analysis_validation',
+      attempt: 1,
+      valid: v1.valid,
+      errors: v1.errors,
+      wordCount: (text || '').split(/\s+/).filter(Boolean).length,
+      ticker,
+      timestamp: new Date().toISOString(),
+    }));
 
-      if (!validateAnalysis(text, finalScore, direction, percentageDataAvailable)) {
-        // Minimal fallback template (S06 provides richer fallback)
-        const insiderName = alert.insiderName || alert.insider_name || 'The insider';
-        const actionVerb = direction === 'A' ? 'bought' : 'sold';
-        const sharesStr = sharesTraded != null ? sharesTraded + ' shares' : 'shares';
-        const priceStr = alert.pricePerShare || alert.price_per_share || '';
-        text = `${insiderName} ${actionVerb} ${sharesStr} at $${priceStr}. Score: ${finalScore}/10.`;
-      }
+    if (v1.valid) {
+      return { analysisText: text, percentageDataAvailable, wordTarget, attemptCount };
     }
+
+    // Attempt 2 — append error list to prompt
+    attemptCount++;
+    if (sleep) await sleep(2000);
+    const retryPrompt = promptString +
+      `\n\nPrevious attempt failed validation: [${v1.errors.join(', ')}]. Fix these issues.`;
+    result = await client.complete(null, retryPrompt, { temperature: 0.3 });
+    text = result.content;
+
+    const v2 = validateAnalysis(text, finalScore, direction, percentageDataAvailable);
+    console.log(JSON.stringify({
+      event: 'analysis_validation',
+      attempt: 2,
+      valid: v2.valid,
+      errors: v2.errors,
+      wordCount: (text || '').split(/\s+/).filter(Boolean).length,
+      ticker,
+      timestamp: new Date().toISOString(),
+    }));
+
+    if (v2.valid) {
+      return { analysisText: text, percentageDataAvailable, wordTarget, attemptCount };
+    }
+
+    // Both attempts failed — use fallback template (no third validateAnalysis call)
+    console.log(JSON.stringify({
+      event: 'analysis_fallback_used',
+      reason: 'double_validation_failure',
+      attempt1Errors: v1.errors,
+      attempt2Errors: v2.errors,
+      ticker,
+      timestamp: new Date().toISOString(),
+    }));
+
+    const sharesStr = sharesTraded != null ? sharesTraded + ' shares' : 'shares';
+    text = `${insiderName} ${actionVerb} ${sharesStr} at ${priceStr}. Score: ${finalScore}/10.`;
+
   } catch (err) {
     console.warn(`[analyze-alert] runAnalyzeAlert error for ${ticker}: ${err.message}`);
     return null;
