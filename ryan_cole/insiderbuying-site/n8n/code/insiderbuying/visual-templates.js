@@ -660,6 +660,14 @@ async function renderTemplate(templateId, data, opts = {}, helpers) {
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
+// ─── DD Post visual stubs (return null until implemented) ─────────────────────
+
+function generateInsiderTable(_filings) { return null; }
+function generatePriceChart(_ticker, _priceData) { return null; }
+function generatePeerRadar(_ticker, _peers) { return null; }
+
+// ─── Exports ──────────────────────────────────────────────────────────────────
+
 module.exports = {
   t1DataCard,
   t2SecFilingMiniCard,
@@ -677,4 +685,7 @@ module.exports = {
   t14AlertScoreBadge,
   t15WeeklyLeaderboard,
   renderTemplate,
+  generateInsiderTable,
+  generatePriceChart,
+  generatePeerRadar,
 };
