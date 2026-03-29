@@ -11,6 +11,13 @@ const {
   computeAlertPerformance,
   getUpcomingEarnings,
   generateNewsletter,
+  checkWordCount,
+  checkLinkCount,
+  assembleFreeHtml,
+  assembleProHtml,
+  sendViaBeehiiv,
+  sendViaResend,
+  logSendToNocodb,
 } = require('../../n8n/code/insiderbuying/weekly-newsletter');
 
 // ---------------------------------------------------------------------------
@@ -446,5 +453,238 @@ describe('generateNewsletter', () => {
     const injected = JSON.parse(userPrompt.match(/DATA:\n(\{[\s\S]*?\})\n\nSECTIONS/)[1]);
     expect(injected.alerts).toHaveLength(5);
     expect(injected.earnings).toHaveLength(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section 03 — Quality Gates, HTML Assembly, Send
+// ---------------------------------------------------------------------------
+
+const SAMPLE_SECTIONS = {
+  s1: 'S1-UNIQUE-OPENING insiders noticed something unusual this week.',
+  s2: 'S2-UNIQUE-MOVE the biggest move came from a tech executive buying aggressively.',
+  s3: 'S3-UNIQUE-SCORECARD winners and losers from the prior week performance.',
+  s4: 'S4-UNIQUE-PATTERN sector rotation visible in the data this period.',
+  s5: 'S5-UNIQUE-WATCHING upcoming earnings events to monitor next week carefully.',
+  s6_free: 'S6FREE-UNIQUE upgrade to pro for full access to all sections today.',
+  s6_pro: 'S6PRO-UNIQUE refer a friend at {{rp_refer_url}} and earn rewards.',
+};
+
+const SAMPLE_ALERTS_03 = [
+  { ticker: 'AAPL', insider_name: 'Tim Cook', total_value: 1500000, score: 9 },
+  { ticker: 'MSFT', insider_name: 'Satya Nadella', total_value: 800000, score: 8 },
+  { ticker: 'TSLA', insider_name: 'Elon Musk', total_value: 2000000, score: 7 },
+];
+
+// ---------------------------------------------------------------------------
+// checkWordCount
+// ---------------------------------------------------------------------------
+
+describe('word count gate', () => {
+  test('throws when plain text word count is below 1000', () => {
+    const shortSections = { s1: 'one two three.', s2: 'a b c.', s3: 'x y z.', s4: 'd e f.', s5: 'g h i.', s6_free: 'j k l.', s6_pro: 'm n o.' };
+    expect(() => checkWordCount(shortSections)).toThrow(/Word count out of range/);
+    expect(() => checkWordCount(shortSections)).toThrow(/expected 1000/);
+  });
+
+  test('passes when word count is 1200', () => {
+    // 6 joined sections x 200 words = 1200 — within [1000, 1400]
+    const filler = Array(200).fill('insider').join(' ');
+    const sections = { s1: filler, s2: filler, s3: filler, s4: filler, s5: filler, s6_free: filler, s6_pro: filler };
+    expect(() => checkWordCount(sections)).not.toThrow();
+  });
+
+  test('throws when word count is 1500', () => {
+    // 6 x 250 = 1500 — above 1400
+    const big = Array(250).fill('insider').join(' ');
+    const sections = { s1: big, s2: big, s3: big, s4: big, s5: big, s6_free: big, s6_pro: big };
+    expect(() => checkWordCount(sections)).toThrow(/Word count out of range/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkLinkCount
+// ---------------------------------------------------------------------------
+
+describe('link count gate', () => {
+  test('throws when assembled HTML contains 8 <a href occurrences', () => {
+    const html = '<a href="#">link</a>'.repeat(8);
+    expect(() => checkLinkCount(html, 'free')).toThrow(/Link count exceeded for free/);
+    expect(() => checkLinkCount(html, 'free')).toThrow(/8/);
+  });
+
+  test('passes when HTML contains exactly 7 links', () => {
+    const html = '<a href="#">link</a>'.repeat(7);
+    expect(() => checkLinkCount(html, 'free')).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assembleFreeHtml
+// ---------------------------------------------------------------------------
+
+describe('Free version HTML', () => {
+  let freeHtml;
+  beforeAll(() => {
+    freeHtml = assembleFreeHtml(SAMPLE_SECTIONS, SAMPLE_ALERTS_03, 'Test Subject');
+  });
+
+  test('contains s1, s2, s3 content', () => {
+    expect(freeHtml).toContain(SAMPLE_SECTIONS.s1);
+    expect(freeHtml).toContain(SAMPLE_SECTIONS.s2);
+    expect(freeHtml).toContain(SAMPLE_SECTIONS.s3);
+  });
+
+  test('does NOT contain s4 or s5 content', () => {
+    expect(freeHtml).not.toContain(SAMPLE_SECTIONS.s4);
+    expect(freeHtml).not.toContain(SAMPLE_SECTIONS.s5);
+  });
+
+  test('contains upgrade CTA block', () => {
+    expect(freeHtml).toContain('earlyinsider.com/pricing');
+  });
+
+  test('does NOT contain {{rp_refer_url}}', () => {
+    expect(freeHtml).not.toContain('{{rp_refer_url}}');
+  });
+
+  test('contains top-3 alert table with ticker, insider_name, total_value, score columns', () => {
+    expect(freeHtml).toContain('AAPL');
+    expect(freeHtml).toContain('Tim Cook');
+    expect(freeHtml).toContain('$1,500,000');
+    expect(freeHtml).toContain('9/10');
+  });
+
+  test('contains <meta name="viewport"', () => {
+    expect(freeHtml).toContain('<meta name="viewport"');
+  });
+
+  test('contains @media (max-width: 480px) CSS', () => {
+    expect(freeHtml).toContain('@media (max-width: 480px)');
+  });
+
+  test('contains List-Unsubscribe link', () => {
+    expect(freeHtml.toLowerCase()).toMatch(/unsubscribe/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assembleProHtml
+// ---------------------------------------------------------------------------
+
+describe('Pro version HTML', () => {
+  let proHtml;
+  beforeAll(() => {
+    proHtml = assembleProHtml(SAMPLE_SECTIONS, SAMPLE_ALERTS_03, 'Test Subject');
+  });
+
+  test('contains all 6 sections: s1-s6_pro', () => {
+    expect(proHtml).toContain(SAMPLE_SECTIONS.s1);
+    expect(proHtml).toContain(SAMPLE_SECTIONS.s2);
+    expect(proHtml).toContain(SAMPLE_SECTIONS.s3);
+    expect(proHtml).toContain(SAMPLE_SECTIONS.s4);
+    expect(proHtml).toContain(SAMPLE_SECTIONS.s5);
+    expect(proHtml).toContain(SAMPLE_SECTIONS.s6_pro);
+  });
+
+  test('does NOT contain upgrade CTA block', () => {
+    expect(proHtml).not.toContain('earlyinsider.com/pricing');
+  });
+
+  test('contains {{rp_refer_url}} in referral block', () => {
+    expect(proHtml).toContain('{{rp_refer_url}}');
+  });
+
+  test('contains "5 more alerts" link block', () => {
+    expect(proHtml.toLowerCase()).toMatch(/5 more alerts|more alerts/);
+  });
+
+  test('contains top-3 alert table', () => {
+    expect(proHtml).toContain('AAPL');
+    expect(proHtml).toContain('MSFT');
+    expect(proHtml).toContain('TSLA');
+  });
+
+  test('contains @media (max-width: 480px) CSS', () => {
+    expect(proHtml).toContain('@media (max-width: 480px)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Beehiiv send
+// ---------------------------------------------------------------------------
+
+const BEEHIIV_ENV = {
+  BEEHIIV_API_KEY: 'bh-key',
+  BEEHIIV_PUBLICATION_ID: 'pub-123',
+  BEEHIIV_PREMIUM_TIER_IDS: 'tier-1,tier-2',
+  RESEND_API_KEY: 'rs-key',
+};
+
+describe('Beehiiv send', () => {
+  test('sends with email_subject_line = subjectA (not subjectB)', async () => {
+    const mockPost = jest.fn().mockResolvedValue({
+      status: 201,
+      json: () => Promise.resolve({ data: { status: 'confirmed' } }),
+    });
+    await sendViaBeehiiv('<html/>', 'My Subject A', 'free', { _postFn: mockPost, _env: BEEHIIV_ENV });
+    const [, , bodyStr] = mockPost.mock.calls[0];
+    const body = JSON.parse(bodyStr);
+    expect(body.email_subject_line).toBe('My Subject A');
+  });
+
+  test('triggers Resend fallback when Beehiiv response has status: "draft"', async () => {
+    const mockPost = jest.fn().mockResolvedValue({
+      status: 201,
+      json: () => Promise.resolve({ data: { status: 'draft' } }),
+    });
+    const resendFn = jest.fn().mockResolvedValue(undefined);
+    await sendViaBeehiiv('<html/>', 'subjectA', 'free', {
+      _postFn: mockPost, _resendFn: resendFn, _env: BEEHIIV_ENV,
+    });
+    expect(resendFn).toHaveBeenCalledTimes(1);
+  });
+
+  test('triggers Resend fallback when Beehiiv returns 403', async () => {
+    const mockPost = jest.fn().mockResolvedValue({
+      status: 403,
+      json: () => Promise.resolve({ error: 'Forbidden' }),
+    });
+    const resendFn = jest.fn().mockResolvedValue(undefined);
+    await sendViaBeehiiv('<html/>', 'subjectA', 'free', {
+      _postFn: mockPost, _resendFn: resendFn, _env: BEEHIIV_ENV,
+    });
+    expect(resendFn).toHaveBeenCalledTimes(1);
+  });
+
+  test('Resend fallback is called with batches of max 500 recipients', async () => {
+    const mockPost = jest.fn().mockResolvedValue({
+      status: 200,
+      text: () => Promise.resolve('{}'),
+    });
+    const subscribers = Array.from({ length: 1100 }, (_, i) => 'user' + i + '@test.com');
+    await sendViaResend('<html/>', 'subjectA', 'free', subscribers, {
+      _postFn: mockPost, _env: { RESEND_API_KEY: 'rk' },
+    });
+    // 1100 subscribers -> 3 batches: 500 + 500 + 100
+    expect(mockPost).toHaveBeenCalledTimes(3);
+  });
+
+  test('logs subjectA and subjectB to NocoDB after send', async () => {
+    const db = makeNocoDB([]);
+    await logSendToNocodb(db, {
+      subjectA: 'Subject Line A',
+      subjectB: 'Subject Line B',
+      sendPath: 'beehiiv',
+      wordCount: 1150,
+      freeLinkCount: 3,
+      proLinkCount: 3,
+    });
+    expect(db.create).toHaveBeenCalledTimes(1);
+    const [table, data] = db.create.mock.calls[0];
+    expect(table).toBe('Newsletter_Sends');
+    expect(data.subject_a).toBe('Subject Line A');
+    expect(data.subject_b).toBe('Subject Line B');
+    expect(typeof data.sent_at).toBe('string');
   });
 });
