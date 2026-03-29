@@ -403,4 +403,140 @@ function createDeepSeekClient(fetchFn, apiKey, extraConfig = {}) {
   });
 }
 
-module.exports = { AIClient, createOpusClient, createClaudeClient, createDeepSeekClient };
+// ---------------------------------------------------------------------------
+// Simple functional API for x-engine (sections 03 and 06)
+// claude(prompt, opts, helpers) -> string
+// deepseek(prompt, opts, helpers) -> string
+// ---------------------------------------------------------------------------
+
+var _CLAUDE_HAIKU_URL = 'https://api.anthropic.com/v1/messages';
+var _DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
+var _RETRY_DELAYS = [2000, 4000, 8000];
+var _MAX_RETRY_AFTER_MS = 60000;
+
+async function claude(prompt, opts, helpers) {
+  opts = opts || {};
+  var fetchFn = helpers.fetchFn;
+  var apiKey = helpers.anthropicApiKey;
+  var sleep = helpers._sleep || function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };
+  var maxTokens = opts.maxTokens || 300;
+
+  var reqBody = {
+    model: 'claude-haiku-20240307',
+    max_tokens: maxTokens,
+    messages: [{ role: 'user', content: prompt }],
+  };
+  if (opts.systemPrompt) reqBody.system = opts.systemPrompt;
+
+  var reqHeaders = {
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+  };
+
+  var lastStatus;
+  for (var attempt = 1; attempt <= 3; attempt++) {
+    var res;
+    try {
+      res = await fetchFn(_CLAUDE_HAIKU_URL, {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify(reqBody),
+      });
+    } catch (netErr) {
+      if (attempt < 3) {
+        await sleep(_RETRY_DELAYS[attempt - 1]);
+        continue;
+      }
+      throw netErr;
+    }
+
+    if (res.ok) {
+      var resData = await res.json();
+      var textBlock = resData.content && resData.content.find(function(b) { return b.type === 'text'; });
+      return textBlock ? textBlock.text : '';
+    }
+
+    var resStatus = res.status;
+    lastStatus = resStatus;
+
+    // Non-retryable 4xx (not 429)
+    if (resStatus >= 400 && resStatus < 500 && resStatus !== 429) {
+      throw new Error('HTTP ' + resStatus);
+    }
+
+    if (attempt < 3) {
+      var retryAfterVal = res.headers && res.headers.get ? res.headers.get('Retry-After') : null;
+      var retryAfterMs = retryAfterVal ? parseInt(retryAfterVal, 10) * 1000 : NaN;
+      var waitMs = !isNaN(retryAfterMs)
+        ? Math.min(retryAfterMs, _MAX_RETRY_AFTER_MS)
+        : _RETRY_DELAYS[attempt - 1];
+      await sleep(waitMs);
+    }
+  }
+
+  throw new Error('HTTP ' + lastStatus + ' after 3 attempts');
+}
+
+async function deepseek(prompt, opts, helpers) {
+  opts = opts || {};
+  var fetchFn = helpers.fetchFn;
+  var apiKey = helpers.deepseekApiKey;
+  var sleep = helpers._sleep || function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };
+  var maxTokens = opts.maxTokens || 400;
+
+  var reqBody = {
+    model: 'deepseek-chat',
+    max_tokens: maxTokens,
+    messages: [{ role: 'user', content: prompt }],
+  };
+
+  var reqHeaders = {
+    'Authorization': 'Bearer ' + apiKey,
+    'content-type': 'application/json',
+  };
+
+  var lastStatus;
+  for (var attempt = 1; attempt <= 3; attempt++) {
+    var res;
+    try {
+      res = await fetchFn(_DEEPSEEK_URL, {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify(reqBody),
+      });
+    } catch (netErr) {
+      if (attempt < 3) {
+        await sleep(_RETRY_DELAYS[attempt - 1]);
+        continue;
+      }
+      throw netErr;
+    }
+
+    if (res.ok) {
+      var resData = await res.json();
+      return resData.choices[0].message.content;
+    }
+
+    var resStatus = res.status;
+    lastStatus = resStatus;
+
+    // Non-retryable 4xx (not 429)
+    if (resStatus >= 400 && resStatus < 500 && resStatus !== 429) {
+      throw new Error('HTTP ' + resStatus);
+    }
+
+    if (attempt < 3) {
+      var retryAfterVal = res.headers && res.headers.get ? res.headers.get('Retry-After') : null;
+      var retryAfterMs = retryAfterVal ? parseInt(retryAfterVal, 10) * 1000 : NaN;
+      var waitMs = !isNaN(retryAfterMs)
+        ? Math.min(retryAfterMs, _MAX_RETRY_AFTER_MS)
+        : _RETRY_DELAYS[attempt - 1];
+      await sleep(waitMs);
+    }
+  }
+
+  throw new Error('HTTP ' + lastStatus + ' after 3 attempts');
+}
+
+module.exports = { AIClient, createOpusClient, createClaudeClient, createDeepSeekClient, claude, deepseek };
