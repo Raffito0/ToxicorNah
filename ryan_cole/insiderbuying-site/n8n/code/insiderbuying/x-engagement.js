@@ -354,6 +354,75 @@ function buildEngagementSequence(originalTweetId) {
   ];
 }
 
+// ---------------------------------------------------------------------------
+// Media attachment
+// ---------------------------------------------------------------------------
+
+/**
+ * Optionally attach a media PNG to the reply (40% of calls).
+ * Falls back to null if visual-templates.js is not found, random skip, or upload fails.
+ * @param {object} filingContext
+ * @param {object} helpers - must include fetchFn + OAuth credentials
+ * @param {function} [_requireFn=require] - injectable for testing
+ * @param {function} [_randomFn=Math.random] - injectable for testing
+ * @returns {Promise<string|null>} media_id_string or null
+ */
+async function maybeAttachMedia(filingContext, helpers, _requireFn, _randomFn) {
+  if (typeof _requireFn !== 'function') _requireFn = require;
+  if (typeof _randomFn !== 'function') _randomFn = Math.random;
+
+  var templates;
+  try {
+    templates = _requireFn('./visual-templates');
+  } catch (e) {
+    return null;
+  }
+
+  if (_randomFn() > 0.4) return null;
+
+  try {
+    var buffer = await templates.renderTemplate(2, filingContext);
+    return await uploadMediaToX(buffer, helpers);
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Upload a media buffer to X via multipart POST.
+ * Uses helpers.xOAuthHeader (pre-computed) or builds from OAuth credentials.
+ * @param {Buffer} buffer
+ * @param {object} helpers - { fetchFn, xOAuthHeader or xConsumerKey/xConsumerSecret/xAccessToken/xAccessTokenSecret }
+ * @returns {Promise<string>} media_id_string
+ */
+async function uploadMediaToX(buffer, helpers) {
+  var boundary = '----FormBoundary' + Math.random().toString(16).slice(2);
+  var CRLF = '\r\n';
+  var head = Buffer.from(
+    '--' + boundary + CRLF
+    + 'Content-Disposition: form-data; name="media"' + CRLF
+    + 'Content-Type: application/octet-stream' + CRLF
+    + CRLF
+  );
+  var tail = Buffer.from(CRLF + '--' + boundary + '--' + CRLF);
+  var body = Buffer.concat([head, buffer, tail]);
+
+  var authHeader = helpers.xOAuthHeader
+    || ('OAuth oauth_consumer_key="' + (helpers.xConsumerKey || '') + '"');
+
+  var res = await helpers.fetchFn('https://upload.twitter.com/1.1/media/upload.json', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'multipart/form-data; boundary=' + boundary,
+      'Authorization': authHeader,
+    },
+    body: body,
+  });
+
+  var data = await res.json();
+  return String(data.media_id_string);
+}
+
 module.exports = {
   filterRelevant: filterRelevant,
   draftReply: draftReply,
@@ -366,4 +435,6 @@ module.exports = {
   checkDailyReplyCap: checkDailyReplyCap,
   buildTimingDelay: buildTimingDelay,
   buildEngagementSequence: buildEngagementSequence,
+  maybeAttachMedia: maybeAttachMedia,
+  uploadMediaToX: uploadMediaToX,
 };

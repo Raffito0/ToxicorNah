@@ -13,6 +13,8 @@ const {
   checkDailyReplyCap,
   buildTimingDelay,
   buildEngagementSequence,
+  maybeAttachMedia,
+  uploadMediaToX,
 } = require('../code/insiderbuying/x-engagement.js');
 
 // ---------------------------------------------------------------------------
@@ -617,5 +619,119 @@ describe('buildEngagementSequence', () => {
     const r = buildEngagementSequence('123');
     assert.equal(r[0].method, 'POST');
     assert.ok(r[0].url && r[0].url.includes('/likes'), `url: ${r[0].url}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// maybeAttachMedia
+// ---------------------------------------------------------------------------
+describe('maybeAttachMedia', () => {
+  const sampleFiling = {
+    ticker: 'NVDA', insiderName: 'Jensen Huang', insiderRole: 'CEO',
+    transactionValue: '$2.4M', transactionDate: '2024-11-15',
+    priceAtPurchase: 142.50, trackRecord: '+23% avg', clusterCount: 2,
+  };
+
+  it('returns null when _requireFn throws (module not found)', async () => {
+    const badRequire = () => { throw new Error('MODULE_NOT_FOUND'); };
+    const result = await maybeAttachMedia(sampleFiling, {}, badRequire);
+    assert.equal(result, null);
+  });
+
+  it('returns null when Math.random > 0.4 (uses injectable randomFn)', async () => {
+    const mockTemplates = { renderTemplate: async () => Buffer.from('png') };
+    const mockRequire = () => mockTemplates;
+    // Pass randomFn that always returns 0.5 (> 0.4 threshold)
+    const result = await maybeAttachMedia(sampleFiling, {}, mockRequire, () => 0.5);
+    assert.equal(result, null);
+  });
+
+  it('returns null when uploadMediaToX throws', async () => {
+    const mockTemplates = { renderTemplate: async () => Buffer.from('png') };
+    const mockRequire = () => mockTemplates;
+    const helpers = {
+      fetchFn: async () => { throw new Error('network error'); },
+      xOAuthHeader: 'OAuth test',
+    };
+    const result = await maybeAttachMedia(sampleFiling, helpers, mockRequire, () => 0.2);
+    assert.equal(result, null);
+  });
+
+  it('returns media_id_string when all conditions met', async () => {
+    const mockTemplates = { renderTemplate: async () => Buffer.from('png') };
+    const mockRequire = () => mockTemplates;
+    const helpers = {
+      fetchFn: async () => ({
+        ok: true,
+        json: async () => ({ media_id_string: 'media_id_abc' }),
+      }),
+      xOAuthHeader: 'OAuth test',
+    };
+    const result = await maybeAttachMedia(sampleFiling, helpers, mockRequire, () => 0.2);
+    assert.equal(result, 'media_id_abc');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// uploadMediaToX
+// ---------------------------------------------------------------------------
+describe('uploadMediaToX', () => {
+  it('returned payload has method POST and upload URL', async () => {
+    let capturedUrl, capturedOpts;
+    const helpers = {
+      fetchFn: async (url, opts) => {
+        capturedUrl = url; capturedOpts = opts;
+        return { ok: true, json: async () => ({ media_id_string: '1234567890123456789' }) };
+      },
+      xOAuthHeader: 'OAuth realm="test"',
+    };
+    await uploadMediaToX(Buffer.from('test'), helpers);
+    assert.equal(capturedOpts.method, 'POST');
+    assert.ok(capturedUrl.includes('upload.twitter.com'), `url: ${capturedUrl}`);
+    assert.ok(capturedUrl.includes('/media/upload.json'), `url: ${capturedUrl}`);
+  });
+
+  it('Content-Type header includes multipart/form-data with boundary', async () => {
+    let capturedOpts;
+    const helpers = {
+      fetchFn: async (url, opts) => {
+        capturedOpts = opts;
+        return { ok: true, json: async () => ({ media_id_string: '123' }) };
+      },
+      xOAuthHeader: 'OAuth test',
+    };
+    await uploadMediaToX(Buffer.from('test'), helpers);
+    const ct = capturedOpts.headers && (capturedOpts.headers['Content-Type'] || capturedOpts.headers['content-type']);
+    assert.ok(ct && /multipart\/form-data/.test(ct), `Content-Type: ${ct}`);
+    assert.ok(ct && /boundary=/.test(ct), `boundary missing: ${ct}`);
+  });
+
+  it('credentials not in request body as plaintext', async () => {
+    let capturedBody;
+    const helpers = {
+      fetchFn: async (url, opts) => {
+        capturedBody = opts.body ? opts.body.toString() : '';
+        return { ok: true, json: async () => ({ media_id_string: '123' }) };
+      },
+      xOAuthHeader: 'OAuth test',
+      xConsumerKey: 'MY_CONSUMER_KEY',
+      xAccessToken: 'MY_ACCESS_TOKEN',
+    };
+    await uploadMediaToX(Buffer.from('test'), helpers);
+    assert.ok(!capturedBody.includes('MY_CONSUMER_KEY'), 'consumer_key in body');
+    assert.ok(!capturedBody.includes('MY_ACCESS_TOKEN'), 'access_token in body');
+  });
+
+  it('returns media_id_string as string', async () => {
+    const helpers = {
+      fetchFn: async () => ({
+        ok: true,
+        json: async () => ({ media_id_string: '1234567890123456789' }),
+      }),
+      xOAuthHeader: 'OAuth test',
+    };
+    const result = await uploadMediaToX(Buffer.from('test'), helpers);
+    assert.equal(typeof result, 'string');
+    assert.equal(result, '1234567890123456789');
   });
 });
