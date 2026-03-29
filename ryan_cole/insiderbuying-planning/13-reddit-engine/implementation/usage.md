@@ -2,7 +2,7 @@
 
 Module: `n8n/code/insiderbuying/reddit-monitor.js`
 Tests: `tests/insiderbuying/reddit-monitor.test.js`
-Tests: **105/105 passing**
+Tests: **172/172 passing**
 
 ---
 
@@ -14,11 +14,91 @@ The Reddit Engine is a complete autonomous Reddit engagement system for the Earl
 
 | Section | Feature | Commit |
 |---------|---------|--------|
+| 00 | visual-templates stubs | `(prior)` |
+| 01 | SUBREDDIT_TONE_MAP + getRedditToken + getRedditLog | `e375e9c` |
+| 02 | REPLY_STRUCTURES + getNextReplyStructure + validateReply + validateDDPost | `e375e9c` |
+| 03 | checkDailyCommentLimit + shouldSkipToday + insertJob + schedules + processScheduledJobs + runCAT4Comments | `e375e9c` |
 | 04 | CAT 5 — Daily Thread Comments | `1f08cdd` |
 | 05 | CAT 6 — Long-form DD Posts | `a3f661e` |
 | 06 | Anti-AI Detection + Few-Shot Style | `a3f661e` |
 
-> Sections 00-03 (prerequisites, auth, tone map, rotation, validation, cap/timing/jobs) were pre-existing infrastructure built in earlier sessions.
+---
+
+## Infrastructure Functions (Sections 01-03)
+
+### `getRedditToken(opts?)`
+Reddit OAuth with dual-mode: refresh_token (preferred) or ROPC (password grant) fallback. Token cached in NocoDB `reddit_auth` state key.
+
+```javascript
+const token = await getRedditToken();                    // uses cache
+const token = await getRedditToken({ _skipCache: true }); // bypass cache (tests)
+```
+
+### `getRedditLog(dateStr)`
+Returns all posts with `status=posted` for a given date from NocoDB `Reddit_Log` table.
+
+```javascript
+const entries = await getRedditLog('2026-03-29'); // [{ subreddit, comment, status, ... }]
+```
+
+### `checkDailyCommentLimit(subreddit)`
+Checks both global cap (10/day) and per-subreddit dailyCap from `SUBREDDIT_TONE_MAP`.
+
+```javascript
+const { allowed, reason } = await checkDailyCommentLimit('stocks');
+// { allowed: true } or { allowed: false, reason: 'global_cap' | 'subreddit_cap' }
+```
+
+### `shouldSkipToday()`
+Auto-generates 1-2 weekday skip days per ISO week (first call). EST-aware day-of-week.
+
+```javascript
+const { skip } = await shouldSkipToday();
+```
+
+### `getNextReplyStructure(subreddit)`
+Rotates through 3 `REPLY_STRUCTURES` per subreddit: `Q_A_DATA` → `AGREEMENT_BUT` → `DATA_INTERPRET` → repeat.
+
+```javascript
+const structure = await getNextReplyStructure('stocks');
+// { id: 'Q_A_DATA', systemPromptInstruction: '...' }
+```
+
+### `validateReply(text, subreddit)`
+Validates a comment against the subreddit's word limit (±10% tolerance). Rejects URLs and EarlyInsider brand names.
+
+```javascript
+const { valid, words, min, max, issues } = validateReply(text, 'wallstreetbets');
+```
+
+### `validateDDPost(text)`
+Validates a DD post: 1500-2500 words, bear case ≥400 words, TLDR present, ≤38000 chars.
+
+```javascript
+const { valid, wordCount, bearWordCount, hasTLDR, charCount, issues } = validateDDPost(text);
+```
+
+### `insertJob(type, payload, delayMs)`
+Inserts a scheduled job into NocoDB `Scheduled_Jobs` with `execute_after` ISO timestamp.
+
+```javascript
+await insertJob('reddit_edit', { commentId: 't1_abc', ticker: 'AAPL' }, 2 * 60 * 60 * 1000);
+```
+
+### `processScheduledJobs(opts?)`
+Fetches and processes all pending past-due jobs. Never throws. Marks each job done/skipped.
+
+```javascript
+await processScheduledJobs();                         // production
+await processScheduledJobs({ _fixedJobs: [...] });    // tests
+```
+
+### `runCAT4Comments()`
+Full autonomous Reddit comment posting run. Checks skip day, iterates subreddits with cap enforcement, queues deferred reply jobs.
+
+```javascript
+await runCAT4Comments(); // called by n8n scheduler
+```
 
 ---
 
