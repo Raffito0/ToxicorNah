@@ -1,13 +1,57 @@
 'use strict';
 
 /**
- * ai-client.js — Provider abstraction for Claude and DeepSeek in n8n Code nodes.
+ * ai-client.js -- Unified AI Provider Abstraction
+ *
+ * Routes AI calls to Claude (Anthropic) or DeepSeek via a single interface.
+ * Handles request formatting, response parsing, retry with backoff, prompt
+ * caching (Claude only), and per-call cost logging.
+ *
+ * Environment variables:
+ *   ANTHROPIC_API_KEY  -- required for Claude calls (generate-article.js)
+ *   DEEPSEEK_API_KEY   -- required for DeepSeek calls (score-alert.js, analyze-alert.js)
  *
  * Usage:
+ *
  *   const { createClaudeClient, createDeepSeekClient } = require('./ai-client');
- *   const client = createClaudeClient($env['ANTHROPIC_API_KEY']);
- *   const { content } = await client.complete(systemPrompt, userPrompt);
- *   const { toolResult } = await client.completeToolUse(sys, user, tools, toolChoice);
+ *
+ *   // Text completion (DeepSeek)
+ *   const ds = createDeepSeekClient(fetchFn, env.DEEPSEEK_API_KEY);
+ *   const result = await ds.complete(systemPrompt, userPrompt);
+ *   console.log(result.content);        // prose text
+ *   console.log(result.estimatedCost);  // USD
+ *
+ *   // Cached completion (Claude) -- saves ~90% on repeated system prompts
+ *   // Note: cache TTL is 5 minutes. Only beneficial for batch processing.
+ *   const claude = createClaudeClient(fetchFn, env.ANTHROPIC_API_KEY);
+ *   const result = await claude.completeWithCache(systemPrompt, userPrompt);
+ *
+ *   // Tool Use (Claude) -- structured output via tools
+ *   const result = await claude.completeToolUse(
+ *     systemPrompt, userPrompt, tools, toolChoice, { cache: true }
+ *   );
+ *   console.log(result.toolResult); // parsed tool input object
+ *
+ *   // Switching providers: change one line
+ *   // createDeepSeekClient(fetchFn, env.DEEPSEEK_API_KEY)
+ *   //   --> createClaudeClient(fetchFn, env.ANTHROPIC_API_KEY)
+ *
+ * Return shape (all methods):
+ *   {
+ *     content: string,            // text response (null for tool use)
+ *     toolResult: object | null,  // tool use input (only completeToolUse)
+ *     usage: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
+ *     cached: boolean,            // true if cache_read > 0
+ *     estimatedCost: number,      // USD
+ *   }
+ *
+ * Cost logging: every call logs provider/model/tokens/cost to console.
+ * Security: logs NEVER include prompts, API keys, or response content.
+ *
+ * Monthly cost projection (earlyinsider.com, ~30 articles/day):
+ *   Claude (generate-article):  ~$11-14/month (with prompt caching)
+ *   DeepSeek (score+analyze):   ~$2-3/month
+ *   Total:                      ~$13-17/month (vs ~$45/month pre-migration)
  */
 
 class AIClient {
