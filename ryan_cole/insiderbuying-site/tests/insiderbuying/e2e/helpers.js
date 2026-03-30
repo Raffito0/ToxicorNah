@@ -110,7 +110,6 @@ const BASE_ENV = Object.freeze({
   BEEHIIV_API_KEY: 'test-beehiiv-key-000',
   BEEHIIV_PUBLICATION_ID: 'pub_test_000',
   NOCODB_BASE_URL: 'https://test-nocodb.example.com',
-  NOCODB_API_KEY: 'test-nocodb-key-000',
   NOCODB_API_TOKEN: 'test-nocodb-token-000',
   NOCODB_PROJECT_ID: 'test-nocodb-project-000',
   NOCODB_API_URL: 'https://test-nocodb.example.com/api/v1',
