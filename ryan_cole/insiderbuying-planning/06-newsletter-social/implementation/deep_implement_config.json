@@ -1,0 +1,6 @@
+{
+  "status": "superseded",
+  "superseded_by": "Units 13 (reddit-engine), 14 (x-engine), 16 (newsletter-outreach)",
+  "reason": "All code described in this unit was implemented in later units. Existing files: weekly-newsletter.js (852 lines), x-auto-post.js (338 lines), x-engagement.js (512 lines), reddit-monitor.js (1628 lines), social-telegram-handler.js (98 lines). All have comprehensive tests.",
+  "created_at": "2026-03-30T12:00:00.000000+00:00"
+}

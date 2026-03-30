@@ -1,0 +1,6 @@
+{
+  "status": "superseded",
+  "superseded_by": "Units 16 (newsletter-outreach), 17 (infra-polish)",
+  "reason": "All code described in this unit was implemented in later units. Existing files: find-prospects.js (99 lines), send-outreach.js (1178 lines), select-keyword.js (436 lines), seo-monitor.js (293 lines). All have comprehensive tests.",
+  "created_at": "2026-03-30T12:00:00.000000+00:00"
+}

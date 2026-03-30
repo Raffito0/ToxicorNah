@@ -18,9 +18,21 @@
       "status": "complete",
       "commit_hash": "pre-existing"
     },
+    "section-02-structured-data": {
+      "status": "complete",
+      "commit_hash": "263bc11"
+    },
     "section-03-next-sitemap": {
       "status": "complete",
       "commit_hash": "pre-existing"
+    },
+    "section-04-seo-meta-tags": {
+      "status": "complete",
+      "commit_hash": "263bc11"
+    },
+    "section-05-faq-jsonld": {
+      "status": "complete",
+      "commit_hash": "263bc11"
     }
   },
   "pre_commit": {

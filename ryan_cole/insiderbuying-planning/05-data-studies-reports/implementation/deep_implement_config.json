@@ -1,0 +1,6 @@
+{
+  "status": "superseded",
+  "superseded_by": "Units 12 (scoring-analysis), 15 (articles-reports), 17 (infra-polish)",
+  "reason": "All code described in this unit was implemented in later, more detailed planning units. Existing files: render-pdf.js (116 lines), data-study.js (320 lines, disabled), generate-report.js (713 lines), generate-lead-magnet.js (559 lines), reports/page.tsx (174 lines). All have comprehensive tests.",
+  "created_at": "2026-03-30T12:00:00.000000+00:00"
+}
