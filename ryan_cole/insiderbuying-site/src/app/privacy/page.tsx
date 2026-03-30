@@ -1,3 +1,11 @@
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Privacy Policy | EarlyInsider",
+  description:
+    "EarlyInsider privacy policy: how we collect, use, and protect your personal data. GDPR and CCPA compliant.",
+};
+
 export default function PrivacyPage() {
   return (
     <div className="bg-[var(--color-bg-alt)]">

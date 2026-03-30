@@ -1,0 +1,35 @@
+{
+  "plugin_root": "C:\\Users\\rafca\\.claude\\plugins\\cache\\piercelamb-deep-implement",
+  "sections_dir": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\ryan_cole\\insiderbuying-planning\\02-figma-site-pages\\sections",
+  "target_dir": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\ryan_cole\\insiderbuying-site",
+  "state_dir": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\ryan_cole\\insiderbuying-planning\\02-figma-site-pages\\implementation",
+  "git_root": "C:\\Users\\rafca\\OneDrive\\Desktop\\Toxic or Nah\\ryan_cole",
+  "commit_style": "simple",
+  "test_command": "npx jest",
+  "sections": [
+    "section-01-next-seo-setup",
+    "section-02-structured-data",
+    "section-03-next-sitemap",
+    "section-04-seo-meta-tags",
+    "section-05-faq-jsonld"
+  ],
+  "sections_state": {
+    "section-01-next-seo-setup": {
+      "status": "complete",
+      "commit_hash": "pre-existing"
+    },
+    "section-03-next-sitemap": {
+      "status": "complete",
+      "commit_hash": "pre-existing"
+    }
+  },
+  "pre_commit": {
+    "present": false,
+    "type": "none",
+    "config_file": null,
+    "native_hook": null,
+    "may_modify_files": false,
+    "detected_formatters": []
+  },
+  "created_at": "2026-03-30T12:00:00.000000+00:00"
+}

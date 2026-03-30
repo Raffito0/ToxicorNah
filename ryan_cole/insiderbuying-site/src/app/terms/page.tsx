@@ -1,3 +1,11 @@
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Terms of Service | EarlyInsider",
+  description:
+    "EarlyInsider terms of service: usage agreement, liability limitations, and service conditions.",
+};
+
 export default function TermsPage() {
   return (
     <div className="bg-[var(--color-bg-alt)]">

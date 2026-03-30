@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { buildWebPageJsonLd } from "@/lib/structured-data";
 
 export const metadata: Metadata = {
   title: "About | EarlyInsider",
@@ -20,9 +21,19 @@ const TRUST_CARDS = [
   { icon: "⚡", title: "Sub-60s Delivery", desc: "Median alert latency under 60 seconds. 99.998% platform uptime over trailing 12 months." },
 ];
 
+const aboutJsonLd = buildWebPageJsonLd({
+  name: "About EarlyInsider",
+  description: "Learn about EarlyInsider — our mission, team, and how we deliver real-time SEC insider trading alerts and AI-powered stock analysis.",
+  url: "https://earlyinsider.com/about",
+});
+
 export default function AboutPage() {
   return (
     <div className="bg-[var(--color-bg-alt)]">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(aboutJsonLd) }}
+      />
 
       {/* ═══ SECTION 1: HEADER ═══ */}
       <section className="bg-[var(--color-primary)] pt-[var(--section-y-hero-mobile)] pb-[var(--section-y-hero-mobile)] md:pt-[var(--section-y-hero)] md:pb-[var(--section-y-hero)] px-[20px] md:px-[24px] flex flex-col items-center justify-center">

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { buildWebPageJsonLd } from "@/lib/structured-data";
 
 export const metadata: Metadata = {
   title: "Methodology | EarlyInsider",
@@ -27,9 +28,19 @@ const LIMITATIONS = [
   { icon: "", text: "Historical performance is not predictive. Academic research demonstrates that insider purchases have historically outperformed market benchmarks. Past patterns do not guarantee future results for any individual filing or trade." },
 ];
 
+const methodologyJsonLd = buildWebPageJsonLd({
+  name: "Methodology | EarlyInsider",
+  description: "Our data-driven methodology: how we source SEC filings, score insider trades, and generate institutional-grade stock analysis reports.",
+  url: "https://earlyinsider.com/methodology",
+});
+
 export default function MethodologyPage() {
   return (
     <div className="bg-[var(--color-bg-alt)]">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(methodologyJsonLd) }}
+      />
 
       {/* ═══ SECTION 1: HEADER ═══ */}
       <section className="bg-[var(--color-bg-alt)] pt-[var(--section-y-hero-mobile)] pb-[var(--section-y-hero-mobile)] md:pt-[var(--section-y-hero)] md:pb-[var(--section-y-hero)] px-[20px] md:px-[32px]">
