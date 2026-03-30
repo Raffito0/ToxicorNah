@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { EmailCapture } from "@/components/EmailCapture";
 
 /* ── ALERT DATA ─────────────────────────────────────────── */
 const ALERTS = [
@@ -25,9 +26,9 @@ const REPORTS = [
 ];
 
 const PLANS = [
-  { name: "Free", desc: "Start monitoring.", price: "$0", features: ["SEC Form 4 feed (15-minute delay)", "5 watchlist tickers", "Weekly insider activity digest", "Basic filing data (no AI analysis)"], border: "", btn: "border border-[var(--color-border)] text-[color:var(--color-text)]" },
-  { name: "Analyst", desc: "See what the data means.", price: "$24", features: ["Real-time alerts (under 60 seconds)", "AI conviction scoring on every filing", "Plain-English analysis per transaction", "50 watchlist tickers", "Weekly AI-scored summary report"], border: "border border-[var(--color-primary)]", btn: "bg-[var(--color-primary)] text-white", popular: true },
-  { name: "Investor", desc: "The complete research desk.", price: "$84", features: ["All Analyst features", "Unlimited watchlist tickers", "All deep dive reports included", "Custom ticker report requests", "Webhook and API access"], border: "", btn: "border border-[var(--color-border)] text-[color:var(--color-text)]" },
+  { name: "Free", desc: "Start monitoring.", priceAnnual: "$0", priceMonthly: "$0", features: ["Delayed Form 4 feed (15-minute lag)", "5 watchlist tickers", "Weekly insider digest email", "Basic filing data", "Access to CEO Alpha Report"], border: "", btn: "border border-[var(--color-border)] text-[color:var(--color-text)]", iconType: "check" as const },
+  { name: "Analyst", desc: "See what the data means.", priceAnnual: "$24", priceMonthly: "$29", features: ["Real-time Form 4 alerts (under 60 seconds)", "AI conviction scoring on every filing", "Plain-English analysis per transaction", "25 watchlist tickers with custom filters", "Weekly AI summary with sector patterns", "1 Deep Dive report per month", "Email and Slack delivery"], border: "border border-[var(--color-primary)]", btn: "bg-[var(--color-primary)] text-white", popular: true, iconType: "badge" as const },
+  { name: "Investor", desc: "The complete research desk.", priceAnnual: "$84", priceMonthly: "$99", features: ["Everything in Analyst", "Unlimited Deep Dive reports", "API access: programmatic Form 4 data", "Webhook integration", "Unlimited watchlist tickers", "Priority custom report requests (24h)", "CSV and JSON data export"], border: "", btn: "border border-[var(--color-border)] text-[color:var(--color-text)]", iconType: "check" as const },
 ];
 
 const FAQS = [
@@ -39,33 +40,57 @@ const FAQS = [
   { q: "Can I cancel anytime?", a: "Yes. Cancel in one click from your dashboard. No contracts, no cancellation fees. Annual plans refunded pro-rata for unused months." },
 ];
 
-const LOGOS = ["NVIDIA","Apple","Microsoft","Amazon","Meta","Tesla","Google","JPMorgan","Goldman Sachs","Berkshire","J&J","UnitedHealth","Visa","Mastercard","Pfizer","Eli Lilly","Broadcom","AMD","Netflix","Costco"];
+// h = visual height in px. Tall/square logos (VISA, AMD) get smaller h, wide/thin logos (Berkshire, J&J) get larger h
+const LOGOS: { name: string; domain: string; h: number }[] = [
+  { name: "NVIDIA", domain: "nvidia.com", h: 24 },
+  { name: "Apple", domain: "apple.com", h: 28 },
+  { name: "Microsoft", domain: "microsoft.com", h: 24 },
+  { name: "Amazon", domain: "amazon.com", h: 28 },
+  { name: "Meta", domain: "meta.com", h: 50 },
+  { name: "Tesla", domain: "tesla.com", h: 16 },
+  { name: "Google", domain: "google.com", h: 28 },
+  { name: "JPMorgan", domain: "jpmorgan.com", h: 26 },
+  { name: "Goldman Sachs", domain: "goldmansachs.com", h: 32 },
+  { name: "Berkshire Hathaway", domain: "berkshirehathaway.com", h: 21 },
+  { name: "J&J", domain: "jnj.com", h: 20 },
+  { name: "UnitedHealth", domain: "unitedhealthgroup.com", h: 20 },
+  { name: "Visa", domain: "visa.com", h: 18 },
+  { name: "Mastercard", domain: "mastercard.com", h: 21 },
+  { name: "Pfizer", domain: "pfizer.com", h: 31 },
+  { name: "Eli Lilly", domain: "lilly.com", h: 32 },
+  { name: "Broadcom", domain: "broadcom.com", h: 23 },
+  { name: "AMD", domain: "amd.com", h: 18 },
+  { name: "Netflix", domain: "netflix.com", h: 20 },
+  { name: "Costco", domain: "costco.com", h: 26 },
+];
 
 export default function HomePage() {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [billing, setBilling] = useState<"monthly" | "annual">("annual");
 
   return (
     <div className="bg-white">
 
       {/* ═══ 1. HERO ═══ */}
       <section className="relative w-full min-h-[500px] lg:h-[614px] overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0a0a2e] to-[#1a1a4e]" />
-        <div className="absolute inset-0 bg-black/40" />
-        <div className="relative z-10 flex flex-col justify-center max-w-[868px] mx-auto h-full px-[20px] md:px-[32px] pt-[100px] pb-[60px] lg:pt-[0px] lg:pb-[0px]">
+        <img src="/images/hero-mobile.jpg" alt="" className="absolute inset-0 w-full h-full object-cover md:hidden" />
+        <img src="/images/hero-desktop.jpg" alt="" className="absolute inset-0 w-full h-full object-cover hidden md:block" />
+        <div className="absolute inset-0 bg-black/50" />
+        <div className="relative z-10 flex flex-col justify-center max-w-[1154px] mx-auto h-full px-[20px] md:px-[48px] pt-[100px] pb-[60px] lg:pt-[0px] lg:pb-[0px]">
           <h1 className="font-[var(--font-montaga)] text-[39px] md:text-[42px] lg:text-[54px] font-normal leading-[1.15] tracking-[0.5px] text-white mb-[16px]">
-            SEC Insider Trades. Seconds, Not Days.
+            Know What CEOs Are Buying.<br />In Seconds, Not Days.
           </h1>
-          <p className="text-[20px] font-normal leading-[32px] text-white/90 max-w-[672px] mb-[12px]">
+          <p className="text-[19px] font-normal leading-[32px] text-white/90 max-w-[672px] mb-[12px]">
             Every Form 4 filing across 17,325+ public companies &mdash; parsed, scored for conviction, and delivered to your inbox in under 60 seconds.
           </p>
           <p className="text-[14px] font-normal leading-[20px] text-white/60 mb-[32px]">
             All data sourced directly from SEC EDGAR.
           </p>
           <div className="flex flex-col sm:flex-row gap-[12px] sm:gap-[16px]">
-            <Link href="/alerts" className="flex items-center justify-center h-[56px] sm:h-[72px] px-[24px] sm:px-[40px] bg-[var(--color-primary)] text-white text-[18px] font-semibold hover:bg-[var(--color-primary-dark)] transition-colors">
+            <Link href="/alerts" className="flex items-center justify-center h-[58px] sm:h-[62px] px-[24px] sm:px-[40px] bg-[var(--color-primary)] text-white text-[18px] font-semibold hover:bg-[var(--color-primary-dark)] transition-colors">
               See Recent Insider Trades
             </Link>
-            <Link href="#how-it-works" className="flex items-center justify-center h-[56px] sm:h-[72px] px-[24px] sm:px-[40px] border border-white/80 text-white text-[18px] font-semibold hover:bg-white/10 transition-colors">
+            <Link href="#how-it-works" className="flex items-center justify-center h-[58px] sm:h-[62px] px-[24px] sm:px-[40px] border border-white/80 text-white text-[18px] font-semibold hover:bg-white/10 transition-colors">
               How It Works
             </Link>
           </div>
@@ -74,35 +99,36 @@ export default function HomePage() {
 
       {/* ═══ 1.5 LOGO TICKER ═══ */}
       <section className="w-full py-[24px] bg-white overflow-hidden" aria-hidden="true">
-        <div className="flex gap-[48px] animate-[scroll_30s_linear_infinite] whitespace-nowrap">
+        <div className="logo-ticker flex items-center gap-[56px]" style={{ width: "max-content" }}>
           {[...LOGOS, ...LOGOS].map((logo, i) => (
-            <span key={i} className="text-[13px] font-medium text-[color:var(--color-text)]/60 shrink-0">{logo}</span>
+            <img key={i} src={`https://cdn.brandfetch.io/domain/${logo.domain}/w/400/h/120/logo?c=1idSo4YEEODo2rW6Anw`} alt={logo.name} className="w-auto shrink-0 object-contain" style={{ height: `${logo.h}px` }} />
           ))}
         </div>
-        <style>{`@keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}`}</style>
+        <style>{`@keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}.logo-ticker{animation:scroll 90s linear infinite}@media(max-width:768px){.logo-ticker{animation-duration:140s}}`}</style>
       </section>
+
 
       {/* ═══ 2. LIVE ALERT FEED ═══ */}
       <section className="w-full py-[var(--section-y-mobile)] px-[20px] md:pt-[var(--section-y)] md:px-[48px] md:pb-[var(--section-y)] bg-white">
         <div className="max-w-[1154px] mx-auto">
-          <div className="flex flex-col items-center lg:flex-row lg:items-center gap-[12px] lg:gap-[var(--gap-tight)] mb-[24px]">
+          <div className="flex flex-col-reverse items-center lg:flex-row lg:items-center lg:justify-center gap-[12px] lg:gap-[16px] mb-[48px]">
+            <h2 className="font-[var(--font-montaga)] text-[39px] md:text-[length:var(--text-title)] font-normal leading-[1.1] tracking-[0.5px] text-[color:var(--color-text)] text-center">SEC Form 4 Feed</h2>
             <div className="flex items-center gap-[8px] bg-[#00de16]/20 px-[12px] py-[4px] rounded-full">
               <div className="w-[8px] h-[8px] rounded-full bg-[var(--color-signal-green)]" />
-              <span className="text-[12px] font-medium tracking-[0.5px] text-[color:var(--color-signal-green)]">Live</span>
+              <span className="text-[15px] md:text-[12px] font-medium tracking-[0.5px] text-[color:var(--color-signal-green)]">Live</span>
             </div>
-            <h2 className="font-[var(--font-montaga)] text-[39px] md:text-[length:var(--text-title)] font-normal leading-[1.1] tracking-[0.5px] text-[color:var(--color-text)] text-center lg:text-left">SEC Form 4 Feed</h2>
           </div>
           {/* Desktop rows — attached block */}
-          <div className="hidden lg:flex flex-col mb-[var(--gap-tight)] overflow-hidden shadow-[0px_1px_2px_rgba(0,0,0,0.05)]">
+          <div className="hidden lg:flex flex-col mb-[var(--gap-tight)] overflow-hidden shadow-[0px_1px_2px_rgba(0,0,0,0.05)] border border-[var(--color-border)]">
             {ALERTS.map((a, i) => (
               <div key={i} className={`flex items-center justify-between h-[112px] px-[32px] ${i % 2 === 0 ? "bg-[var(--color-bg-alt)]" : "bg-white"} ${i > 0 ? "border-t border-[var(--color-border)]" : ""}`}>
                 <div className="flex items-center gap-[24px] w-[280px] shrink-0">
-                  <div className="w-[64px] h-[64px] rounded-full bg-[#d9d9d9] flex items-center justify-center text-[14px] font-semibold text-[color:var(--color-text-muted)]">
+                  <div className="w-[58px] h-[58px] rounded-full bg-[#d9d9d9] flex items-center justify-center text-[13px] font-semibold text-[color:var(--color-text-muted)]">
                     {a.name.split(" ").map(n => n[0]).join("")}
                   </div>
                   <div className="flex flex-col gap-[4px]">
                     <span className="text-[13px] font-normal text-[color:var(--color-text-muted)]">{a.title}</span>
-                    <span className="font-[var(--font-montaga)] text-[18px] font-normal leading-[28px] text-[color:var(--color-text)]">{a.name}</span>
+                    <span className="font-[var(--font-montaga)] text-[15px] font-normal leading-[22px] text-[color:var(--color-text)]">{a.name}</span>
                   </div>
                 </div>
                 <span className="text-[24px] font-medium leading-[32px] text-[color:var(--color-text)]">{a.ticker}</span>
@@ -113,25 +139,25 @@ export default function HomePage() {
           </div>
 
           {/* Mobile/tablet rows — attached, card layout */}
-          <div className="lg:hidden bg-[var(--color-bg-alt)] overflow-hidden mb-[var(--gap-tight)]">
+          <div className="lg:hidden overflow-hidden mb-[var(--gap-tight)] border border-[var(--color-border)]">
             {ALERTS.map((a, i) => (
-              <div key={i} className={`flex items-center gap-[12px] px-[var(--gap-tight)] py-[14px] ${i > 0 ? "border-t border-[var(--color-border)]" : ""}`}>
-                <div className="w-[40px] h-[40px] rounded-full bg-[#d9d9d9] flex items-center justify-center text-[12px] font-semibold text-[color:var(--color-text-muted)] shrink-0">
+              <div key={i} className={`flex items-center gap-[12px] px-[var(--gap-tight)] py-[14px] ${i % 2 === 0 ? "bg-[#F8F8F8]" : "bg-white"} ${i > 0 ? "border-t border-[var(--color-border)]" : ""}`}>
+                <div className="w-[46px] h-[46px] rounded-full bg-[#d9d9d9] flex items-center justify-center text-[12px] font-semibold text-[color:var(--color-text-muted)] shrink-0">
                   {a.name.split(" ").map(n => n[0]).join("")}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[14px] font-medium leading-[18px] text-[color:var(--color-text)] truncate">{a.name}</p>
+                  <p className="text-[16px] font-medium leading-[18px] text-[color:var(--color-text)] truncate">{a.name}</p>
                   <p className="text-[13px] font-normal text-[color:var(--color-text-muted)]">{a.title}</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-[13px] font-semibold tracking-[0.5px] text-[color:var(--color-text)] font-[var(--font-mono)]">{a.ticker}</p>
-                  <p className="text-[14px] font-semibold text-[color:var(--color-signal-green)]">{a.amount}</p>
-                  <p className="text-[13px] font-normal text-[color:var(--color-text-muted)]">{a.time}</p>
+                  <p className="text-[14px] font-semibold tracking-[0.5px] text-[color:var(--color-text)] font-[var(--font-mono)]">{a.ticker}</p>
+                  <p className="text-[15px] font-semibold text-[color:var(--color-signal-green)]">{a.amount}</p>
+                  <p className="text-[14px] font-normal text-[color:var(--color-text-muted)]">{a.time}</p>
                 </div>
               </div>
             ))}
           </div>
-          <p className="text-[16px] font-normal leading-[20px] text-[color:var(--color-text-muted)] text-center">Source: SEC Form 4 Filings. Data updated every 15 seconds.</p>
+          <p className="text-[16px] font-normal leading-[20px] text-[color:var(--color-text-muted)] text-center mt-[24px]">Source: SEC Form 4 Filings. Data updated every 15 seconds.</p>
         </div>
       </section>
 
@@ -147,7 +173,7 @@ export default function HomePage() {
             ].map((s) => (
               <div key={s.title} className="w-full md:w-[296px] text-center">
                 <div className="w-[64px] h-[64px] rounded-full bg-[var(--color-bg-alt)] mx-auto mb-[var(--gap-tight)]" />
-                <h3 className="font-[var(--font-montaga)] text-[22px] font-normal leading-[28px] text-[color:var(--color-text)] mb-[8px]">{s.title}</h3>
+                <h3 className="font-[var(--font-montaga)] text-[26px] md:text-[22px] font-normal leading-[28px] text-[color:var(--color-text)] mb-[8px]">{s.title}</h3>
                 <p className="text-[16px] font-normal leading-[26px] text-[color:var(--color-text-secondary)]">{s.desc}</p>
               </div>
             ))}
@@ -160,11 +186,11 @@ export default function HomePage() {
         <h2 className="font-[var(--font-montaga)] text-[39px] md:text-[length:var(--text-title)] font-normal leading-[1.1] tracking-[0.5px] text-[color:var(--color-text)] max-w-[1084px] mx-auto mb-[32px] text-center lg:text-left">Why Insider Buying Matters</h2>
         <div className="max-w-[1084px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-[var(--gap-items)]">
           {STATS.map((s) => (
-            <div key={s.value} className="bg-white p-[32px]">
+            <div key={s.value} className="bg-white p-[32px] py-[40px]">
               <p className="font-[var(--font-montaga)] text-[40px] lg:text-[48px] font-normal leading-[1.1] tracking-[0.5px] text-[color:var(--color-text)]">{s.value}</p>
-              <p className="font-[var(--font-montaga)] text-[20px] font-normal leading-[28px] text-[color:var(--color-text)] mb-[6px]">{s.label}</p>
-              <p className="text-[16px] font-normal leading-[23px] text-[color:var(--color-text-secondary)] mb-[4px]">{s.desc}</p>
-              <p className="text-[13px] font-normal leading-[23px] tracking-[0.5px] text-[color:var(--color-text-muted)]">{s.source}</p>
+              <p className="font-[var(--font-montaga)] text-[21px] font-normal leading-[28px] text-[color:var(--color-text)] mb-[16px] mt-[4px]">{s.label}</p>
+              <p className="text-[16px] font-normal leading-[23px] text-[color:var(--color-text-secondary)] mb-[12px]">{s.desc}</p>
+              <p className="text-[13px] font-normal leading-[22px] tracking-[0.5px] text-[color:var(--color-text-muted)]">{s.source}</p>
             </div>
           ))}
         </div>
@@ -179,8 +205,8 @@ export default function HomePage() {
                 <div className="w-[48px] h-[48px] rounded-full bg-[#d9d9d9] shrink-0" />
                 <div>
                   <h3 className="text-[16px] md:text-[20px] font-medium leading-[24px] md:leading-[28px] text-[color:var(--color-text)] font-[var(--font-montaga)]">NVDA / NVIDIA Corp</h3>
-                  <div className="flex items-center gap-[8px] mt-[2px]">
-                    <span className="bg-[var(--color-signal-green)] text-white text-[11px] px-[8px] py-[2px] rounded-[2px]">High Conviction</span>
+                  <div className="flex flex-col md:flex-row md:items-center gap-[4px] md:gap-[8px] mt-[2px]">
+                    <span className="bg-[var(--color-signal-green)] text-white text-[13px] px-[8px] py-[2px] rounded-[2px] self-start">High Conviction</span>
                     <span className="text-[12px] tracking-[0.5px] text-[color:var(--color-text-muted)]">Alert ID: #88321-X</span>
                   </div>
                 </div>
@@ -216,24 +242,24 @@ export default function HomePage() {
                   <p className="text-[16px] font-semibold text-[color:var(--color-text)] mb-[4px]">SENTIMENT SCORE</p>
                   <div className="flex items-center gap-[8px]">
                     <div className="flex-1 h-[4px] bg-[var(--color-border)] rounded-full"><div className="h-full w-[87%] bg-[var(--color-signal-green)] rounded-full" /></div>
-                    <span className="text-[14px] font-semibold text-[color:var(--color-signal-green)]">87/100</span>
+                    <span className="text-[16px] font-semibold text-[color:var(--color-signal-green)]">87/100</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-          <p className="text-[14px] leading-[20px] text-[color:var(--color-text-secondary)] text-center italic px-[32px] pb-[12px] pt-[25px]">
+          <p className="text-[14px] leading-[20px] text-[color:var(--color-text-secondary)] text-center italic px-[32px] pt-[16px] pb-[20px]">
             &ldquo;Huang&apos;s purchase is the largest individual open-market buy since Q2 2026, signaling immense internal confidence in upcoming product cycles.&rdquo;
           </p>
         </div>
-        <div className="flex flex-col md:flex-row items-center justify-center gap-[32px] md:gap-[60px] pt-[50px]">
+        <div className="flex flex-col md:flex-row items-center justify-center gap-[32px] md:gap-[60px] pt-[60px] pb-[16px]">
           {[{v:"$4.2B",l:"Tracked Monthly"},{v:"2,847",l:"Alerts Sent (24h)"},{v:"17,325+",l:"Companies Monitored"}].map((m,i)=>(
             <div key={m.v} className="flex items-center gap-[60px]">
-              <div>
+              <div className="text-center md:text-center">
                 <p className="font-[var(--font-montaga)] text-[48px] font-normal leading-[40px] tracking-[0.5px] text-[color:var(--color-text)]">{m.v}</p>
-                <p className="text-[14px] leading-[16px] text-[color:var(--color-text-secondary)] mt-[8px]">{m.l}</p>
+                <p className="text-[18px] leading-[20px] text-[color:var(--color-text-secondary)] mt-[14px]">{m.l}</p>
               </div>
-              {i<2&&<div className="w-[1px] h-[48px] bg-[var(--color-text)]" />}
+              {i<2&&<div className="w-[1px] h-[48px] bg-[var(--color-text)] hidden md:block" />}
             </div>
           ))}
         </div>
@@ -286,7 +312,7 @@ export default function HomePage() {
                 </ul>
                 <p className="font-[var(--font-montaga)] text-[48px] leading-[36px] tracking-[1px] text-[color:var(--color-text)] mb-[8px]">{r.price}</p>
                 <p className="text-[14px] font-light tracking-[1px] text-[color:var(--color-text-muted)] mb-[24px]">*one-time payment</p>
-                <Link href="/reports" className="flex items-center justify-center w-full h-[50px] bg-[var(--color-primary)] text-white text-[14px] font-medium tracking-[1px]">GET REPORT</Link>
+                <Link href="/reports" className="flex items-center justify-center w-full h-[50px] bg-[var(--color-primary)] text-white text-[16px] font-medium tracking-[1px]">Get Access</Link>
               </div>
             ))}
           </div>
@@ -306,7 +332,7 @@ export default function HomePage() {
                 </ul>
                 <p className="font-[var(--font-montaga)] text-[36px] leading-[32px] tracking-[1px] text-[color:var(--color-text)] mb-[6px]">{r.price}</p>
                 <p className="text-[12px] font-light tracking-[1px] text-[color:var(--color-text-muted)] mb-[20px]">*one-time payment</p>
-                <Link href="/reports" className="flex items-center justify-center w-full h-[46px] bg-[var(--color-primary)] text-white text-[13px] font-medium tracking-[1px]">GET REPORT</Link>
+                <Link href="/reports" className="flex items-center justify-center w-full h-[46px] bg-[var(--color-primary)] text-white text-[16px] font-medium tracking-[1px]">Get Access</Link>
               </div>
             ))}
           </div>
@@ -317,25 +343,74 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* ═══ 7.5 NEWSLETTER CAPTURE ═══ */}
+      <section className="w-full py-[var(--section-y-mobile)] md:py-[var(--section-y)] bg-[var(--color-bg-dark)]">
+        <div className="max-w-[720px] mx-auto px-[20px] md:px-[32px] text-center">
+          <EmailCapture
+            heading="The CEO Alpha Report"
+            subheading="50,247 CEO stock purchases. 12 years of data. 7 filters that separated the 23.4% winners from the noise. Updated monthly. Free."
+            bullets={[
+              "Every CEO purchase that scored 75+ conviction in the last 30 days",
+              "The 7-filter methodology: what we track, how we score it, what we ignore",
+              "Sector-by-sector insider sentiment — which industries executives are buying into",
+              "One explicit verdict per featured stock: BUY, CAUTION, or WAIT",
+            ]}
+            ctaText="Get the Free Report"
+            placement="homepage_newsletter"
+            variant="hero"
+            dark
+          />
+        </div>
+      </section>
+
       {/* ═══ 8. PRICING ═══ */}
       <section className="w-full py-[var(--section-y-mobile)] md:pt-[var(--section-y)] md:pb-[var(--section-y)] bg-[var(--color-bg-alt)]">
         <div className="max-w-[1216px] mx-auto px-[20px] md:px-[32px]">
           <h2 className="font-[var(--font-montaga)] text-[39px] md:text-[length:var(--text-title)] leading-[1.1] tracking-[0.5px] text-[color:var(--color-text)] text-center mb-[12px]">Choose Your Signal Level</h2>
-          <p className="text-[16px] leading-[24px] text-[color:var(--color-text-secondary)] text-center mb-[40px] md:mb-[80px]">All plans include the SEC EDGAR real-time feed. Billed annually.</p>
+          <p className="text-[16px] leading-[24px] text-[color:var(--color-text-secondary)] text-center mb-[24px] md:mb-[40px]">All plans include the SEC EDGAR real-time feed.</p>
+
+          {/* Billing toggle */}
+          <div className="flex items-center justify-center gap-[4px] mb-[40px] md:mb-[64px] border border-[var(--color-border)] rounded-[8px] w-fit mx-auto p-[4px]">
+            <button
+              onClick={() => setBilling("monthly")}
+              className={`px-[20px] py-[10px] text-[14px] font-medium leading-[20px] transition-colors ${billing === "monthly" ? "bg-white text-[color:var(--color-text)] shadow-sm" : "text-[color:var(--color-text-muted)]"}`}
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => setBilling("annual")}
+              className={`px-[20px] py-[10px] text-[14px] font-medium leading-[20px] transition-colors flex items-center gap-[8px] ${billing === "annual" ? "bg-white text-[color:var(--color-text)] shadow-sm" : "text-[color:var(--color-text-muted)]"}`}
+            >
+              Annually
+              <span className="bg-[var(--color-signal-green)] text-white text-[11px] font-bold px-[8px] py-[2px] rounded-[2px]">SAVE 21%</span>
+            </button>
+          </div>
+
           <div className="max-w-[1024px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-[var(--gap-items)]">
             {PLANS.map((p)=>(
-              <div key={p.name} className={`bg-white p-[48px] relative ${p.border}`}>
-                {p.popular&&<div className="absolute -top-[15px] left-1/2 -translate-x-1/2 bg-[var(--color-primary)] text-white text-[11px] font-medium tracking-[1px] px-[24px] py-[4px] rounded-full whitespace-nowrap">Most Popular</div>}
+              <div key={p.name} className={`bg-white p-[28px] md:p-[48px] relative ${p.border}`}>
+                {p.popular&&<div className="absolute -top-[15px] left-1/2 -translate-x-1/2 bg-[var(--color-signal-green)] text-white text-[11px] font-extrabold tracking-[1px] px-[16px] py-[4px] rounded-[2px] whitespace-nowrap">MOST POPULAR</div>}
                 <h3 className="font-[var(--font-montaga)] text-[32px] leading-[32px] tracking-[1px] text-[color:var(--color-text)] mb-[8px]">{p.name}</h3>
-                <p className="text-[14px] leading-[20px] tracking-[1px] text-[color:var(--color-text-secondary)] mb-[32px]">{p.desc}</p>
-                <div className="flex items-baseline mb-[48px]">
-                  <span className="font-[var(--font-montaga)] text-[48px] leading-[48px] tracking-[0.5px] text-[color:var(--color-text)]">{p.price}</span>
+                <p className="text-[14px] leading-[20px] tracking-[1px] text-[color:var(--color-text-secondary)] mb-[16px]">{p.desc}</p>
+                <div className="flex items-baseline mb-[8px]">
+                  <span className="font-[var(--font-montaga)] text-[48px] leading-[48px] tracking-[0.5px] text-[color:var(--color-text)]">{billing === "annual" ? p.priceAnnual : p.priceMonthly}</span>
                   <span className="text-[16px] leading-[24px] text-[color:var(--color-text-muted)] ml-[4px]">/mo</span>
                 </div>
-                <ul className="space-y-[var(--gap-tight)] mb-[48px]">
-                  {p.features.map(f=>(<li key={f} className="flex items-center gap-[12px] text-[14px] leading-[20px] text-[color:var(--color-text)]"><div className="w-[11px] h-[11px] rounded-full border-2 border-[var(--color-signal-green)] flex items-center justify-center"><div className="w-[5px] h-[5px] rounded-full bg-[var(--color-signal-green)]"/></div>{f}</li>))}
+                {billing === "annual" && p.name !== "Free" && <p className="text-[12px] font-normal leading-[16px] text-[color:var(--color-text-muted)] mb-[32px]">billed annually</p>}
+                {(billing !== "annual" || p.name === "Free") && <div className="mb-[32px]" />}
+                <ul className="flex flex-col gap-[16px] mb-[48px]">
+                  {p.features.map(f=>(<li key={f} className="flex items-center gap-[12px] text-[14px] leading-[20px] text-[color:var(--color-text)]">
+                    {p.iconType === "badge" ? (
+                      <div className="w-[15px] h-[15px] rounded-full bg-[var(--color-primary)] flex items-center justify-center shrink-0">
+                        <svg className="w-[8px] h-[8px]" viewBox="0 0 8 8"><path d="M1 4l2 2L7 2" stroke="white" strokeWidth="1.5" fill="none"/></svg>
+                      </div>
+                    ) : (
+                      <svg className="w-[11px] h-[8px] shrink-0" viewBox="0 0 11 8"><path d="M1 4l3 3L10 1" stroke="#006d34" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    )}
+                    {f}
+                  </li>))}
                 </ul>
-                <Link href="/signup" className={`flex items-center justify-center w-full h-[58px] text-[16px] font-medium tracking-[1px] transition-colors ${p.btn}`}>{p.name === "Free" ? "Start Monitoring — Free" : "Start 14-Day Trial"}</Link>
+                <Link href="/signup" className={`flex items-center justify-center w-full h-[58px] text-[16px] font-medium tracking-[1px] transition-colors ${p.btn}`}>{p.name === "Free" ? "Start Monitoring Free" : "Get Access"}</Link>
               </div>
             ))}
           </div>
@@ -366,7 +441,7 @@ export default function HomePage() {
         <div className="max-w-[1216px] mx-auto px-[32px] text-center">
           <h2 className="font-[var(--font-montaga)] text-[39px] md:text-[length:var(--text-title)] leading-[1.2] tracking-[0.5px] text-white mb-[var(--gap-tight)]">142 Form 4 Filings Today. Your Pipeline: Empty.</h2>
           <p className="text-[20px] leading-[28px] text-white/60 max-w-[672px] mx-auto mb-[32px]">Set up your watchlist in 60 seconds. The next filing that matters to your portfolio will arrive before you finish reading this sentence.</p>
-          <Link href="/signup" className="inline-flex items-center justify-center h-[56px] px-[48px] bg-[var(--color-primary)] text-white text-[16px] font-medium hover:bg-[var(--color-primary-dark)] transition-colors">Start Monitoring Free</Link>
+          <Link href="/signup" className="inline-flex items-center justify-center h-[56px] px-[48px] bg-[var(--color-primary)] text-white text-[16px] font-medium tracking-[1px] hover:bg-[var(--color-primary-dark)] transition-colors">Start Monitoring Free</Link>
         </div>
       </section>
 

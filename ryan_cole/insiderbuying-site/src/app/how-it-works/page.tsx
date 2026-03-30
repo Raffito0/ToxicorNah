@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { EmailCapture } from "@/components/EmailCapture";
 
 export const metadata: Metadata = {
   title: "How It Works | EarlyInsider",
@@ -492,8 +493,8 @@ export default function HowItWorksPage() {
 
                       {/* Label */}
                       <div className="mt-[24px] text-center">
-                        <p className="text-[14px] font-bold leading-[20px] text-[color:var(--color-text)]">{step.title}</p>
-                        <p className={`font-[var(--font-mono)] text-[12px] font-normal mt-[4px] ${isFinal ? "text-[color:var(--color-signal-green)] font-bold" : "text-[color:var(--color-text-secondary)]"}`}>
+                        <p className="text-[16px] font-bold leading-[22px] text-[color:var(--color-text)]">{step.title}</p>
+                        <p className={`font-[var(--font-mono)] text-[13px] font-normal mt-[4px] ${isFinal ? "text-[color:var(--color-signal-green)] font-bold" : "text-[color:var(--color-text-secondary)]"}`}>
                           {step.sub}
                         </p>
                       </div>
@@ -505,9 +506,9 @@ export default function HowItWorksPage() {
 
             {/* Mobile: vertical timeline */}
             <div className="md:hidden">
-              <div className="relative pl-[48px]">
+              <div className="relative pl-[56px] max-w-[320px] mx-auto">
                 {/* Vertical line */}
-                <div className="absolute left-[22px] top-0 bottom-0 w-[2px] bg-gradient-to-b from-[#000592] via-[#c6c5d9] to-[#006d34]" />
+                <div className="absolute left-[26px] top-0 bottom-0 w-[2px] bg-gradient-to-b from-[#000592] via-[#c6c5d9] to-[#006d34]" />
 
                 <div className="flex flex-col gap-[32px]">
                   {TIMELINE_STEPS.map((step, i) => {
@@ -518,7 +519,7 @@ export default function HowItWorksPage() {
                       <div key={step.time} className="flex items-start gap-[20px]">
                         {/* Node */}
                         <div
-                          className={`absolute left-[6px] w-[34px] h-[34px] flex items-center justify-center shrink-0 ${
+                          className={`absolute left-[8px] w-[38px] h-[38px] flex items-center justify-center shrink-0 ${
                             isFinal ? "bg-[var(--color-signal-green)]" : "bg-white"
                           } ${
                             isFirst
@@ -532,11 +533,11 @@ export default function HowItWorksPage() {
                         </div>
                         {/* Text */}
                         <div>
-                          <span className={`font-[var(--font-mono)] text-[11px] font-bold ${isFirst ? "text-[color:var(--color-primary)]" : isFinal ? "text-[color:var(--color-signal-green)]" : "text-[color:var(--color-text-secondary)]"}`}>
+                          <span className={`font-[var(--font-mono)] text-[12px] font-bold ${isFirst ? "text-[color:var(--color-primary)]" : isFinal ? "text-[color:var(--color-signal-green)]" : "text-[color:var(--color-text-secondary)]"}`}>
                             {step.time}
                           </span>
-                          <p className="text-[14px] font-bold leading-[20px] text-[color:var(--color-text)]">{step.title}</p>
-                          <p className={`font-[var(--font-mono)] text-[12px] ${isFinal ? "text-[color:var(--color-signal-green)] font-bold" : "text-[color:var(--color-text-secondary)]"}`}>
+                          <p className="text-[15px] font-bold leading-[22px] text-[color:var(--color-text)]">{step.title}</p>
+                          <p className={`font-[var(--font-mono)] text-[13px] ${isFinal ? "text-[color:var(--color-signal-green)] font-bold" : "text-[color:var(--color-text-secondary)]"}`}>
                             {step.sub}
                           </p>
                         </div>
@@ -552,8 +553,8 @@ export default function HowItWorksPage() {
           <div className="max-w-[896px] mx-auto flex flex-col sm:flex-row justify-center gap-[32px] sm:gap-[64px] pt-[32px] border-t border-[var(--color-border)]">
             {DATA_LABELS.map((dl) => (
               <div key={dl.label} className="flex flex-col items-center sm:items-start gap-[4px]">
-                <span className="font-[var(--font-mono)] text-[11px] font-normal text-[color:var(--color-text-secondary)]">{dl.label}</span>
-                <span className="font-[var(--font-mono)] text-[18px] font-bold text-[color:var(--color-primary)]">{dl.value}</span>
+                <span className="font-[var(--font-mono)] text-[13px] font-normal text-[color:var(--color-text-secondary)]">{dl.label}</span>
+                <span className="font-[var(--font-mono)] text-[22px] font-bold text-[color:var(--color-primary)]">{dl.value}</span>
               </div>
             ))}
           </div>
@@ -575,6 +576,18 @@ export default function HowItWorksPage() {
           >
             Start Monitoring Free
           </Link>
+        </div>
+      </section>
+
+      {/* ═══ NEWSLETTER CAPTURE ═══ */}
+      <section className="w-full py-[48px] bg-[var(--color-bg-alt)] border-t border-[var(--color-border)]">
+        <div className="max-w-[540px] mx-auto px-[20px] text-center">
+          <EmailCapture
+            heading="See the Output"
+            subheading="Want to see what the system produces? The CEO Alpha Report applies everything described on this page to real insider trades. Free."
+            ctaText="Get the Free Report"
+            placement="how_it_works"
+          />
         </div>
       </section>
     </div>

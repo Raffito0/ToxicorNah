@@ -4,6 +4,8 @@ import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { OneSignalInit } from "@/components/OneSignalInit";
+import { StickyBar } from "@/components/StickyBar";
+import { ExitIntentPopup } from "@/components/ExitIntentPopup";
 
 const montaga = Montaga({
   weight: "400",
@@ -60,6 +62,8 @@ export default function RootLayout({
         <Navbar />
         <main>{children}</main>
         <Footer />
+        <StickyBar />
+        <ExitIntentPopup />
         <OneSignalInit />
       </body>
     </html>
