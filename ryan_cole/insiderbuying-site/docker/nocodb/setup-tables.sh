@@ -224,8 +224,35 @@ SEO_ID=$(create_table "SEO_Rankings" '[
   {"title":"ctr","uidt":"Decimal"}
 ]')
 
+# --- Reddit_State Table (Reddit Engine — key/value store for per-subreddit state) ---
+REDDIT_STATE_ID=$(create_table "Reddit_State" '[
+  {"title":"key","uidt":"SingleLineText"},
+  {"title":"value","uidt":"LongText"},
+  {"title":"updated_at","uidt":"DateTime"}
+]')
+
+# --- Scheduled_Jobs Table (Reddit Engine — unified queue for delayed Reddit actions) ---
+SCHEDULED_JOBS_ID=$(create_table "Scheduled_Jobs" '[
+  {"title":"type","uidt":"SingleLineText"},
+  {"title":"payload","uidt":"LongText"},
+  {"title":"execute_after","uidt":"DateTime"},
+  {"title":"status","uidt":"SingleSelect","dtxp":"pending,done,skipped"},
+  {"title":"created_at","uidt":"DateTime"}
+]')
+
+# --- Reddit_DD_Posts Table (Reddit Engine — tracks posted DD posts for frequency limiting) ---
+REDDIT_DD_POSTS_ID=$(create_table "Reddit_DD_Posts" '[
+  {"title":"ticker","uidt":"SingleLineText"},
+  {"title":"post_url","uidt":"SingleLineText"},
+  {"title":"subreddit","uidt":"SingleLineText"},
+  {"title":"price_at_post","uidt":"Decimal"},
+  {"title":"authenticity_score","uidt":"Decimal"},
+  {"title":"posted_at","uidt":"DateTime"},
+  {"title":"status","uidt":"SingleSelect","dtxp":"draft,posted"}
+]')
+
 echo ""
-echo "=== 12 tables created ==="
+echo "=== 15 tables created ==="
 echo ""
 echo "Table IDs:"
 echo "  Keywords:           $KEYWORDS_ID"
@@ -240,6 +267,9 @@ echo "  X_Engagement_Log:   $X_LOG_ID"
 echo "  Reddit_Log:         $REDDIT_LOG_ID"
 echo "  Lead_Magnet_Vers:   $LEAD_MAGNET_ID"
 echo "  SEO_Rankings:       $SEO_ID"
+echo "  Reddit_State:       $REDDIT_STATE_ID"
+echo "  Scheduled_Jobs:     $SCHEDULED_JOBS_ID"
+echo "  Reddit_DD_Posts:    $REDDIT_DD_POSTS_ID"
 echo ""
 echo "=== Next Steps ==="
 echo "1. In NocoDB UI: Published_Images -> add LinkToAnotherRecord field to Articles"
@@ -251,6 +281,9 @@ echo "   CREATE INDEX idx_keywords_status_score ON Keywords (status, priority_sc
 echo "   CREATE INDEX idx_articles_status_pub ON Articles (status, published_at DESC, blog);"
 echo "   CREATE INDEX idx_articles_ticker ON Articles (ticker, sector);"
 echo "   CREATE UNIQUE INDEX idx_cache_ticker_type ON Financial_Cache (ticker, data_type);"
+echo "   CREATE UNIQUE INDEX idx_reddit_state_key ON Reddit_State (key);"
+echo "   CREATE INDEX idx_scheduled_jobs_status_exec ON Scheduled_Jobs (status, execute_after);"
+echo "   CREATE INDEX idx_reddit_dd_posts_posted ON Reddit_DD_Posts (posted_at);"
 echo "   \""
 echo ""
 echo "4. Test API:"
